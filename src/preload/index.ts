@@ -1,0 +1,146 @@
+import { contextBridge, ipcRenderer } from "electron";
+import type { Attachment } from "../shared/types";
+
+const api = {
+  // Config
+  getHermesHome: (): Promise<string> =>
+    ipcRenderer.invoke("get-hermes-home"),
+  getActiveProfile: (): Promise<string> =>
+    ipcRenderer.invoke("get-active-profile"),
+  readEnv: (profile?: string): Promise<Record<string, string>> =>
+    ipcRenderer.invoke("read-env", profile),
+  getConfigValue: (key: string, profile?: string): Promise<any> =>
+    ipcRenderer.invoke("get-config-value", key, profile),
+  setConfigValue: (key: string, value: any, profile?: string): Promise<boolean> =>
+    ipcRenderer.invoke("set-config-value", key, value, profile),
+
+  // Model & provider
+  getModelConfig: (profile?: string): Promise<{
+    model: string;
+    provider: string;
+    baseUrl: string;
+  }> => ipcRenderer.invoke("get-model-config", profile),
+  setModelConfig: (
+    model: string,
+    provider: string,
+    baseUrl: string,
+    profile?: string,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("set-model-config", model, provider, baseUrl, profile),
+
+  // Env vars
+  getEnvValue: (key: string, profile?: string): Promise<string | undefined> =>
+    ipcRenderer.invoke("get-env-value", key, profile),
+  setEnvValue: (key: string, value: string, profile?: string): Promise<void> =>
+    ipcRenderer.invoke("set-env-value", key, value, profile),
+
+  // Profiles
+  listProfiles: (): Promise<string[]> =>
+    ipcRenderer.invoke("list-profiles"),
+
+  // Chat streaming
+  sendMessage: (
+    message: string,
+    options?: {
+      profile?: string;
+      resumeSessionId?: string;
+      history?: Array<{ role: string; content: string }>;
+      attachments?: Attachment[];
+      model?: string;
+      provider?: string;
+      baseUrl?: string;
+    },
+  ): { abort: () => void } => {
+    const channel = new MessageChannel();
+    ipcRenderer.postMessage("chat-stream", options || {}, [channel.port2]);
+    // Actual SSE streaming will be handled via HTTP in main process
+    return { abort: () => ipcRenderer.send("chat-abort") };
+  },
+
+  // Session history
+  listSessions: (
+    limit?: number,
+    offset?: number,
+  ): Promise<
+    Array<{
+      id: string;
+      source: string;
+      startedAt: number;
+      endedAt: number | null;
+      messageCount: number;
+      model: string;
+      title: string | null;
+    }>
+  > => ipcRenderer.invoke("list-sessions", limit, offset),
+
+  searchSessions: (
+    query: string,
+    limit?: number,
+  ): Promise<
+    Array<{
+      sessionId: string;
+      title: string | null;
+      startedAt: number;
+      source: string;
+      messageCount: number;
+      model: string;
+      snippet: string;
+    }>
+  > => ipcRenderer.invoke("search-sessions", query, limit),
+
+  getSessionMessages: (
+    sessionId: string,
+  ): Promise<Array<any>> =>
+    ipcRenderer.invoke("get-session-messages", sessionId),
+
+  deleteSession: (sessionId: string): Promise<void> =>
+    ipcRenderer.invoke("delete-session", sessionId),
+
+  // Events
+  onStreamChunk: (cb: (text: string) => void): (() => void) => {
+    const handler = (_: any, text: string) => cb(text);
+    ipcRenderer.on("stream-chunk", handler);
+    return () => ipcRenderer.removeListener("stream-chunk", handler);
+  },
+
+  onStreamDone: (cb: (sessionId?: string) => void): (() => void) => {
+    const handler = (_: any, sessionId?: string) => cb(sessionId);
+    ipcRenderer.on("stream-done", handler);
+    return () => ipcRenderer.removeListener("stream-done", handler);
+  },
+
+  onStreamError: (cb: (error: string) => void): (() => void) => {
+    const handler = (_: any, error: string) => cb(error);
+    ipcRenderer.on("stream-error", handler);
+    return () => ipcRenderer.removeListener("stream-error", handler);
+  },
+
+  onToolProgress: (cb: (tool: string) => void): (() => void) => {
+    const handler = (_: any, tool: string) => cb(tool);
+    ipcRenderer.on("tool-progress", handler);
+    return () => ipcRenderer.removeListener("tool-progress", handler);
+  },
+
+  onReasoningChunk: (cb: (text: string) => void): (() => void) => {
+    const handler = (_: any, text: string) => cb(text);
+    ipcRenderer.on("reasoning-chunk", handler);
+    return () => ipcRenderer.removeListener("reasoning-chunk", handler);
+  },
+
+  onUsage: (
+    cb: (usage: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+      cost?: number;
+    }) => void,
+  ): (() => void) => {
+    const handler = (_: any, usage: any) => cb(usage);
+    ipcRenderer.on("stream-usage", handler);
+    return () => ipcRenderer.removeListener("stream-usage", handler);
+  },
+};
+
+contextBridge.exposeInMainWorld("hermes", api);
+
+export type HermesAPI = typeof api;

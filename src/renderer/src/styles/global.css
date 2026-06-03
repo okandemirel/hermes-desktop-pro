@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+/*
+ * Hermes Desktop Pro — Premium Design System
+ * Apple HIG inspired, dark-first, clean aesthetic
+ */
+
+/* ─── Base ─────────────────────────────────────── */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  background: #0D0D0D;
+  color: #ffffff;
+  font-family: -apple-system, "SF Pro Text", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ─── Scrollbar ───────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* ─── Selection ───────────────────────────────── */
+::selection {
+  background: rgba(10, 132, 255, 0.3);
+  color: #ffffff;
+}
+
+/* ─── Focus ring ──────────────────────────────── */
+*:focus-visible {
+  outline: 2px solid rgba(10, 132, 255, 0.5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Animations ──────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.25s ease-out;
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
+/* ─── Markdown content ────────────────────────── */
+.markdown-content h1 { font-size: 1.5em; font-weight: 700; margin: 0.67em 0; color: #fff; }
+.markdown-content h2 { font-size: 1.25em; font-weight: 600; margin: 0.75em 0 0.5em; color: #fff; }
+.markdown-content h3 { font-size: 1.1em; font-weight: 600; margin: 0.5em 0; color: rgba(255,255,255,0.9); }
+.markdown-content p { margin: 0.5em 0; line-height: 1.65; color: rgba(255,255,255,0.75); }
+.markdown-content ul, .markdown-content ol { padding-left: 1.5em; margin: 0.5em 0; }
+.markdown-content li { margin: 0.25em 0; line-height: 1.5; color: rgba(255,255,255,0.7); }
+.markdown-content code {
+  background: rgba(255,255,255,0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  color: #0A84FF;
+}
+.markdown-content pre {
+  background: #1A1A1A;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0.75em 0;
+  font-size: 0.8125em;
+  line-height: 1.6;
+}
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+  color: rgba(255,255,255,0.8);
+}
+.markdown-content blockquote {
+  border-left: 3px solid rgba(10, 132, 255, 0.4);
+  padding-left: 12px;
+  margin: 0.75em 0;
+  color: rgba(255,255,255,0.5);
+}
+.markdown-content a {
+  color: #0A84FF;
+  text-decoration: none;
+}
+.markdown-content a:hover { text-decoration: underline; }
+.markdown-content strong { color: rgba(255,255,255,0.9); font-weight: 600; }
+.markdown-content table { border-collapse: collapse; width: 100%; margin: 0.75em 0; font-size: 0.8125em; }
+.markdown-content th {
+  background: rgba(255,255,255,0.04);
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: rgba(255,255,255,0.7);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.markdown-content td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.6);
+}
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  margin: 1.25em 0;
+}
+
+/* ─── macOS traffic light ─────────────────────── */
+.mac-traffic-light {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* ─── No drag on interactive elements ─────────── */
+button, input, select, textarea, a {
+  -webkit-app-region: no-drag;
+}
+
+/* ─── Smooth transitions globally ─────────────── */
+button, a, input, select, textarea {
+  transition: all 0.15s ease;
+}
+
+/* ─── Tooltip ─────────────────────────────────── */
+[title] {
+  position: relative;
+}

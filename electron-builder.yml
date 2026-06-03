@@ -1,0 +1,56 @@
+appId: "com.hermes.desktop-pro"
+productName: "Hermes Desktop Pro"
+copyright: "MIT"
+
+directories:
+  buildResources: resources
+  output: dist
+
+files:
+  - "out/**/*"
+  - "resources/**/*"
+
+# ── macOS ──────────────────────────────────────────
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  category: "public.app-category.developer-tools"
+  icon: "resources/icon.png"
+  artifactName: "Hermes-Desktop-Pro-${version}-mac-${arch}.${ext}"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: "build/entitlements.mac.plist"
+  entitlementsInherit: "build/entitlements.mac.plist"
+  extendInfo:
+    NSHighResolutionCapable: true
+    NSSupportsAutomaticGraphicsSwitching: true
+    LSMinimumSystemVersion: "11.0"
+
+# ── Linux ──────────────────────────────────────────
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+  category: Utility
+  icon: "resources/icon.png"
+  artifactName: "Hermes-Desktop-Pro-${version}-linux-${arch}.${ext}"
+
+# ── Windows ────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: "resources/icon.png"
+  artifactName: "Hermes-Desktop-Pro-${version}-win-${arch}.${ext}"
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
