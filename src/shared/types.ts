@@ -123,12 +123,15 @@ export interface SessionSearchResult {
 // ─── Profile types ──────────────────────────────────────────────
 export interface ProfileInfo {
   name: string;
+  path: string;
+  isDefault: boolean;
   isActive: boolean;
-  configPath: string;
-  envPath: string;
-  stateDbPath: string;
+  model: string;
+  provider: string;
+  hasEnv: boolean;
+  hasSoul: boolean;
+  skillCount: number;
   gatewayRunning: boolean;
-  port: number;
 }
 
 // ─── Config types ───────────────────────────────────────────────
@@ -136,6 +139,165 @@ export interface ModelConfig {
   model: string;
   provider: string;
   baseUrl: string;
+}
+
+// ─── Memory types ───────────────────────────────────────────────
+export interface MemoryEntry {
+  index: number;
+  content: string;
+}
+
+export interface MemoryInfo {
+  memory: {
+    content: string;
+    exists: boolean;
+    lastModified: number | null;
+    entries: MemoryEntry[];
+    charCount: number;
+    charLimit: number;
+  };
+  user: {
+    content: string;
+    exists: boolean;
+    lastModified: number | null;
+    charCount: number;
+    charLimit: number;
+  };
+  stats: { totalSessions: number; totalMessages: number };
+}
+
+// ─── Skills types ───────────────────────────────────────────────
+export interface InstalledSkill {
+  name: string;
+  category: string;
+  description: string;
+  path: string;
+}
+
+export interface SkillSearchResult {
+  name: string;
+  description: string;
+  category: string;
+  source: string;
+  installed: boolean;
+}
+
+// ─── Tools types ────────────────────────────────────────────────
+export interface ToolsetInfo {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+}
+
+// ─── Cron types ─────────────────────────────────────────────────
+export interface CronJob {
+  id: string;
+  name: string;
+  schedule: string;
+  prompt: string;
+  state: "active" | "paused" | "completed";
+  enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  repeat: { times: number | null; completed: number } | null;
+  deliver: string[];
+  skills: string[];
+  script: string | null;
+}
+
+// ─── Kanban types ───────────────────────────────────────────────
+export interface KanbanTask {
+  id: string;
+  title: string;
+  body: string | null;
+  assignee: string | null;
+  status: string;
+  priority: number;
+  tenant: string | null;
+  workspace_kind: string;
+  workspace_path: string | null;
+  created_by: string | null;
+  created_at: number | null;
+  started_at: number | null;
+  completed_at: number | null;
+  result: string | null;
+  skills: string[];
+  max_retries: number | null;
+}
+
+export interface KanbanBoard {
+  slug: string;
+  name: string;
+  description?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  is_current: boolean;
+  archived?: boolean;
+  total: number;
+  counts: Record<string, number>;
+  db_path?: string;
+}
+
+export interface KanbanTaskDetail {
+  task: KanbanTask;
+  comments: KanbanComment[];
+  events: KanbanEvent[];
+  parents: string[];
+  children: string[];
+  runs: KanbanRun[];
+  latest_summary: string | null;
+}
+
+export interface KanbanResult<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  stdout?: string;
+  unsupportedMode?: boolean;
+}
+
+interface KanbanRun {
+  id: number;
+  task_id: string;
+  profile: string | null;
+  status: string | null;
+  outcome: string | null;
+  summary: string | null;
+  error: string | null;
+  started_at: number | null;
+  ended_at: number | null;
+  last_heartbeat_at: number | null;
+}
+
+interface KanbanComment {
+  id: number;
+  task_id: string;
+  author: string | null;
+  body: string;
+  created_at: number;
+}
+
+interface KanbanEvent {
+  id: number;
+  task_id: string;
+  kind: string;
+  payload: Record<string, unknown> | null;
+  created_at: number;
+  run_id: number | null;
+}
+
+// ─── Models types ───────────────────────────────────────────────
+export interface SavedModel {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiMode?: string | null;
+  createdAt: number;
 }
 
 // ─── Streaming callbacks ────────────────────────────────────────
