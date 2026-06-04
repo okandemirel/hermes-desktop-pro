@@ -58,7 +58,7 @@ export default function ChatView({ tab, providers, allTabs, onNewTab, onSelectTa
   const activeProvider = providers.find(p => p.id === tab.providerId);
 
   const { messages, isStreaming, sendMessage, abortStream } = useChatStream({
-    providerId: tab.providerId, modelId: tab.modelId,
+    providerId: tab.providerId, modelId: tab.modelId, sessionId: tab.sessionId,
     onTokenUsage: (usage: TokenUsage) => setTokenUsage(usage),
   });
 
