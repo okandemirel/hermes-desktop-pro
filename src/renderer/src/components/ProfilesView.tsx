@@ -106,8 +106,12 @@ export default function ProfilesView() {
     setBusy(name);
     setDeleteTarget(null);
     try {
-      await window.hermes.deleteProfile(name);
-      await load();
+      const res = asResult(await window.hermes.deleteProfile(name));
+      if (res.ok) {
+        await load();
+      } else {
+        setError(res.error || "Failed to delete profile.");
+      }
     } finally {
       setBusy(null);
     }

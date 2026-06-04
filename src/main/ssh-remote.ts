@@ -1113,8 +1113,12 @@ def gw_running(path):
     pid_file = os.path.join(path, "gateway.pid")
     if not os.path.exists(pid_file): return False
     try:
-        pid = int(open(pid_file).read().strip())
-        os.kill(pid, 0)
+        raw = open(pid_file).read().strip()
+        if raw.startswith("{"):
+            pid = json.loads(raw).get("pid")
+        else:
+            pid = int(raw)
+        os.kill(int(pid), 0)
         return True
     except:
         return False
@@ -1175,18 +1179,13 @@ export async function sshCreateProfile(
   try {
     const safe = name.replace(/[^a-zA-Z0-9_-]/g, "");
     if (!safe) return false;
-    const quoted = shellQuote(safe);
-    if (clone) {
-      await sshExec(
-        config,
-        `hermes profiles create ${quoted} --clone-from default 2>&1 || mkdir -p ~/.hermes/profiles/${quoted}`,
-      );
-    } else {
-      await sshExec(
-        config,
-        `hermes profiles create ${quoted} 2>&1 || mkdir -p ~/.hermes/profiles/${quoted}`,
-      );
-    }
+    const args = clone
+      ? ["profile", "create", safe, "--clone"]
+      : ["profile", "create", safe];
+    const cmd =
+      buildRemoteHermesCmd(args) +
+      ` 2>&1 || mkdir -p ~/.hermes/profiles/${shellQuote(safe)}`;
+    await sshExec(config, cmd);
     return true;
   } catch {
     return false;
@@ -1200,11 +1199,10 @@ export async function sshDeleteProfile(
   try {
     const safe = name.replace(/[^a-zA-Z0-9_-]/g, "");
     if (!safe || safe === "default") return false;
-    const quoted = shellQuote(safe);
-    await sshExec(
-      config,
-      `hermes profiles delete ${quoted} --yes 2>&1 || rm -rf ~/.hermes/profiles/${quoted}`,
-    );
+    const cmd =
+      buildRemoteHermesCmd(["profile", "delete", safe, "--yes"]) +
+      ` 2>&1 || rm -rf ~/.hermes/profiles/${shellQuote(safe)}`;
+    await sshExec(config, cmd);
     return true;
   } catch {
     return false;
