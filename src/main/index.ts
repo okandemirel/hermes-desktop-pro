@@ -68,6 +68,11 @@ import {
   sshListProfiles,
   sshCreateProfile,
   sshDeleteProfile,
+  sshListInstalledSkills,
+  sshListBundledSkills,
+  sshGetSkillContent,
+  sshInstallSkill,
+  sshUninstallSkill,
 } from "./ssh-remote";
 
 import {
@@ -78,6 +83,14 @@ import {
 } from "./sessions";
 
 import { readSoul, writeSoul, resetSoul } from "./soul";
+
+import {
+  listInstalledSkills,
+  listBundledSkills,
+  getSkillContent,
+  installSkill,
+  uninstallSkill,
+} from "./skills";
 
 import { getToolsets, setToolsetEnabled } from "./tools";
 
@@ -372,6 +385,40 @@ function registerIpcHandlers(): void {
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh) return sshResetSoul(conn.ssh, profile);
     return resetSoul(profile);
+  });
+
+  // ── Skills ────────────────────────────────────────────
+  ipcMain.handle("list-installed-skills", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshListInstalledSkills(conn.ssh, profile);
+    return listInstalledSkills(profile);
+  });
+
+  ipcMain.handle("list-bundled-skills", () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshListBundledSkills(conn.ssh);
+    return listBundledSkills();
+  });
+
+  ipcMain.handle("get-skill-content", (_event, path: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshGetSkillContent(conn.ssh, path);
+    return getSkillContent(path);
+  });
+
+  ipcMain.handle("install-skill", (_event, id: string, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshInstallSkill(conn.ssh, id);
+    return installSkill(id, profile);
+  });
+
+  ipcMain.handle("uninstall-skill", (_event, name: string, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshUninstallSkill(conn.ssh, name);
+    return uninstallSkill(name, profile);
   });
 
   // ── Tools (platform_toolsets.cli) ─────────────────────

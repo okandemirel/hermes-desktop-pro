@@ -5,6 +5,8 @@ import type {
   MemoryInfo,
   SavedModel,
   ProfileInfo,
+  InstalledSkill,
+  SkillSearchResult,
 } from "../shared/types";
 
 const api = {
@@ -62,6 +64,24 @@ const api = {
     ipcRenderer.invoke("write-soul", content, profile),
   resetSoul: (profile?: string): Promise<string> =>
     ipcRenderer.invoke("reset-soul", profile),
+
+  // Skills (SKILL.md walk + hermes skills CLI)
+  listInstalledSkills: (profile?: string): Promise<InstalledSkill[]> =>
+    ipcRenderer.invoke("list-installed-skills", profile),
+  listBundledSkills: (): Promise<SkillSearchResult[]> =>
+    ipcRenderer.invoke("list-bundled-skills"),
+  getSkillContent: (path: string): Promise<string> =>
+    ipcRenderer.invoke("get-skill-content", path),
+  installSkill: (
+    id: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("install-skill", id, profile),
+  uninstallSkill: (
+    name: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("uninstall-skill", name, profile),
 
   // Tools (platform_toolsets.cli)
   getToolsets: (profile?: string): Promise<ToolsetInfo[]> =>

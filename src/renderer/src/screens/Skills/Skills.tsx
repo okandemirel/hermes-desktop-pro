@@ -1,41 +1,91 @@
-import { useState, useMemo } from "react";
-import { Brain, Trash2, Download, Sparkles, Check, Package } from "lucide-react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { Brain, Trash2, Download, Sparkles, Check, Package, X } from "lucide-react";
 import { Screen, Card, Button, IconButton, Badge, Tag, Field, Input, SearchInput, EmptyState, IconChip, Modal, cx } from "../../ui";
+import type { InstalledSkill, SkillSearchResult } from "@shared/types";
 
-// ─── Types ──────────────────────────────────────────────────
+// ─── View model ─────────────────────────────────────────────
+//
+// The backend gives two shapes — InstalledSkill{name,category,description,path}
+// and SkillSearchResult{name,description,category,source,installed}. Neither
+// carries the mock's version/tags/author, so those fields are dropped. We fold
+// both lists into one card model keyed by name and surface `category` (the one
+// real grouping field) where the mock used to show author/version/tags.
 
-interface Skill {
-  id: string;
+interface SkillCardModel {
   name: string;
   description: string;
-  version: string;
-  tags: string[];
-  author: string;
-  isBundled: boolean;
+  category: string;
+  source: string; // "" for installed-only, "bundled" for browse entries
   installed: boolean;
+  path?: string; // present for installed skills (for the detail/remove path)
 }
-
-// ─── Mock data ──────────────────────────────────────────────
-
-const MOCK_SKILLS: Skill[] = [
-  { id: "hermes-agent", name: "Hermes Agent Config", description: "Configure Hermes Agent settings, profiles, and preferences", version: "1.0.0", tags: ["core", "config"], author: "Nous Research", isBundled: true, installed: true },
-  { id: "code-interpreter", name: "Code Interpreter", description: "Execute Python, JavaScript, and shell code in a sandboxed environment", version: "2.1.3", tags: ["code", "sandbox", "python"], author: "Nous Research", isBundled: true, installed: true },
-  { id: "file-browser", name: "File Browser", description: "Browse, read, write, and manage files on your system", version: "1.5.0", tags: ["files", "system", "io"], author: "Nous Research", isBundled: true, installed: true },
-  { id: "web-search", name: "Web Search", description: "Search the web using multiple search engines and extract results", version: "3.0.1", tags: ["search", "web", "api"], author: "Community", isBundled: false, installed: true },
-  { id: "git-assistant", name: "Git Assistant", description: "Intelligent Git operations with PR review and branch management", version: "1.2.0", tags: ["git", "vcs", "devops"], author: "Community", isBundled: false, installed: true },
-  { id: "image-gen", name: "Image Generator", description: "Generate and edit images using DALL-E, Stable Diffusion, and Midjourney", version: "0.9.1", tags: ["image", "ai", "creative"], author: "Community", isBundled: false, installed: false },
-  { id: "pdf-tools", name: "PDF Tools", description: "Extract text, merge, split, and analyze PDF documents", version: "2.0.0", tags: ["pdf", "documents", "parser"], author: "Community", isBundled: false, installed: false },
-  { id: "database-explorer", name: "Database Explorer", description: "Connect to and query SQL and NoSQL databases with schema introspection", version: "1.8.2", tags: ["database", "sql", "nosql"], author: "Community", isBundled: false, installed: false },
-];
 
 // ─── Component ──────────────────────────────────────────────
 
 export default function SkillsView() {
   const [query, setQuery] = useState("");
-  const [skills, setSkills] = useState<Skill[]>(MOCK_SKILLS);
+  const [installed, setInstalled] = useState<InstalledSkill[]>([]);
+  const [bundled, setBundled] = useState<SkillSearchResult[]>([]);
+  const [loading, setLoading] = useState(true);
   const [installId, setInstallId] = useState("");
   const [installing, setInstalling] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
+  const [actionName, setActionName] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  const loadInstalled = useCallback(async () => {
+    const list = await window.hermes.listInstalledSkills();
+    setInstalled(list);
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [inst, bnd] = await Promise.all([
+        window.hermes.listInstalledSkills(),
+        window.hermes.listBundledSkills(),
+      ]);
+      setInstalled(inst);
+      setBundled(bnd);
+    } catch {
+      // honest empty state on failure — no mock fallback
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  const installedNames = useMemo(
+    () => new Set(installed.map((s) => s.name.toLowerCase())),
+    [installed],
+  );
+
+  // Fold both backend lists into one keyed card collection. Installed skills
+  // win on identity; bundled entries that are already installed are de-duped.
+  const skills = useMemo<SkillCardModel[]>(() => {
+    const out: SkillCardModel[] = installed.map((s) => ({
+      name: s.name,
+      description: s.description,
+      category: s.category,
+      source: "",
+      installed: true,
+      path: s.path,
+    }));
+    for (const b of bundled) {
+      if (installedNames.has(b.name.toLowerCase())) continue;
+      out.push({
+        name: b.name,
+        description: b.description,
+        category: b.category,
+        source: b.source || "bundled",
+        installed: false,
+      });
+    }
+    return out;
+  }, [installed, bundled, installedNames]);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -43,43 +93,60 @@ export default function SkillsView() {
     return skills.filter(s =>
       s.name.toLowerCase().includes(q) ||
       s.description.toLowerCase().includes(q) ||
-      s.tags.some(t => t.toLowerCase().includes(q)) ||
-      s.author.toLowerCase().includes(q)
+      s.category.toLowerCase().includes(q)
     );
   }, [query, skills]);
 
-  // The house skill — promoted as the screen's single signature anchor.
-  const houseSkill = skills.find(s => s.id === "hermes-agent");
-  const houseVisible = filtered.some(s => s.id === "hermes-agent");
+  // The first installed skill is promoted as the screen's signature anchor —
+  // a real entry, not a hardcoded one. Hidden when nothing is installed yet.
+  const heroSkill = installed[0] ?? null;
+  const heroVisible = heroSkill
+    ? filtered.some(s => s.installed && s.name === heroSkill.name)
+    : false;
 
-  const bundled = filtered.filter(s => s.isBundled && s.id !== "hermes-agent");
-  const custom = filtered.filter(s => !s.isBundled);
-  const installedCount = skills.filter(s => s.installed).length;
+  const bundledCards = filtered.filter(s => !s.installed);
+  const installedCards = filtered.filter(
+    s => s.installed && !(heroVisible && heroSkill && s.name === heroSkill.name),
+  );
+  const installedCount = installed.length;
+  const totalCount = installed.length + bundled.filter(b => !installedNames.has(b.name.toLowerCase())).length;
 
-  const toggleInstall = (id: string) => {
-    setSkills(prev => prev.map(s => s.id === id ? { ...s, installed: !s.installed } : s));
-  };
+  // Install by name/identifier — real async CLI: spinner, honest error, refresh.
+  const doInstall = useCallback(async (identifier: string) => {
+    setActionName(identifier);
+    setError("");
+    const result = await window.hermes.installSkill(identifier);
+    setActionName(null);
+    if (result.success) {
+      await loadInstalled();
+      return true;
+    }
+    setError(result.error || "Install failed.");
+    return false;
+  }, [loadInstalled]);
 
-  const handleInstall = () => {
+  const doUninstall = useCallback(async (name: string) => {
+    setActionName(name);
+    setError("");
+    const result = await window.hermes.uninstallSkill(name);
+    setActionName(null);
+    if (result.success) {
+      await loadInstalled();
+    } else {
+      setError(result.error || "Uninstall failed.");
+    }
+  }, [loadInstalled]);
+
+  const handleInstallFromModal = async () => {
     const name = installId.trim();
     if (!name) return;
     setInstalling(true);
-    setTimeout(() => {
-      const newSkill: Skill = {
-        id: name.toLowerCase().replace(/\s+/g, "-"),
-        name,
-        description: "Custom installed skill",
-        version: "0.1.0",
-        tags: ["custom"],
-        author: "Custom",
-        isBundled: false,
-        installed: true,
-      };
-      setSkills(prev => [...prev, newSkill]);
+    const ok = await doInstall(name);
+    setInstalling(false);
+    if (ok) {
       setInstallId("");
-      setInstalling(false);
       setInstallOpen(false);
-    }, 800);
+    }
   };
 
   return (
@@ -87,25 +154,38 @@ export default function SkillsView() {
       icon={<Brain size={19} />}
       kicker="Agent Skills"
       title="Skills"
-      sub={`Extend your agent with reusable skills and workflows — ${installedCount} of ${skills.length} installed.`}
+      sub={`Extend your agent with reusable skills and workflows — ${installedCount} of ${totalCount} installed.`}
       actions={<Badge variant="success"><Check size={11} /> {installedCount} active</Badge>}
     >
       <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />
 
-      {/* ── Signature: the house skill, struck as the focal hero ── */}
-      {houseSkill && houseVisible && (
+      {/* ── Honest error banner ── */}
+      {error && (
+        <Card pad className="mb-6 mint-in mint-in-1 flex items-start gap-3 !border-[var(--error)]/40">
+          <Badge variant="error" className="shrink-0">Error</Badge>
+          <p className="text-[12.5px] text-[var(--text-2)] whitespace-pre-wrap flex-1 min-w-0">{error}</p>
+          <IconButton onClick={() => setError("")} title="Dismiss" aria-label="Dismiss error">
+            <X size={15} />
+          </IconButton>
+        </Card>
+      )}
+
+      {/* ── Signature: first installed skill, struck as the focal hero ── */}
+      {heroSkill && heroVisible && (
         <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
           <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
             <Sparkles size={24} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="ui-eyebrow">Core Skill</div>
+            <div className="ui-eyebrow">{heroSkill.category || "Installed Skill"}</div>
             <h2 className="serif text-[var(--text)] leading-none" style={{ fontSize: "clamp(24px, 2.6vw, 31px)", letterSpacing: "-0.012em" }}>
-              {houseSkill.name}
+              {heroSkill.name}
             </h2>
-            <p className="text-[12.5px] text-[var(--text-2)] mt-2.5 max-w-xl">{houseSkill.description}</p>
+            {heroSkill.description && (
+              <p className="text-[12.5px] text-[var(--text-2)] mt-2.5 max-w-xl">{heroSkill.description}</p>
+            )}
           </div>
-          <Badge variant="accent" className="self-start shrink-0"><Check size={11} /> Bundled</Badge>
+          <Badge variant="accent" className="self-start shrink-0"><Check size={11} /> Installed</Badge>
         </Card>
       )}
 
@@ -114,7 +194,7 @@ export default function SkillsView() {
         <SearchInput
           value={query}
           onChange={setQuery}
-          placeholder="Search skills by name, tag, or description…"
+          placeholder="Search skills by name, category, or description…"
           className="flex-1 min-w-[240px] max-w-[440px]"
         />
         <Button variant="primary" onClick={() => setInstallOpen(true)} leftIcon={<Download size={15} />}>
@@ -123,7 +203,13 @@ export default function SkillsView() {
       </div>
 
       {/* Content */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <EmptyState
+          icon={<Brain size={24} />}
+          title="Loading skills…"
+          sub="Reading installed and bundled skills."
+        />
+      ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Brain size={24} />}
           title="No skills found"
@@ -131,24 +217,28 @@ export default function SkillsView() {
         />
       ) : (
         <div className="flex flex-col gap-8">
-          {bundled.length > 0 && (
+          {installedCards.length > 0 && (
             <Section
-              title="Bundled Skills"
-              subtitle="Core skills included with Hermes Agent"
-              count={bundled.length}
-              skills={bundled}
-              onToggle={toggleInstall}
+              title="Installed Skills"
+              subtitle="Skills available to your agent"
+              count={installedCards.length}
+              skills={installedCards}
+              actionName={actionName}
+              onInstall={doInstall}
+              onUninstall={doUninstall}
               className="mint-in mint-in-3"
             />
           )}
 
-          {custom.length > 0 && (
+          {bundledCards.length > 0 && (
             <Section
-              title="Custom Skills"
-              subtitle="Community and custom installed skills"
-              count={custom.length}
-              skills={custom}
-              onToggle={toggleInstall}
+              title="Browse Skills"
+              subtitle="Bundled skills you can install"
+              count={bundledCards.length}
+              skills={bundledCards}
+              actionName={actionName}
+              onInstall={doInstall}
+              onUninstall={doUninstall}
               className="mint-in mint-in-4"
             />
           )}
@@ -158,26 +248,30 @@ export default function SkillsView() {
       {/* ── Install modal ── */}
       <Modal
         open={installOpen}
-        onClose={() => { if (!installing) setInstallOpen(false); }}
+        onClose={() => { if (!installing) { setInstallOpen(false); setError(""); } }}
         title="Install New Skill"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setInstallOpen(false)} disabled={installing}>Cancel</Button>
-            <Button variant="primary" onClick={handleInstall} disabled={!installId.trim() || installing} leftIcon={<Download size={15} />}>
+            <Button variant="ghost" onClick={() => { setInstallOpen(false); setError(""); }} disabled={installing}>Cancel</Button>
+            <Button variant="primary" onClick={handleInstallFromModal} disabled={!installId.trim() || installing} leftIcon={<Download size={15} />}>
               {installing ? "Installing…" : "Install"}
             </Button>
           </>
         }
       >
-        <Field label="Skill name or URL" hint="Paste a registry name or a Git URL to install.">
+        <Field label="Skill name or identifier" hint="Enter a registry name to install via the hermes skills CLI.">
           <Input
             autoFocus
             value={installId}
             onChange={e => setInstallId(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") handleInstall(); }}
-            placeholder="e.g. web-scraper or https://…"
+            onKeyDown={e => { if (e.key === "Enter") handleInstallFromModal(); }}
+            placeholder="e.g. concept-diagrams"
+            disabled={installing}
           />
         </Field>
+        {error && (
+          <p className="text-[12px] text-[var(--error)] mt-3 whitespace-pre-wrap">{error}</p>
+        )}
       </Modal>
     </Screen>
   );
@@ -190,14 +284,18 @@ function Section({
   subtitle,
   count,
   skills,
-  onToggle,
+  actionName,
+  onInstall,
+  onUninstall,
   className,
 }: {
   title: string;
   subtitle: string;
   count: number;
-  skills: Skill[];
-  onToggle: (id: string) => void;
+  skills: SkillCardModel[];
+  actionName: string | null;
+  onInstall: (id: string) => void | Promise<unknown>;
+  onUninstall: (name: string) => void | Promise<unknown>;
   className?: string;
 }) {
   return (
@@ -210,7 +308,13 @@ function Section({
       <hr className="ui-divider-gold mt-3 mb-5" />
       <div className="ui-grid stagger">
         {skills.map(skill => (
-          <SkillCard key={skill.id} skill={skill} onToggle={onToggle} />
+          <SkillCard
+            key={`${skill.category}/${skill.name}`}
+            skill={skill}
+            busy={actionName === skill.name}
+            onInstall={onInstall}
+            onUninstall={onUninstall}
+          />
         ))}
       </div>
     </section>
@@ -219,40 +323,54 @@ function Section({
 
 // ─── Skill card sub-component ───────────────────────────────
 
-function SkillCard({ skill, onToggle }: { skill: Skill; onToggle: (id: string) => void }) {
+function SkillCard({
+  skill,
+  busy,
+  onInstall,
+  onUninstall,
+}: {
+  skill: SkillCardModel;
+  busy: boolean;
+  onInstall: (id: string) => void | Promise<unknown>;
+  onUninstall: (name: string) => void | Promise<unknown>;
+}) {
+  const isBundled = skill.source === "bundled";
   return (
     <Card pad interactive active={skill.installed} className="flex flex-col gap-3.5">
       {/* Head */}
       <div className="flex items-start gap-3">
         <IconChip className={cx(!skill.installed && "!bg-[var(--surface-3)] !text-[var(--text-3)] !border-[var(--border)]")}>
-          {skill.isBundled ? <Sparkles size={18} /> : <Package size={18} />}
+          {skill.installed ? <Sparkles size={18} /> : <Package size={18} />}
         </IconChip>
         <div className="flex-1 min-w-0">
           <h3 className="serif text-[16px] leading-tight text-[var(--text)] truncate">{skill.name}</h3>
-          <p className="text-[11.5px] text-[var(--text-3)]">
-            {skill.author} <span className="font-mono text-[var(--text-3)]">· v{skill.version}</span>
-          </p>
+          {skill.category && (
+            <p className="text-[11.5px] text-[var(--text-3)] truncate">{skill.category}</p>
+          )}
         </div>
         {skill.installed ? (
-          <IconButton danger onClick={() => onToggle(skill.id)} title="Remove skill" aria-label="Remove skill">
+          <IconButton danger disabled={busy} onClick={() => onUninstall(skill.name)} title="Remove skill" aria-label="Remove skill">
             <Trash2 size={15} />
           </IconButton>
         ) : (
-          <Button variant="primary" size="sm" onClick={() => onToggle(skill.id)} leftIcon={<Download size={13} />}>
-            Install
+          <Button variant="primary" size="sm" disabled={busy} onClick={() => onInstall(skill.name)} leftIcon={<Download size={13} />}>
+            {busy ? "Installing…" : "Install"}
           </Button>
         )}
       </div>
 
       {/* Description */}
-      <p className="text-[12.5px] leading-relaxed text-[var(--text-2)]">{skill.description}</p>
+      {skill.description && (
+        <p className="text-[12.5px] leading-relaxed text-[var(--text-2)]">{skill.description}</p>
+      )}
 
-      {/* Tags */}
-      <div className="flex items-center gap-1.5 flex-wrap mt-auto">
-        {skill.tags.map(tag => (
-          <Tag key={tag}>{tag}</Tag>
-        ))}
-      </div>
+      {/* Category tag */}
+      {skill.category && (
+        <div className="flex items-center gap-1.5 flex-wrap mt-auto">
+          <Tag>{skill.category}</Tag>
+          {isBundled && <Tag>bundled</Tag>}
+        </div>
+      )}
     </Card>
   );
 }
