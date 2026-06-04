@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { FileText, Eye, EyeOff, Pencil, Download, RotateCcw, AlertTriangle, BookOpen } from "../../components/Icons";
+import { BookOpen, Pencil, RotateCcw, Check, X } from "lucide-react";
+import { Screen, Button, Modal, cx } from "../../ui";
 
 const DEFAULT_SOUL = `# Hermes Agent — SOUL.md
 
@@ -23,212 +24,214 @@ You are **Hermes Agent**, a helpful, knowledgeable AI assistant. You communicate
 - Refuse harmful or unethical requests
 `;
 
+/* Parse the SOUL markdown into title + well-spaced ## sections for a calm reading column. */
+function parseSoul(md: string) {
+  const lines = md.split("\n");
+  let title = "";
+  const sections: { heading: string; body: string[] }[] = [];
+  let current: { heading: string; body: string[] } | null = null;
+
+  for (const line of lines) {
+    if (line.startsWith("# ")) {
+      title = line.slice(2).trim();
+    } else if (line.startsWith("## ")) {
+      current = { heading: line.slice(3).trim(), body: [] };
+      sections.push(current);
+    } else if (current) {
+      current.body.push(line);
+    }
+  }
+  return { title, sections };
+}
+
+/* Render the lightweight inline markdown we use (**bold**) + bullet/paragraph blocks
+   as a calm, well-spaced reading document. */
+function renderBody(body: string[]) {
+  const text = body.join("\n").trim();
+  if (!text) return null;
+  const blocks = text.split(/\n{2,}/);
+
+  return (
+    <div className="flex flex-col gap-3.5">
+      {blocks.map((block, bi) => {
+        const rows = block.split("\n").filter((r) => r.trim());
+        const isList = rows.every((r) => r.trim().startsWith("- "));
+
+        if (isList) {
+          return (
+            <ul key={bi} className="flex flex-col gap-2">
+              {rows.map((r, ri) => (
+                <li key={ri} className="flex gap-2.5 leading-[1.65]">
+                  <span className="mt-[9px] h-[3px] w-[3px] shrink-0 rounded-full bg-[var(--accent)]" />
+                  <span>{renderInline(r.trim().slice(2))}</span>
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        return (
+          <p key={bi} className="leading-[1.7]">
+            {renderInline(block.replace(/\n/g, " "))}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderInline(s: string) {
+  return s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**") ? (
+      <strong key={i} className="text-[var(--text)] font-semibold">
+        {part.slice(2, -2)}
+      </strong>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
 export default function SoulEditor() {
   const [content, setContent] = useState(DEFAULT_SOUL);
+  const [draft, setDraft] = useState(content);
   const [isEditing, setIsEditing] = useState(false);
-  const [previewMode, setPreviewMode] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const charCount = content.length;
+  const { title, sections } = parseSoul(content);
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
 
+  const startEdit = () => {
+    setDraft(content);
+    setIsEditing(true);
+  };
+
   const handleSave = () => {
-    setSaved(true);
+    setContent(draft);
     setIsEditing(false);
+    setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const handleCancel = () => {
+    setDraft(content);
+    setIsEditing(false);
+  };
+
   const handleReset = () => {
-    setContent(DEFAULT_SOUL);
+    setDraft(DEFAULT_SOUL);
     setShowResetConfirm(false);
   };
 
-  const handleEdit = () => {
-    setIsEditing(true);
-    setPreviewMode(false);
-  };
-
   return (
-    <div className="flex-1 flex flex-col min-h-0" style={{ background: "var(--bg-primary)" }}>
-      {/* Header */}
-      <div
-        className="px-8 py-5 flex items-center justify-between flex-shrink-0"
-        style={{ borderBottom: "1px solid var(--border)" }}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center"
-            style={{ background: "var(--accent-subtle)", border: "1px solid var(--accent)" }}
-          >
-            <BookOpen size={17} style={{ color: "var(--accent)" }} />
-          </div>
-          <div>
-            <h1 className="text-[15px] font-bold" style={{ color: "var(--text-primary)" }}>
-              Agent Soul
-            </h1>
-            <p className="text-[11.5px] mt-0.5" style={{ color: "var(--text-muted)" }}>
-              Define your agent&apos;s personality and behavior
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {!isEditing ? (
-            <button
-              onClick={handleEdit}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-medium transition-colors"
-              style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-            >
-              <Pencil size={13} /> Edit
-            </button>
-          ) : (
-            <>
-              <button
-                onClick={() => setPreviewMode(!previewMode)}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-medium transition-colors"
-                style={{
-                  background: previewMode ? "var(--accent-subtle)" : "var(--bg-tertiary)",
-                  color: previewMode ? "var(--accent)" : "var(--text-secondary)",
-                  border: `1px solid ${previewMode ? "var(--accent)" : "var(--border)"}`,
-                }}
-              >
-                {previewMode ? <Eye size={13} /> : <EyeOff size={13} />}
-                {previewMode ? "Previewing" : "Preview"}
-              </button>
-              <button
-                onClick={() => setShowResetConfirm(true)}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-medium transition-colors"
-                style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
-              >
-                <RotateCcw size={13} /> Reset
-              </button>
-              <button
-                onClick={handleSave}
-                className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-medium transition-colors"
-                style={{ background: "var(--accent)", color: "#fff" }}
-              >
-                <Download size={13} /> {saved ? "Saved!" : "Save"}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Reset confirmation toast */}
-      {showResetConfirm && (
-        <div
-          className="mx-8 mt-4 rounded-xl p-4 flex items-center justify-between animate-fade-in"
-          style={{ background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.25)" }}
-        >
-          <div className="flex items-center gap-3">
-            <AlertTriangle size={16} style={{ color: "var(--error)" }} />
-            <div>
-              <p className="text-[12px] font-medium" style={{ color: "var(--error)" }}>
-                Reset to default personality?
-              </p>
-              <p className="text-[11px] mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                This will replace your current SOUL.md with the default version. This action cannot be undone.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowResetConfirm(false)}
-              className="rounded-lg px-3 py-1.5 text-[11.5px] font-medium transition-colors"
-              style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleReset}
-              className="rounded-lg px-3 py-1.5 text-[11.5px] font-medium transition-colors"
-              style={{ background: "var(--error)", color: "#fff" }}
-            >
-              Reset
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Info banner */}
-      <div
-        className="mx-8 mt-4 rounded-xl p-4 flex items-start gap-3"
-        style={{ background: "var(--accent-subtle)", border: "1px solid rgba(0, 63, 122, 0.2)" }}
-      >
-        <FileText size={16} style={{ color: "var(--accent)", flexShrink: 0, marginTop: 1 }} />
-        <div>
-          <p className="text-[12px] font-medium" style={{ color: "var(--accent)" }}>
-            What is SOUL.md?
-          </p>
-          <p className="text-[11.5px] leading-relaxed mt-1" style={{ color: "var(--text-secondary)" }}>
-            SOUL.md is the core personality file that defines how your Hermes Agent thinks, communicates, and behaves. It
-            sets the agent&apos;s identity, tone, values, and boundaries — shaping every interaction. Changes take effect
-            immediately after saving.
-          </p>
-        </div>
-      </div>
-
-      {/* Editor / Preview area */}
-      <div className="flex-1 overflow-hidden mx-8 mt-4 mb-6">
-        {previewMode ? (
-          <div
-            className="h-full overflow-y-auto rounded-xl p-6"
-            style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
-          >
-            <div
-              className="prose prose-invert max-w-none text-[13px] leading-relaxed whitespace-pre-wrap font-mono"
-              style={{ color: "var(--text-primary)" }}
-            >
-              {content}
-            </div>
-          </div>
+    <Screen
+      icon={<BookOpen size={19} />}
+      title="Agent Soul"
+      sub={
+        <>
+          Your agent&apos;s personality, tone, and behavior — defined in{" "}
+          <code className="ui-kbd">SOUL.md</code>.
+        </>
+      }
+      actions={
+        !isEditing ? (
+          <Button variant="secondary" leftIcon={<Pencil size={15} />} onClick={startEdit}>
+            Edit
+          </Button>
         ) : (
+          <>
+            <Button variant="ghost" leftIcon={<X size={15} />} onClick={handleCancel}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              leftIcon={saved ? <Check size={15} /> : undefined}
+              onClick={handleSave}
+            >
+              {saved ? "Saved" : "Save"}
+            </Button>
+          </>
+        )
+      }
+    >
+      {/* Comfortable reading / editing column */}
+      <div className="mx-auto" style={{ maxWidth: 720 }}>
+        {/* Quiet meta strip — source · length · last edited */}
+        <div className="flex items-center gap-2.5 text-[11.5px] text-[var(--text-3)] mb-7">
+          <code className="ui-kbd font-mono">SOUL.md</code>
+          <span className="text-[var(--border-2)]">·</span>
+          <span>
+            <span className="font-mono text-[var(--text-2)]">{wordCount.toLocaleString()}</span> words
+          </span>
+          <span className="text-[var(--border-2)]">·</span>
+          <span>Loaded fresh for every conversation</span>
+        </div>
+
+        {isEditing ? (
           <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            readOnly={!isEditing}
-            className="w-full h-full resize-none rounded-xl p-6 font-mono text-[13px] leading-relaxed outline-none transition-colors"
-            style={{
-              background: "var(--bg-secondary)",
-              color: isEditing ? "var(--text-primary)" : "var(--text-secondary)",
-              border: `1px solid ${isEditing ? "var(--accent)" : "var(--border)"}`,
-              opacity: isEditing ? 1 : 0.7,
-            }}
-            placeholder="Write your agent's personality here..."
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="ui-textarea w-full min-h-[520px] !rounded-[14px] font-mono !text-[13.5px] !leading-[1.7] p-5 ui-card-active"
+            placeholder="Write your agent's personality here…"
             spellCheck={false}
+            autoFocus
           />
+        ) : (
+          <article className="fade-in">
+            {title && (
+              <h1 className="serif !text-[27px] !font-normal !mt-0 !mb-9 text-[var(--text)] leading-tight">
+                {title}
+              </h1>
+            )}
+            <div className="flex flex-col gap-9">
+              {sections.map((sec, i) => (
+                <section key={i}>
+                  <h2 className="ui-section-label !text-[var(--accent-text)] !text-[11.5px] !mb-3.5 !mt-0">
+                    {sec.heading}
+                  </h2>
+                  <div className="text-[14px] text-[var(--text-2)]">{renderBody(sec.body)}</div>
+                </section>
+              ))}
+            </div>
+          </article>
+        )}
+
+        {/* Reset — quiet, only while editing */}
+        {isEditing && (
+          <button
+            onClick={() => setShowResetConfirm(true)}
+            className={cx(
+              "flex items-center gap-1.5 mt-4 text-[12px] text-[var(--text-3)]",
+              "hover:text-[var(--text-2)] transition-colors no-drag"
+            )}
+          >
+            <RotateCcw size={13} />
+            Reset to default personality
+          </button>
         )}
       </div>
 
-      {/* Footer stats */}
-      <div
-        className="px-8 py-3 flex items-center gap-5 flex-shrink-0"
-        style={{ borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}
+      {/* Reset confirmation */}
+      <Modal
+        open={showResetConfirm}
+        onClose={() => setShowResetConfirm(false)}
+        title="Reset to default personality?"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setShowResetConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" leftIcon={<RotateCcw size={13} />} onClick={handleReset}>
+              Reset
+            </Button>
+          </>
+        }
       >
-        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-          <span className="font-mono font-medium" style={{ color: "var(--text-secondary)" }}>
-            {charCount.toLocaleString()}
-          </span>{" "}
-          characters
-        </span>
-        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-          <span className="font-mono font-medium" style={{ color: "var(--text-secondary)" }}>
-            {wordCount.toLocaleString()}
-          </span>{" "}
-          words
-        </span>
-        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-          <span className="font-mono font-medium" style={{ color: "var(--text-secondary)" }}>
-            {content.split("\n").length.toLocaleString()}
-          </span>{" "}
-          lines
-        </span>
-        <div className="flex-1" />
-        <span className="text-[10.5px]" style={{ color: "var(--text-muted)" }}>
-          {isEditing ? "Editing" : "Read-only"} · SOUL.md
-        </span>
-      </div>
-    </div>
+        <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
+          This replaces the editor contents with the default SOUL.md. Your saved file is unchanged
+          until you save.
+        </p>
+      </Modal>
+    </Screen>
   );
 }

@@ -3,8 +3,12 @@ import {
   Send, MessageCircle, Hash, MessagesSquare, ShieldCheck, Network,
   MessageSquare, Mail, Smartphone, Apple, Building, Feather,
   Zap, Webhook, Home, Play, Square, RotateCcw,
-  Check, AlertCircle, Wifi, WifiOff, Activity
+  Check, Activity,
 } from "lucide-react";
+import { BrandMedallion } from "../../components/BrandMark";
+import {
+  Screen, Card, Button, IconChip, Badge, StatusDot, Field, Input, Modal, EmptyState, SectionLabel,
+} from "../../ui";
 
 // ─── Platform definitions ────────────────────────────────────────────────
 
@@ -53,16 +57,18 @@ const PLATFORM_DEFAULTS: PlatformConfig[] = [
     fields: [{ key: "haUrl", label: "HA URL", placeholder: "http://homeassistant.local:8123" }, { key: "haToken", label: "Long-Lived Token", placeholder: "eyJ..." }], values: {}, configured: false },
 ];
 
-// ─── Status dot helper ──────────────────────────────────────────────────
+// ─── Status → token mapping ──────────────────────────────────────────────
 
-function StatusDot({ status }: { status: PlatformConfig["status"] }) {
-  const colors: Record<typeof status, string> = {
-    connected: "bg-green-500 shadow-green-500/30",
-    disconnected: "bg-neutral-600",
-    error: "bg-red-500 shadow-red-500/30",
-  };
-  return <span className={`inline-block w-2 h-2 rounded-full ${colors[status]} shadow-sm flex-shrink-0`} />;
-}
+const STATUS_COLOR: Record<PlatformConfig["status"], string> = {
+  connected: "var(--success)",
+  disconnected: "var(--text-3)",
+  error: "var(--error)",
+};
+const STATUS_LABEL: Record<PlatformConfig["status"], string> = {
+  connected: "Connected",
+  disconnected: "Disconnected",
+  error: "Error",
+};
 
 // ─── GatewayView ────────────────────────────────────────────────────────
 
@@ -102,159 +108,129 @@ export default function GatewayView() {
     }
   }, [gatewayStatus]);
 
+  const stopGateway = useCallback(() => {
+    setGatewayStatus("stopped");
+    setPlatforms(prev => prev.map(p => ({ ...p, status: "disconnected" as const })));
+  }, []);
+
   const connectedCount = platforms.filter(p => p.status === "connected").length;
   const errorCount = platforms.filter(p => p.status === "error").length;
+  const offlineCount = platforms.length - connectedCount - errorCount;
+  const isRunning = gatewayStatus === "running";
+
+  const expandedPlatform = platforms.find(p => p.id === expandedId) || null;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden" style={{ background: "#0D0D0D" }}>
-      {/* ── Gateway status bar ── */}
-      <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 border-b border-white/5" style={{ background: "#1A1A1A" }}>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            {gatewayStatus === "running" ? (
-              <Activity size={16} className="text-green-400" />
-            ) : (
-              <Activity size={16} className="text-neutral-500" />
-            )}
-            <span className="text-sm font-medium text-white/90">
-              Gateway {gatewayStatus === "running" ? "Running" : "Stopped"}
-            </span>
-          </div>
-          <span className="text-xs text-white/40">
-            {connectedCount} connected · {platforms.length - connectedCount - errorCount} offline{errorCount > 0 ? ` · ${errorCount} errors` : ""}
+    <Screen
+      icon={<Activity size={19} />}
+      title={`Gateway ${isRunning ? "Running" : "Stopped"}`}
+      sub={
+        <span className="inline-flex items-center gap-2.5">
+          <span className="inline-flex items-center gap-1.5">
+            <StatusDot color={isRunning ? "var(--success)" : "var(--text-3)"} pulse={isRunning} />
+            {isRunning ? "Live" : "Idle"}
           </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {gatewayStatus === "running" ? (
-            <>
-              <button
-                onClick={() => { setGatewayStatus("stopped"); setPlatforms(prev => prev.map(p => ({ ...p, status: "disconnected" as const }))); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                style={{ background: "#242424", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}
-              >
-                <Square size={12} /> Stop
-              </button>
-              <button
-                onClick={toggleGateway}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                style={{ background: "#242424", color: "#f59e0b", border: "1px solid rgba(245,158,11,0.2)" }}
-              >
-                <RotateCcw size={12} /> Restart
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={toggleGateway}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium transition-colors"
-              style={{ background: "#0A84FF", color: "#fff" }}
-            >
-              <Play size={12} /> Start Gateway
-            </button>
-          )}
-        </div>
-      </div>
+          <span>·</span>
+          <span>{connectedCount} connected</span>
+          <span>·</span>
+          <span>{offlineCount} offline</span>
+          {errorCount > 0 && <><span>·</span><span className="text-[var(--error)]">{errorCount} errors</span></>}
+        </span>
+      }
+      actions={
+        isRunning ? (
+          <>
+            <Button variant="danger" size="sm" leftIcon={<Square size={13} />} onClick={stopGateway}>Stop</Button>
+            <Button variant="secondary" size="sm" leftIcon={<RotateCcw size={13} />} onClick={toggleGateway}>Restart</Button>
+          </>
+        ) : (
+          <Button variant="primary" size="sm" leftIcon={<Play size={13} />} onClick={toggleGateway}>Start Gateway</Button>
+        )
+      }
+    >
+      {connectedCount === 0 && gatewayStatus === "stopped" && (
+        <Card pad className="flex flex-col items-center text-center mb-6 fade-in" >
+          <BrandMedallion size={72} className="mb-4" />
+          <h2 className="text-[18px] font-semibold text-[var(--text)]">Connect your channels</h2>
+          <p className="text-[13px] text-[var(--text-2)] mt-1.5 max-w-md">
+            Configure a platform below, then start the gateway to bring Hermes into Telegram, Discord, Slack and more.
+          </p>
+        </Card>
+      )}
 
-      {/* ── Platform grid ── */}
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {platforms.map(platform => {
-            const Icon = platform.icon;
-            const isExpanded = expandedId === platform.id;
-            return (
-              <div
-                key={platform.id}
-                className="rounded-xl border transition-all duration-200"
-                style={{
-                  background: "#242424",
-                  borderColor: isExpanded ? "rgba(10,132,255,0.3)" : "rgba(255,255,255,0.05)",
-                }}
-              >
-                {/* Card header */}
-                <button
-                  onClick={() => toggleExpand(platform.id)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left"
-                >
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(10,132,255,0.1)" }}>
-                    <Icon size={16} className="text-[#0A84FF]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white/90 truncate">{platform.name}</div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <StatusDot status={platform.status} />
-                      <span className="text-[11px] text-white/40 capitalize">{platform.status}</span>
-                    </div>
-                  </div>
-                </button>
+      <SectionLabel className="mb-3.5">Channels · {platforms.length} platforms</SectionLabel>
 
-                {/* Expanded configure form */}
-                {isExpanded && (
-                  <div className="px-4 pb-4 pt-3 border-t border-white/5">
-                    {platform.fields.map(field => (
-                      <div key={field.key} className="mb-3">
-                        <label className="block text-[11px] font-medium text-white/50 mb-1">{field.label}</label>
-                        <input
-                          type={field.type || "text"}
-                          value={editingValues[field.key] || ""}
-                          onChange={e => handleFieldChange(field.key, e.target.value)}
-                          placeholder={field.placeholder}
-                          className="w-full rounded-lg px-3 py-2 text-sm transition-colors"
-                          style={{
-                            background: "#1A1A1A",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            color: "#fff",
-                            outline: "none",
-                          }}
-                          onFocus={e => { e.currentTarget.style.borderColor = "rgba(10,132,255,0.4)"; }}
-                          onBlur={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
-                        />
-                      </div>
-                    ))}
-                    <div className="flex items-center gap-2 mt-4">
-                      <button
-                        onClick={() => handleSave(platform.id)}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors"
-                        style={{ background: "#0A84FF", color: "#fff" }}
-                      >
-                        <Check size={12} /> Save & Connect
-                      </button>
-                      {platform.configured && (
-                        <button
-                          onClick={() => handleDisconnect(platform.id)}
-                          className="px-3 py-2 rounded-lg text-xs font-medium transition-colors"
-                          style={{ background: "rgba(239,68,68,0.1)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}
-                        >
-                          Disconnect
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setExpandedId(null)}
-                        className="px-3 py-2 rounded-lg text-xs font-medium transition-colors"
-                        style={{ background: "#1A1A1A", color: "#fff", border: "1px solid rgba(255,255,255,0.1)" }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Quick status when configured but not expanded */}
-                {!isExpanded && platform.configured && (
-                  <div className="px-4 pb-3 flex items-center gap-2">
-                    {platform.status === "connected" ? (
-                      <Wifi size={12} className="text-green-400" />
-                    ) : platform.status === "error" ? (
-                      <AlertCircle size={12} className="text-red-400" />
-                    ) : (
-                      <WifiOff size={12} className="text-neutral-500" />
-                    )}
-                    <span className="text-[11px] text-white/40">Configured</span>
-                  </div>
-                )}
+      <div className="ui-grid-sm stagger">
+        {platforms.map(platform => {
+          const Icon = platform.icon;
+          return (
+            <Card key={platform.id} pad interactive onClick={() => toggleExpand(platform.id)} className="flex items-center gap-3">
+              <IconChip>
+                <Icon size={17} />
+              </IconChip>
+              <div className="flex-1 min-w-0">
+                <div className="text-[14px] font-semibold text-[var(--text)] truncate">{platform.name}</div>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <StatusDot color={STATUS_COLOR[platform.status]} pulse={platform.status === "connected"} />
+                  <span className="text-[11.5px] text-[var(--text-3)]">{STATUS_LABEL[platform.status]}</span>
+                </div>
               </div>
-            );
-          })}
-        </div>
+              {platform.configured && <Badge variant="accent">Configured</Badge>}
+            </Card>
+          );
+        })}
       </div>
-    </div>
+
+      {platforms.length === 0 && (
+        <EmptyState
+          icon={<Activity size={22} />}
+          title="No channels"
+          sub="No platforms are available to configure."
+        />
+      )}
+
+      <Modal
+        open={!!expandedPlatform}
+        onClose={() => setExpandedId(null)}
+        title={
+          expandedPlatform ? (
+            <span className="flex items-center gap-2.5">
+              <expandedPlatform.icon size={16} className="text-[var(--accent-text)]" />
+              {expandedPlatform.name}
+            </span>
+          ) : null
+        }
+        footer={
+          expandedPlatform ? (
+            <>
+              {expandedPlatform.configured && (
+                <Button variant="danger" onClick={() => { handleDisconnect(expandedPlatform.id); setExpandedId(null); }}>
+                  Disconnect
+                </Button>
+              )}
+              <Button variant="ghost" onClick={() => setExpandedId(null)}>Cancel</Button>
+              <Button variant="primary" leftIcon={<Check size={15} />} onClick={() => handleSave(expandedPlatform.id)}>
+                Save &amp; Connect
+              </Button>
+            </>
+          ) : null
+        }
+      >
+        {expandedPlatform && (
+          <div className="flex flex-col gap-4">
+            {expandedPlatform.fields.map(field => (
+              <Field key={field.key} label={field.label}>
+                <Input
+                  type={field.type || "text"}
+                  value={editingValues[field.key] || ""}
+                  onChange={e => handleFieldChange(field.key, e.target.value)}
+                  placeholder={field.placeholder}
+                />
+              </Field>
+            ))}
+          </div>
+        )}
+      </Modal>
+    </Screen>
   );
 }

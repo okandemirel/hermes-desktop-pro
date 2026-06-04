@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Search, MessageSquare, Calendar, Clock, ArrowRight, Trash2, FolderOpen } from "lucide-react";
+import { MessageSquare, Clock, ArrowRight, Trash2 } from "lucide-react";
+import { Screen, SearchInput, SectionLabel, Card, Badge, IconChip, IconButton, EmptyState } from "../ui";
 
 interface Session {
   id: string;
@@ -38,80 +39,63 @@ export default function SessionsView() {
     return acc;
   }, {} as Record<string, Session[]>);
 
+  const totalMessages = sessions.reduce((s, x) => s + x.messageCount, 0);
+
   return (
-    <div className="flex flex-col h-full bg-[#0D0D0D]">
-      {/* Header */}
-      <div className="px-6 py-5 border-b border-white/5">
-        <h1 className="text-xl font-semibold text-white mb-1">Sessions</h1>
-        <p className="text-sm text-white/40">Browse and search your conversation history</p>
+    <Screen
+      icon={<MessageSquare size={19} />}
+      title="Sessions"
+      sub="Browse and search your conversation history — full-text search across every message."
+      actions={
+        <div className="flex items-center gap-2">
+          <Badge variant="accent">{filtered.length} session{filtered.length !== 1 ? "s" : ""}</Badge>
+          <Badge variant="neutral">{totalMessages.toLocaleString()} messages</Badge>
+        </div>
+      }
+    >
+      <div className="mb-7">
+        <SearchInput value={search} onChange={setSearch} placeholder="Search sessions with FTS5…" />
       </div>
 
-      {/* Search */}
-      <div className="px-6 py-3 border-b border-white/5">
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search sessions with FTS5..."
-            className="w-full bg-[#1A1A1A] border border-white/10 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-white/25 outline-none focus:border-[#0A84FF]/50 transition-colors"
-          />
-        </div>
-        <div className="flex items-center gap-1 mt-2 text-[11px] text-white/25">
-          <span>{filtered.length} sessions</span>
-          <span>·</span>
-          <span>{sessions.reduce((s, x) => s + x.messageCount, 0).toLocaleString()} messages total</span>
-        </div>
-      </div>
-
-      {/* Session list */}
-      <div className="flex-1 overflow-y-auto px-6 py-3">
-        {Object.entries(grouped).map(([label, items]) => (
-          <div key={label} className="mb-6">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-white/25 mb-3">{label}</div>
-            <div className="space-y-2">
-              {items.map(s => (
-                <div
-                  key={s.id}
-                  className="group flex items-start gap-4 p-4 rounded-xl bg-[#1A1A1A] border border-white/5 hover:border-[#0A84FF]/20 hover:bg-[#1A1A1A]/80 cursor-pointer transition-all"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-[#0A84FF]/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <MessageSquare size={18} className="text-[#0A84FF]/70" />
+      {Object.entries(grouped).map(([label, items]) => (
+        <div key={label} className="mb-7">
+          <div className="flex items-center gap-2 mb-3">
+            <SectionLabel>{label}</SectionLabel>
+            <Badge variant="neutral">{items.length}</Badge>
+          </div>
+          <div className="flex flex-col gap-2.5 stagger">
+            {items.map(s => (
+              <Card key={s.id} interactive pad onClick={() => {}} className="group flex items-start gap-4">
+                <IconChip><MessageSquare size={18} /></IconChip>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{s.title}</h3>
+                    <Badge variant="neutral">{s.profile}</Badge>
+                    <Badge variant="accent" className="font-mono">{s.model}</Badge>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-sm font-medium text-white truncate">{s.title}</h3>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/5 text-white/30 shrink-0">{s.profile}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/5 text-white/30 shrink-0">{s.model}</span>
-                    </div>
-                    <p className="text-xs text-white/35 line-clamp-1 mb-2">{s.preview}</p>
-                    <div className="flex items-center gap-3 text-[11px] text-white/25">
-                      <span className="flex items-center gap-1"><MessageSquare size={11} /> {s.messageCount} messages</span>
-                      <span className="flex items-center gap-1"><Clock size={11} /> {s.date}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    <button className="p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-[#0A84FF] transition-colors">
-                      <ArrowRight size={14} />
-                    </button>
-                    <button className="p-2 rounded-lg hover:bg-white/5 text-white/30 hover:text-red-400 transition-colors">
-                      <Trash2 size={14} />
-                    </button>
+                  <p className="text-[13px] text-[var(--text-2)] line-clamp-1 mb-2.5">{s.preview}</p>
+                  <div className="flex items-center gap-4 text-[11.5px] text-[var(--text-3)]">
+                    <span className="flex items-center gap-1.5"><MessageSquare size={12} /> {s.messageCount} messages</span>
+                    <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {s.date}</span>
                   </div>
                 </div>
-              ))}
-            </div>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  <IconButton title="Open session"><ArrowRight size={15} /></IconButton>
+                  <IconButton danger title="Delete session"><Trash2 size={15} /></IconButton>
+                </div>
+              </Card>
+            ))}
           </div>
-        ))}
+        </div>
+      ))}
 
-        {filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <FolderOpen size={48} className="text-white/10 mb-4" />
-            <p className="text-sm text-white/30">No sessions found</p>
-            <p className="text-xs text-white/15 mt-1">Try a different search term</p>
-          </div>
-        )}
-      </div>
-    </div>
+      {filtered.length === 0 && (
+        <EmptyState
+          icon={<MessageSquare size={24} />}
+          title="No sessions found"
+          sub="Try a different search term."
+        />
+      )}
+    </Screen>
   );
 }

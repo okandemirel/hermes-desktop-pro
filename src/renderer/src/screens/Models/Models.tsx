@@ -1,21 +1,17 @@
-import { useState } from "react";
-import { Server, Plus, Trash2, X, Check, ChevronDown } from "../../components/Icons";
-
-// ─── Missing icons defined locally ──────────────────────────
-function SvgIcon({ paths, circle, rect, size = 16, style }: { paths: string[]; circle?: [number, number, number]; rect?: [number, number, number, number]; size?: number; style?: React.CSSProperties }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-      {circle && <circle cx={circle[0]} cy={circle[1]} r={circle[2]} />}
-      {rect && <rect x={rect[0]} y={rect[1]} width={rect[2]} height={rect[3]} rx="2" />}
-      {paths.map((d, i) => <path key={i} d={d} />)}
-    </svg>
-  );
-}
-const Cpu = (p: { size?: number; style?: React.CSSProperties }) => <SvgIcon rect={[4, 4, 16, 16]} paths={["M9 9h6v6H9z", "M9 1v3", "M15 1v3", "M9 20v3", "M15 20v3", "M20 9h3", "M20 14h3", "M1 9h3", "M1 14h3"]} {...p} />;
-const Edit3 = (p: { size?: number; style?: React.CSSProperties }) => <SvgIcon paths={["M12 20h9", "M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"]} {...p} />;
-const SlidersHorizontal = (p: { size?: number; style?: React.CSSProperties }) => <SvgIcon paths={["M4 21v-7", "M4 10V3", "M12 21v-9", "M12 8V3", "M20 21v-5", "M20 12V3", "M1 14h6", "M9 8h6", "M17 16h6"]} {...p} />;
+import { useState, useMemo } from "react";
+import {
+  Cpu, Plus, Trash2, Pencil, Check, Star, Zap, Eye, Wrench, Brain,
+  Layers, Sparkles, Gauge, Database,
+} from "lucide-react";
+import {
+  Screen, Card, Button, IconButton, IconChip, Badge, Tag,
+  Field, Input, Select, Modal, EmptyState, SearchInput,
+  Segment, SegmentItem, SectionLabel, StatusDot, Stat,
+} from "../../ui";
 
 // ─── Types ──────────────────────────────────────────────────
+
+type Capability = "Streaming" | "Vision" | "Tools" | "Reasoning";
 
 interface ModelConfig {
   id: string;
@@ -24,6 +20,12 @@ interface ModelConfig {
   modelId: string;
   contextWindow: number;
   temperature: number;
+  /** USD price per 1M input tokens */
+  priceIn: number;
+  /** USD price per 1M output tokens */
+  priceOut: number;
+  capabilities: Capability[];
+  recommended?: boolean;
 }
 
 const PROVIDERS = [
@@ -31,19 +33,72 @@ const PROVIDERS = [
   "Grok", "DeepSeek", "OpenCode Zen", "OpenCode Go", "Local / Custom",
 ];
 
+const CONTEXT_OPTIONS = [
+  { label: "4K", value: 4000 },
+  { label: "8K", value: 8000 },
+  { label: "16K", value: 16000 },
+  { label: "32K", value: 32000 },
+  { label: "64K", value: 64000 },
+  { label: "128K", value: 128000 },
+  { label: "200K", value: 200000 },
+  { label: "256K", value: 256000 },
+  { label: "1M", value: 1000000 },
+  { label: "2M", value: 2000000 },
+];
+
+const TEMP_OPTIONS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0];
+
+const CAPABILITY_META: Record<Capability, { icon: typeof Zap }> = {
+  Streaming: { icon: Zap },
+  Vision: { icon: Eye },
+  Tools: { icon: Wrench },
+  Reasoning: { icon: Brain },
+};
+
+// Provider glyph (lucide stand-in for brand marks) + display order
+const PROVIDER_ICONS: Record<string, typeof Cpu> = {
+  Anthropic: Sparkles,
+  OpenAI: Brain,
+  Google: Layers,
+  Grok: Zap,
+  DeepSeek: Gauge,
+  OpenRouter: Database,
+  "OpenCode Zen": Cpu,
+  "OpenCode Go": Cpu,
+  "Local / Custom": Cpu,
+};
+
 // ─── Mock data ──────────────────────────────────────────────
 
 const MOCK_MODELS: ModelConfig[] = [
-  { id: "m1", name: "DeepSeek V4 Pro", provider: "OpenCode Go", modelId: "deepseek-v4-pro", contextWindow: 128000, temperature: 0.7 },
-  { id: "m2", name: "Claude Sonnet 4", provider: "OpenCode Zen", modelId: "claude-sonnet-4", contextWindow: 200000, temperature: 0.5 },
-  { id: "m3", name: "GPT-4o", provider: "OpenAI", modelId: "gpt-4o", contextWindow: 128000, temperature: 0.8 },
-  { id: "m4", name: "Gemini 3 Pro", provider: "Google", modelId: "gemini-3-pro", contextWindow: 1000000, temperature: 0.6 },
+  { id: "m1", name: "Claude Sonnet 4", provider: "Anthropic", modelId: "claude-sonnet-4-20250514", contextWindow: 200000, temperature: 0.5, priceIn: 3, priceOut: 15, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"], recommended: true },
+  { id: "m2", name: "Claude Opus 4", provider: "Anthropic", modelId: "claude-opus-4-20250514", contextWindow: 200000, temperature: 0.4, priceIn: 15, priceOut: 75, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"], recommended: true },
+  { id: "m3", name: "GPT-4o", provider: "OpenAI", modelId: "gpt-4o", contextWindow: 128000, temperature: 0.8, priceIn: 2.5, priceOut: 10, capabilities: ["Streaming", "Vision", "Tools"], recommended: true },
+  { id: "m4", name: "o3", provider: "OpenAI", modelId: "o3", contextWindow: 200000, temperature: 1.0, priceIn: 10, priceOut: 40, capabilities: ["Streaming", "Tools", "Reasoning"] },
+  { id: "m5", name: "Gemini 3 Pro", provider: "Google", modelId: "gemini-3-pro", contextWindow: 1000000, temperature: 0.6, priceIn: 1.25, priceOut: 5, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"], recommended: true },
+  { id: "m6", name: "Gemini 3 Flash", provider: "Google", modelId: "gemini-3-flash", contextWindow: 1000000, temperature: 0.7, priceIn: 0.075, priceOut: 0.3, capabilities: ["Streaming", "Vision", "Tools"] },
+  { id: "m7", name: "Grok 4", provider: "Grok", modelId: "grok-4", contextWindow: 256000, temperature: 0.7, priceIn: 5, priceOut: 15, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"] },
+  { id: "m8", name: "DeepSeek V4 Pro", provider: "DeepSeek", modelId: "deepseek-v4-pro", contextWindow: 128000, temperature: 0.7, priceIn: 0.27, priceOut: 1.1, capabilities: ["Streaming", "Tools", "Reasoning"] },
+  { id: "m9", name: "DeepSeek R2", provider: "DeepSeek", modelId: "deepseek-r2", contextWindow: 64000, temperature: 0.6, priceIn: 0.55, priceOut: 2.19, capabilities: ["Streaming", "Reasoning"] },
+  { id: "m10", name: "Sonnet (Zen)", provider: "OpenCode Zen", modelId: "claude-sonnet-4", contextWindow: 200000, temperature: 0.5, priceIn: 0, priceOut: 0, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"] },
+  { id: "m11", name: "DeepSeek (Go)", provider: "OpenCode Go", modelId: "deepseek-v4-pro", contextWindow: 128000, temperature: 0.7, priceIn: 0, priceOut: 0, capabilities: ["Streaming", "Tools"] },
+  { id: "m12", name: "Llama 4 Maverick", provider: "Local / Custom", modelId: "llama-4-maverick-local", contextWindow: 32000, temperature: 0.8, priceIn: 0, priceOut: 0, capabilities: ["Streaming", "Tools"] },
 ];
+
+const DEFAULT_MODEL_ID = "m1";
+
+// ─── Helpers ────────────────────────────────────────────────
+
+const fmtCtx = (n: number) => (n >= 1000000 ? `${n / 1000000}M` : `${Math.round(n / 1000)}K`);
+const fmtPrice = (n: number) => (n === 0 ? "Free" : `$${n}`);
 
 // ─── Component ──────────────────────────────────────────────
 
 export default function ModelsView() {
   const [models, setModels] = useState<ModelConfig[]>(MOCK_MODELS);
+  const [defaultId, setDefaultId] = useState<string>(DEFAULT_MODEL_ID);
+  const [search, setSearch] = useState("");
+  const [activeProvider, setActiveProvider] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -54,7 +109,6 @@ export default function ModelsView() {
   const [formModelId, setFormModelId] = useState("");
   const [formContext, setFormContext] = useState(128000);
   const [formTemp, setFormTemp] = useState(0.7);
-  const [providerOpen, setProviderOpen] = useState(false);
 
   const resetForm = () => {
     setFormName(""); setFormProvider(PROVIDERS[0]); setFormModelId("");
@@ -68,6 +122,8 @@ export default function ModelsView() {
     setEditingId(m.id); setShowForm(true);
   };
 
+  const closeForm = () => { resetForm(); setShowForm(false); };
+
   const handleSave = () => {
     if (!formName.trim() || !formModelId.trim()) return;
     if (editingId) {
@@ -80,6 +136,9 @@ export default function ModelsView() {
         modelId: formModelId.trim(),
         contextWindow: formContext,
         temperature: formTemp,
+        priceIn: 0,
+        priceOut: 0,
+        capabilities: ["Streaming", "Tools"],
       };
       setModels(prev => [...prev, newModel]);
     }
@@ -88,244 +147,247 @@ export default function ModelsView() {
 
   const handleDelete = (id: string) => {
     setModels(prev => prev.filter(m => m.id !== id));
+    if (defaultId === id) {
+      const next = models.find(m => m.id !== id);
+      setDefaultId(next ? next.id : "");
+    }
     setDeleteConfirm(null);
     if (editingId === id) { resetForm(); setShowForm(false); }
   };
 
+  const canSave = !!formName.trim() && !!formModelId.trim();
+
+  // ── Derived data ──
+  const providerCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    models.forEach(m => { counts[m.provider] = (counts[m.provider] || 0) + 1; });
+    return counts;
+  }, [models]);
+
+  const usedProviders = useMemo(
+    () => PROVIDERS.filter(p => providerCounts[p]),
+    [providerCounts],
+  );
+
+  const filterTabs = useMemo(() => ["All", ...usedProviders], [usedProviders]);
+
+  const filtered = useMemo(() => models.filter(m => {
+    const matchesSearch = !search.trim() ||
+      m.name.toLowerCase().includes(search.toLowerCase()) ||
+      m.modelId.toLowerCase().includes(search.toLowerCase()) ||
+      m.provider.toLowerCase().includes(search.toLowerCase());
+    const matchesProvider = activeProvider === "All" || m.provider === activeProvider;
+    return matchesSearch && matchesProvider;
+  }), [models, search, activeProvider]);
+
+  const recommended = filtered.filter(m => m.recommended);
+  const catalog = filtered.filter(m => !m.recommended);
+
+  const defaultModel = models.find(m => m.id === defaultId);
+  const avgCtx = models.length
+    ? Math.round(models.reduce((s, m) => s + m.contextWindow, 0) / models.length)
+    : 0;
+
+  // ── KPI tiles (21st.dev KpiCard: trend delta + sparkline) ──
+  const stats: { label: string; value: string; delta?: number; caption: string; spark?: number[] }[] = [
+    { label: "Total Models", value: String(models.length), delta: 18, caption: "vs last month", spark: [6, 7, 7, 8, 9, 10, 10, 11, 11, 12] },
+    { label: "Providers", value: String(usedProviders.length), delta: 12, caption: "vs last month", spark: [5, 5, 6, 6, 6, 7, 7, 7, 8, 8] },
+    { label: "Default Model", value: defaultModel ? defaultModel.name : "—", caption: "current selection" },
+    { label: "Avg Context", value: avgCtx ? fmtCtx(avgCtx) : "—", delta: -4, caption: "vs last month", spark: [220, 215, 210, 205, 200, 198, 195, 192, 190, 188] },
+  ];
+
+  // ── Card renderer ──
+  const renderCard = (m: ModelConfig) => {
+    const ProviderIcon = PROVIDER_ICONS[m.provider] || Cpu;
+    const isDefault = m.id === defaultId;
+    return (
+      <Card key={m.id} pad interactive active={isDefault} className="group flex flex-col gap-3.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <IconChip><ProviderIcon size={17} /></IconChip>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[14px] font-semibold text-[var(--text)] truncate">{m.name}</span>
+                {isDefault && <Star size={13} className="shrink-0 text-[var(--accent-text)] fill-[var(--accent)]" />}
+              </div>
+              <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">{m.provider}</div>
+            </div>
+          </div>
+          <Badge variant={isDefault ? "accent" : "neutral"}>
+            {isDefault ? <><StatusDot color="var(--accent)" /> Default</> : "Active"}
+          </Badge>
+        </div>
+
+        <code className="block text-[12px] font-mono text-[var(--text-2)] truncate">{m.modelId}</code>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {m.capabilities.map(c => {
+            const CapIcon = CAPABILITY_META[c].icon;
+            return (
+              <Badge key={c} variant="neutral"><CapIcon size={11} /> {c}</Badge>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 pt-0.5">
+          <div className="rounded-[8px] bg-[var(--surface-3)] border border-[var(--border)] px-2.5 py-1.5">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-3)] font-semibold">Context</div>
+            <div className="text-[13px] font-mono text-[var(--text)] mt-0.5">{fmtCtx(m.contextWindow)}</div>
+          </div>
+          <div className="rounded-[8px] bg-[var(--surface-3)] border border-[var(--border)] px-2.5 py-1.5">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-3)] font-semibold">In / 1M</div>
+            <div className="text-[13px] font-mono text-[var(--text)] mt-0.5">{fmtPrice(m.priceIn)}</div>
+          </div>
+          <div className="rounded-[8px] bg-[var(--surface-3)] border border-[var(--border)] px-2.5 py-1.5">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-3)] font-semibold">Out / 1M</div>
+            <div className="text-[13px] font-mono text-[var(--text)] mt-0.5">{fmtPrice(m.priceOut)}</div>
+          </div>
+        </div>
+
+        <div className="mt-auto pt-3.5 border-t border-[var(--border)] flex items-center justify-between gap-2">
+          <Tag>temp&nbsp;<span className="font-mono">{m.temperature.toFixed(1)}</span></Tag>
+          <div className="flex items-center gap-0.5 shrink-0">
+            {!isDefault && (
+              <IconButton onClick={() => setDefaultId(m.id)} title="Set as default"><Star size={15} /></IconButton>
+            )}
+            {isDefault && (
+              <span className="flex items-center justify-center w-[30px] h-[30px] text-[var(--accent-text)]" title="Current default"><Check size={15} /></span>
+            )}
+            <IconButton onClick={() => openEditForm(m)} title="Edit"><Pencil size={15} /></IconButton>
+            <IconButton danger onClick={() => setDeleteConfirm(m.id)} title="Delete"><Trash2 size={15} /></IconButton>
+          </div>
+        </div>
+      </Card>
+    );
+  };
+
   return (
-    <div className="flex-1 flex flex-col min-h-0" style={{ background: "#0D0D0D" }}>
-      {/* Header */}
-      <div className="px-8 py-5 flex items-center justify-between flex-shrink-0 mac-drag-region" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(10,132,255,0.1)", border: "1px solid rgba(10,132,255,0.15)" }}>
-            <Cpu size={18} style={{ color: "#0A84FF" }} />
-          </div>
-          <div>
-            <h1 className="text-[15px] font-bold" style={{ color: "#fff" }}>Models</h1>
-            <p className="text-[11.5px] mt-0.5" style={{ color: "rgba(255,255,255,0.45)" }}>
-              {models.length} configuration{models.length !== 1 ? "s" : ""} saved
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={showForm ? () => { resetForm(); setShowForm(false); } : openAddForm}
-          className="mac-no-drag rounded-lg px-4 py-2 text-[12px] font-medium transition-all flex items-center gap-1.5"
-          style={{ background: showForm ? "transparent" : "#0A84FF", color: "#fff", border: showForm ? "1px solid rgba(255,255,255,0.1)" : "none" }}
-        >
-          {showForm ? <><X size={13} /> Cancel</> : <><Plus size={13} /> Add Model</>}
-        </button>
+    <Screen
+      icon={<Cpu size={19} />}
+      title="Models"
+      sub="Manage your model library — these appear in the chat model selector."
+      actions={<Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={openAddForm}>Add Model</Button>}
+    >
+      {/* ── KPI summary row ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 stagger">
+        {stats.map(s => (
+          <Stat key={s.label} label={s.label} value={s.value} delta={s.delta} caption={s.caption} spark={s.spark} />
+        ))}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto py-6 px-8 space-y-6">
-
-          {/* Inline Add/Edit Form */}
-          {showForm && (
-            <div className="rounded-xl p-5 animate-slide-up" style={{ background: "#242424", border: "1px solid rgba(10,132,255,0.12)" }}>
-              <h2 className="text-[13px] font-semibold mb-4" style={{ color: "#fff" }}>
-                {editingId ? "Edit Model Configuration" : "New Model Configuration"}
-              </h2>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[10.5px] font-medium mb-1.5" style={{ color: "rgba(255,255,255,0.45)" }}>Display Name</label>
-                  <input type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. My DeepSeek"
-                    className="w-full rounded-lg px-3 py-2 text-[12px] outline-none transition-colors"
-                    style={{ background: "#1A1A1A", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-                    onFocus={e => { e.currentTarget.style.borderColor = "#0A84FF"; }}
-                    onBlur={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
-                  />
-                </div>
-
-                {/* Provider dropdown */}
-                <div>
-                  <label className="block text-[10.5px] font-medium mb-1.5" style={{ color: "rgba(255,255,255,0.45)" }}>Provider</label>
-                  <div className="relative">
-                    <button
-                      onClick={() => setProviderOpen(!providerOpen)}
-                      className="w-full rounded-lg px-3 py-2 text-[12px] flex items-center justify-between transition-colors outline-none"
-                      style={{ background: "#1A1A1A", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-                    >
-                      <span>{formProvider}</span>
-                      <ChevronDown size={13} style={{ color: "rgba(255,255,255,0.4)" }} />
-                    </button>
-                    {providerOpen && (
-                      <div className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-10 shadow-lg"
-                        style={{ background: "#1A1A1A", border: "1px solid rgba(255,255,255,0.08)" }}>
-                        {PROVIDERS.map(p => (
-                          <button
-                            key={p}
-                            onClick={() => { setFormProvider(p); setProviderOpen(false); }}
-                            className="w-full text-left px-3 py-2 text-[11.5px] transition-colors"
-                            style={{ color: p === formProvider ? "#0A84FF" : "rgba(255,255,255,0.7)", background: p === formProvider ? "rgba(10,132,255,0.08)" : "transparent" }}
-                            onMouseEnter={e => { if (p !== formProvider) e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
-                            onMouseLeave={e => { if (p !== formProvider) e.currentTarget.style.background = "transparent"; }}
-                          >
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10.5px] font-medium mb-1.5" style={{ color: "rgba(255,255,255,0.45)" }}>Model ID</label>
-                  <input type="text" value={formModelId} onChange={e => setFormModelId(e.target.value)} placeholder="e.g. gpt-4o"
-                    className="w-full rounded-lg px-3 py-2 text-[12px] outline-none transition-colors font-mono"
-                    style={{ background: "#1A1A1A", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-                    onFocus={e => { e.currentTarget.style.borderColor = "#0A84FF"; }}
-                    onBlur={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10.5px] font-medium mb-1.5" style={{ color: "rgba(255,255,255,0.45)" }}>
-                    Context Window — <span className="font-mono" style={{ color: "#0A84FF" }}>{formContext.toLocaleString()}</span> tokens
-                  </label>
-                  <input type="range" min={4000} max={2000000} step={1000} value={formContext}
-                    onChange={e => setFormContext(Number(e.target.value))}
-                    className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                    style={{ accentColor: "#0A84FF", background: "#1A1A1A" }}
-                  />
-                  <div className="flex justify-between text-[9.5px] mt-0.5" style={{ color: "rgba(255,255,255,0.25)" }}>
-                    <span>4K</span><span>2M</span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10.5px] font-medium mb-1.5" style={{ color: "rgba(255,255,255,0.45)" }}>
-                    Temperature — <span className="font-mono" style={{ color: "#0A84FF" }}>{formTemp.toFixed(1)}</span>
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <SlidersHorizontal size={13} style={{ color: "rgba(255,255,255,0.3)", flexShrink: 0 }} />
-                    <input type="range" min={0} max={2} step={0.1} value={formTemp}
-                      onChange={e => setFormTemp(Number(e.target.value))}
-                      className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
-                      style={{ accentColor: "#0A84FF", background: "#1A1A1A" }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-[9.5px] mt-0.5" style={{ color: "rgba(255,255,255,0.25)" }}>
-                    <span>0 (deterministic)</span><span>2 (creative)</span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button onClick={handleSave} disabled={!formName.trim() || !formModelId.trim()}
-                  className="rounded-lg px-4 py-2 text-[12px] font-medium transition-all flex items-center gap-1.5"
-                  style={{ background: "#0A84FF", color: "#fff", opacity: formName.trim() && formModelId.trim() ? 1 : 0.5, cursor: formName.trim() && formModelId.trim() ? "pointer" : "not-allowed" }}>
-                  <Check size={13} /> Save
-                </button>
-                <button onClick={() => { resetForm(); setShowForm(false); }}
-                  className="rounded-lg px-4 py-2 text-[12px] font-medium transition-all"
-                  style={{ background: "transparent", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Empty state */}
-          {models.length === 0 && !showForm && (
-            <div className="flex items-center justify-center py-24">
-              <div className="text-center animate-fade-in">
-                <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "#1A1A1A" }}>
-                  <Cpu size={40} style={{ color: "rgba(255,255,255,0.2)" }} />
-                </div>
-                <h2 className="text-[16px] font-semibold mb-1" style={{ color: "#fff" }}>No models configured</h2>
-                <p className="text-[12px] mb-4" style={{ color: "rgba(255,255,255,0.4)" }}>Add your first model to get started</p>
-                <button onClick={openAddForm}
-                  className="rounded-lg px-4 py-2 text-[12px] font-medium transition-all inline-flex items-center gap-1.5"
-                  style={{ background: "#0A84FF", color: "#fff" }}>
-                  <Plus size={13} /> Add Model
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Model list grouped by provider */}
-          {models.length > 0 && (
-            <div className="space-y-8">
-              {PROVIDERS.filter(p => models.some(m => m.provider === p)).map(provider => {
-                const providerModels = models.filter(m => m.provider === provider);
-                return (
-                  <div key={provider}>
-                    <div className="flex items-center gap-2 mb-3">
-                      <Server size={14} style={{ color: "rgba(255,255,255,0.35)" }} />
-                      <h2 className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.35)" }}>{provider}</h2>
-                      <span className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.2)" }}>{providerModels.length}</span>
-                    </div>
-                    <div className="space-y-2">
-                      {providerModels.map(m => (
-                        <div key={m.id}
-                          className="rounded-xl p-4 transition-all duration-200 animate-slide-up"
-                          style={{ background: "#242424", border: "1px solid rgba(255,255,255,0.05)" }}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-0.5">
-                                <h3 className="text-[13px] font-semibold" style={{ color: "#fff" }}>{m.name}</h3>
-                                <code className="text-[10.5px] font-mono px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)" }}>{m.modelId}</code>
-                              </div>
-                              <div className="flex items-center gap-3 text-[10.5px] mt-1.5">
-                                <span style={{ color: "rgba(255,255,255,0.35)" }}>
-                                  Context: <span className="font-mono" style={{ color: "rgba(255,255,255,0.55)" }}>{m.contextWindow.toLocaleString()}</span>
-                                </span>
-                                <span style={{ color: "rgba(255,255,255,0.35)" }}>
-                                  Temp: <span className="font-mono" style={{ color: "rgba(255,255,255,0.55)" }}>{m.temperature.toFixed(1)}</span>
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <button onClick={() => openEditForm(m)}
-                                className="p-1.5 rounded-lg transition-all"
-                                style={{ color: "rgba(255,255,255,0.3)" }}
-                                onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.7)"; }}
-                                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.3)"; }}>
-                                <Edit3 size={14} />
-                              </button>
-                              <button onClick={() => setDeleteConfirm(m.id)}
-                                className="p-1.5 rounded-lg transition-all"
-                                style={{ color: "rgba(255,255,255,0.3)" }}
-                                onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; e.currentTarget.style.color = "#ef4444"; }}
-                                onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.3)"; }}>
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      {/* ── Search + provider filter ── */}
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search models, IDs, providers…"
+          className="flex-1 min-w-[240px] max-w-[400px]"
+        />
+        <Segment className="flex-wrap">
+          {filterTabs.map(p => (
+            <SegmentItem key={p} active={p === activeProvider} onClick={() => setActiveProvider(p)}>
+              {p}
+              {p !== "All" && <span className="ml-0.5 text-[var(--text-3)] font-mono">{providerCounts[p]}</span>}
+            </SegmentItem>
+          ))}
+        </Segment>
       </div>
 
-      {/* Delete confirmation overlay */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setDeleteConfirm(null)}>
-          <div className="rounded-xl p-6 max-w-sm w-full mx-4 animate-slide-up" style={{ background: "#242424", border: "1px solid rgba(255,255,255,0.08)" }} onClick={e => e.stopPropagation()}>
-            <h3 className="text-[14px] font-semibold mb-2" style={{ color: "#fff" }}>Delete Model?</h3>
-            <p className="text-[11.5px] mb-4" style={{ color: "rgba(255,255,255,0.5)" }}>
-              This action cannot be undone. The model configuration will be permanently removed.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleteConfirm(null)}
-                className="rounded-lg px-4 py-2 text-[12px] font-medium transition-all"
-                style={{ background: "transparent", color: "rgba(255,255,255,0.55)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                Cancel
-              </button>
-              <button onClick={() => handleDelete(deleteConfirm)}
-                className="rounded-lg px-4 py-2 text-[12px] font-medium transition-all flex items-center gap-1.5"
-                style={{ background: "#ef4444", color: "#fff" }}>
-                <Trash2 size={12} /> Delete
-              </button>
-            </div>
-          </div>
-        </div>
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={<Cpu size={24} />}
+          title={models.length === 0 ? "No models configured" : "No models found"}
+          sub={models.length === 0 ? "Add your first model to get started." : `No models match "${search || activeProvider}".`}
+          action={models.length === 0 ? <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openAddForm}>Add Model</Button> : undefined}
+        />
+      ) : (
+        <>
+          {recommended.length > 0 && (
+            <section className="mb-7">
+              <div className="flex items-center gap-2 mb-3">
+                <SectionLabel>Recommended</SectionLabel>
+                <Badge variant="accent">{recommended.length}</Badge>
+              </div>
+              <div className="ui-grid stagger">
+                {recommended.map(renderCard)}
+              </div>
+            </section>
+          )}
+
+          {catalog.length > 0 && (
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <SectionLabel>{activeProvider === "All" ? "Catalog" : activeProvider}</SectionLabel>
+                <Badge variant="neutral">{catalog.length}</Badge>
+              </div>
+              <div className="ui-grid stagger">
+                {catalog.map(renderCard)}
+              </div>
+            </section>
+          )}
+        </>
       )}
-    </div>
+
+      {/* Add / Edit modal */}
+      <Modal
+        open={showForm}
+        onClose={closeForm}
+        title={editingId ? "Edit Model" : "New Model"}
+        footer={
+          <>
+            <Button variant="ghost" onClick={closeForm}>Cancel</Button>
+            <Button variant="primary" disabled={!canSave} onClick={handleSave}>Save Model</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Field label="Display Name">
+            <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. My DeepSeek" />
+          </Field>
+
+          <Field label="Provider">
+            <Select value={formProvider} onChange={e => setFormProvider(e.target.value)}>
+              {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+            </Select>
+          </Field>
+
+          <Field label="Model ID">
+            <Input value={formModelId} onChange={e => setFormModelId(e.target.value)} placeholder="e.g. gpt-4o" className="font-mono" />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Context Window">
+              <Select value={formContext} onChange={e => setFormContext(Number(e.target.value))}>
+                {CONTEXT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label} tokens</option>)}
+              </Select>
+            </Field>
+
+            <Field label="Temperature">
+              <Select value={formTemp} onChange={e => setFormTemp(Number(e.target.value))}>
+                {TEMP_OPTIONS.map(t => <option key={t} value={t}>{t.toFixed(1)}</option>)}
+              </Select>
+            </Field>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete confirmation modal */}
+      <Modal
+        open={!!deleteConfirm}
+        onClose={() => setDeleteConfirm(null)}
+        title="Delete Model?"
+        width={400}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button variant="danger" leftIcon={<Trash2 size={14} />} onClick={() => deleteConfirm && handleDelete(deleteConfirm)}>Delete</Button>
+          </>
+        }
+      >
+        <p className="text-[13px] text-[var(--text-2)]">
+          This action cannot be undone. The model configuration will be permanently removed.
+        </p>
+      </Modal>
+    </Screen>
   );
 }

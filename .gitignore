@@ -4,3 +4,7 @@ dist/
 *.log
 .DS_Store
 .env
+
+# Local Claude Code config (per-machine; not shared)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

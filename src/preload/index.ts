@@ -139,6 +139,53 @@ const api = {
     ipcRenderer.on("stream-usage", handler);
     return () => ipcRenderer.removeListener("stream-usage", handler);
   },
+
+  // Claw3D (local mode only)
+  claw3dStatus: (): Promise<{
+    installed: boolean;
+    running: boolean;
+    port: number;
+    portInUse: boolean;
+    wsUrl: string;
+    remoteUrl: string | null;
+    error?: string;
+  }> => ipcRenderer.invoke("claw3d-status"),
+
+  claw3dSetup: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("claw3d-setup"),
+
+  onClaw3dSetupProgress: (
+    callback: (progress: {
+      step: number;
+      totalSteps: number;
+      title: string;
+      detail: string;
+      log: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (_: any, progress: any) => callback(progress);
+    ipcRenderer.on("claw3d-setup-progress", handler);
+    return () => ipcRenderer.removeListener("claw3d-setup-progress", handler);
+  },
+
+  claw3dGetPort: (): Promise<number> => ipcRenderer.invoke("claw3d-get-port"),
+  claw3dSetPort: (port: number): Promise<boolean> =>
+    ipcRenderer.invoke("claw3d-set-port", port),
+  claw3dGetWsUrl: (): Promise<string> =>
+    ipcRenderer.invoke("claw3d-get-ws-url"),
+  claw3dSetWsUrl: (url: string): Promise<boolean> =>
+    ipcRenderer.invoke("claw3d-set-ws-url", url),
+
+  claw3dStartAll: (
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("claw3d-start-all", profile),
+  claw3dStopAll: (): Promise<boolean> => ipcRenderer.invoke("claw3d-stop-all"),
+  claw3dGetLogs: (): Promise<string> => ipcRenderer.invoke("claw3d-get-logs"),
+
+  // External links
+  openExternal: (url: string): Promise<void> =>
+    ipcRenderer.invoke("open-external", url),
 };
 
 contextBridge.exposeInMainWorld("hermes", api);

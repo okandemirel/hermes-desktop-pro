@@ -9,9 +9,24 @@ import {
   Pencil,
   Bell,
   Timer,
-  X,
-  Bot,
-} from "../../components/Icons";
+} from "lucide-react";
+import {
+  Screen,
+  Card,
+  Button,
+  IconButton,
+  Badge,
+  Tag,
+  StatusDot,
+  Field,
+  Input,
+  Textarea,
+  Select,
+  Segment,
+  SegmentItem,
+  Modal,
+  EmptyState,
+} from "../../ui";
 
 interface ScheduleJob {
   id: string;
@@ -148,6 +163,16 @@ export default function SchedulesView() {
     resetForm();
   };
 
+  const openCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    resetForm();
+  };
+
   const startEdit = (job: ScheduleJob) => {
     setFormName(job.name);
     setFormScheduleType("custom");
@@ -173,478 +198,232 @@ export default function SchedulesView() {
     setDeleteConfirmId(null);
   };
 
+  const activeCount = jobs.filter((j) => j.status === "active").length;
+  const canSubmit = !!formName.trim() && !!formPrompt.trim();
+
   return (
-    <div className="flex-1 flex flex-col min-h-0" style={{ background: "var(--bg-primary)" }}>
-      {/* Header */}
-      <div
-        className="px-8 py-5 flex items-center justify-between flex-shrink-0"
-        style={{ borderBottom: "1px solid var(--border)" }}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center"
-            style={{ background: "var(--accent-subtle)", border: "1px solid var(--accent)" }}
-          >
-            <Clock size={17} style={{ color: "var(--accent)" }} />
-          </div>
-          <div>
-            <h1 className="text-[15px] font-bold" style={{ color: "var(--text-primary)" }}>
-              Schedules
-            </h1>
-            <p className="text-[11.5px] mt-0.5" style={{ color: "var(--text-muted)" }}>
-              {jobs.length} cron job{jobs.length !== 1 ? "s" : ""} ·{" "}
-              {jobs.filter((j) => j.status === "active").length} active
-            </p>
-          </div>
+    <Screen
+      icon={<Clock size={19} />}
+      title="Schedules"
+      sub="Automate agent tasks with cron jobs — they run on the Hermes engine and deliver where you choose."
+      actions={
+        <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openCreate}>
+          Add Schedule
+        </Button>
+      }
+    >
+      {/* Summary stats rail */}
+      {jobs.length > 0 && (
+        <div className="flex items-center flex-wrap gap-2 mb-5">
+          <Badge variant="accent">
+            <Calendar size={12} />
+            <span className="font-mono">{jobs.length}</span> job{jobs.length !== 1 ? "s" : ""}
+          </Badge>
+          <Badge variant="success">
+            <StatusDot color="var(--success)" />
+            <span className="font-mono">{activeCount}</span> active
+          </Badge>
+          <Badge variant="neutral">
+            <Pause size={11} />
+            <span className="font-mono">{jobs.length - activeCount}</span> paused
+          </Badge>
         </div>
+      )}
 
-        <button
-          onClick={() => {
-            resetForm();
-            setShowForm(true);
-          }}
-          className="flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-medium transition-colors"
-          style={{ background: "var(--accent)", color: "#fff" }}
-        >
-          <Plus size={13} /> Add Schedule
-        </button>
-      </div>
+      {/* Jobs list — stacked full-width rows */}
+      {jobs.length === 0 ? (
+        <EmptyState
+          icon={<Clock size={24} />}
+          title="No schedules yet"
+          sub="Create your first cron job to automate agent tasks."
+          action={
+            <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openCreate}>
+              Create Schedule
+            </Button>
+          }
+        />
+      ) : (
+        <div className="flex flex-col gap-3 stagger">
+          {jobs.map((job) => {
+            const isActive = job.status === "active";
+            return (
+              <Card key={job.id} pad interactive className="flex flex-col gap-3">
+                <div className="flex items-start gap-3">
+                  {/* Status dot */}
+                  <span className="flex items-center justify-center shrink-0 w-9 h-9 rounded-[10px] bg-[var(--surface-3)] border border-[var(--border)]">
+                    <StatusDot color={isActive ? "var(--success)" : "var(--text-3)"} pulse={isActive} />
+                  </span>
 
-      {/* Add/Edit Form */}
-      {showForm && (
-        <div className="flex-1 overflow-y-auto p-8">
-          <div
-            className="max-w-lg mx-auto rounded-xl p-6 animate-slide-up"
-            style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
-          >
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-[14px] font-bold" style={{ color: "var(--text-primary)" }}>
-                {editingId ? "Edit Schedule" : "New Schedule"}
-              </h2>
-              <button
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
-                className="p-1 rounded transition-colors"
-                style={{ color: "var(--text-muted)" }}
-              >
-                <X size={16} />
-              </button>
-            </div>
+                  <div className="flex-1 min-w-0">
+                    {/* Top row: name + status + cron */}
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{job.name}</h3>
+                      <Badge variant={isActive ? "success" : "neutral"}>
+                        {isActive ? "Active" : "Paused"}
+                      </Badge>
+                      <Tag className="font-mono text-[var(--accent-text)]">{job.schedule}</Tag>
+                      <span className="text-[12px] text-[var(--text-3)]">{job.scheduleHuman}</span>
+                    </div>
 
-            {/* Name */}
-            <label
-              className="block text-[11px] font-medium mb-1.5"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Schedule Name
-            </label>
-            <input
+                    {/* Prompt preview */}
+                    <p className="text-[13px] leading-relaxed text-[var(--text-2)] mt-2 line-clamp-2">
+                      {job.prompt}
+                    </p>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <IconButton onClick={() => toggleStatus(job.id)} title={isActive ? "Pause" : "Resume"}>
+                      {isActive ? <Pause size={15} /> : <Play size={15} />}
+                    </IconButton>
+                    <IconButton onClick={() => startEdit(job)} title="Edit">
+                      <Pencil size={15} />
+                    </IconButton>
+                    <IconButton danger onClick={() => setDeleteConfirmId(job.id)} title="Delete">
+                      <Trash2 size={15} />
+                    </IconButton>
+                  </div>
+                </div>
+
+                {/* Meta row */}
+                <div className="flex items-center gap-2 flex-wrap pt-3 border-t border-[var(--border)]">
+                  <Tag>
+                    <Timer size={12} className="mr-1 text-[var(--text-3)]" />
+                    Next:&nbsp;<span className="text-[var(--text-2)]">{job.nextRun}</span>
+                  </Tag>
+                  <Tag>
+                    <Calendar size={12} className="mr-1 text-[var(--text-3)]" />
+                    Last:&nbsp;<span className="text-[var(--text-2)]">{job.lastRun}</span>
+                  </Tag>
+                  <Tag>
+                    <Bell size={12} className="mr-1 text-[var(--text-3)]" />
+                    <span className="text-[var(--text-2)]">{job.deliveryTarget}</span>
+                  </Tag>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add / Edit modal */}
+      <Modal
+        open={showForm}
+        onClose={closeForm}
+        title={editingId ? "Edit Schedule" : "New Schedule"}
+        width={520}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeForm}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleAddOrEdit} disabled={!canSubmit}>
+              {editingId ? "Save Changes" : "Add Schedule"}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Field label="Schedule Name">
+            <Input
               type="text"
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
-              placeholder="e.g., Morning Briefing"
-              className="w-full rounded-lg px-3 py-2 text-[12px] outline-none mb-4 transition-colors"
-              style={{
-                background: "var(--bg-tertiary)",
-                color: "var(--text-primary)",
-                border: "1px solid var(--border)",
-              }}
+              placeholder="e.g. Morning Briefing"
             />
+          </Field>
 
-            {/* Schedule type */}
-            <label
-              className="block text-[11px] font-medium mb-1.5"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Schedule Type
-            </label>
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={() => setFormScheduleType("every")}
-                className="flex-1 rounded-lg px-3 py-2 text-[12px] font-medium transition-colors"
-                style={{
-                  background:
-                    formScheduleType === "every" ? "var(--accent-subtle)" : "var(--bg-tertiary)",
-                  color:
-                    formScheduleType === "every" ? "var(--accent)" : "var(--text-secondary)",
-                  border: `1px solid ${
-                    formScheduleType === "every" ? "var(--accent)" : "var(--border)"
-                  }`,
-                }}
+          <Field label="Schedule Type">
+            <Segment className="w-full">
+              <SegmentItem active={formScheduleType === "every"} onClick={() => setFormScheduleType("every")}>
+                <Timer size={14} /> Recurring
+              </SegmentItem>
+              <SegmentItem active={formScheduleType === "custom"} onClick={() => setFormScheduleType("custom")}>
+                <Calendar size={14} /> Custom Cron
+              </SegmentItem>
+            </Segment>
+          </Field>
+
+          {formScheduleType === "every" && (
+            <div className="flex items-center gap-2.5">
+              <span className="text-[13px] text-[var(--text-3)]">Every</span>
+              <Input
+                type="number"
+                value={formEveryValue}
+                onChange={(e) => setFormEveryValue(Math.max(1, parseInt(e.target.value) || 1))}
+                min={1}
+                className="text-center !w-24"
+              />
+              <Select
+                value={formEveryUnit}
+                onChange={(e) => setFormEveryUnit(e.target.value as "min" | "hour" | "day")}
+                className="!w-auto"
               >
-                <Timer size={12} className="inline mr-1" /> Recurring
-              </button>
-              <button
-                onClick={() => setFormScheduleType("custom")}
-                className="flex-1 rounded-lg px-3 py-2 text-[12px] font-medium transition-colors"
-                style={{
-                  background:
-                    formScheduleType === "custom" ? "var(--accent-subtle)" : "var(--bg-tertiary)",
-                  color:
-                    formScheduleType === "custom" ? "var(--accent)" : "var(--text-secondary)",
-                  border: `1px solid ${
-                    formScheduleType === "custom" ? "var(--accent)" : "var(--border)"
-                  }`,
-                }}
-              >
-                <Calendar size={12} className="inline mr-1" /> Custom Cron
-              </button>
+                <option value="min">Minutes</option>
+                <option value="hour">Hours</option>
+                <option value="day">Days</option>
+              </Select>
             </div>
+          )}
 
-            {/* Every X */}
-            {formScheduleType === "every" && (
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>
-                  Every
-                </span>
-                <input
-                  type="number"
-                  value={formEveryValue}
-                  onChange={(e) => setFormEveryValue(Math.max(1, parseInt(e.target.value) || 1))}
-                  min={1}
-                  className="w-20 rounded-lg px-3 py-2 text-[12px] text-center outline-none"
-                  style={{
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                    border: "1px solid var(--border)",
-                  }}
-                />
-                <select
-                  value={formEveryUnit}
-                  onChange={(e) => setFormEveryUnit(e.target.value as "min" | "hour" | "day")}
-                  className="rounded-lg px-3 py-2 text-[12px] outline-none"
-                  style={{
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  <option value="min">Minutes</option>
-                  <option value="hour">Hours</option>
-                  <option value="day">Days</option>
-                </select>
-              </div>
-            )}
+          {formScheduleType === "custom" && (
+            <Field label="Cron Expression" hint="Standard 5-field cron expression: minute hour day month weekday">
+              <Input
+                type="text"
+                value={formCustomCron}
+                onChange={(e) => setFormCustomCron(e.target.value)}
+                placeholder="e.g. 0 8 * * *"
+                className="font-mono"
+              />
+            </Field>
+          )}
 
-            {/* Custom cron */}
-            {formScheduleType === "custom" && (
-              <div className="mb-4">
-                <input
-                  type="text"
-                  value={formCustomCron}
-                  onChange={(e) => setFormCustomCron(e.target.value)}
-                  placeholder="e.g., 0 8 * * *"
-                  className="w-full rounded-lg px-3 py-2 text-[12px] font-mono outline-none"
-                  style={{
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                    border: "1px solid var(--border)",
-                  }}
-                />
-                <p className="text-[10.5px] mt-1" style={{ color: "var(--text-muted)" }}>
-                  Standard 5-field cron expression: minute hour day month weekday
-                </p>
-              </div>
-            )}
-
-            {/* Prompt */}
-            <label
-              className="block text-[11px] font-medium mb-1.5"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Prompt
-            </label>
-            <textarea
+          <Field label="Prompt">
+            <Textarea
               value={formPrompt}
               onChange={(e) => setFormPrompt(e.target.value)}
               placeholder="What should the agent do on this schedule?"
               rows={4}
-              className="w-full resize-none rounded-lg px-3 py-2 text-[12px] outline-none mb-4"
-              style={{
-                background: "var(--bg-tertiary)",
-                color: "var(--text-primary)",
-                border: "1px solid var(--border)",
-              }}
             />
+          </Field>
 
-            {/* Delivery target */}
-            <label
-              className="block text-[11px] font-medium mb-1.5"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              Delivery Target
-            </label>
-            <select
-              value={formTarget}
-              onChange={(e) => setFormTarget(e.target.value)}
-              className="w-full rounded-lg px-3 py-2 text-[12px] outline-none mb-5"
-              style={{
-                background: "var(--bg-tertiary)",
-                color: "var(--text-primary)",
-                border: "1px solid var(--border)",
-              }}
-            >
+          <Field label="Delivery Target">
+            <Select value={formTarget} onChange={(e) => setFormTarget(e.target.value)}>
               {DELIVERY_TARGETS.map((t) => (
                 <option key={t} value={t}>
                   {t}
                 </option>
               ))}
-            </select>
-
-            {/* Submit */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
-                className="flex-1 rounded-lg px-4 py-2 text-[12px] font-medium transition-colors"
-                style={{
-                  background: "var(--bg-tertiary)",
-                  color: "var(--text-secondary)",
-                  border: "1px solid var(--border)",
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddOrEdit}
-                className="flex-1 rounded-lg px-4 py-2 text-[12px] font-medium transition-colors"
-                style={{ background: "var(--accent)", color: "#fff" }}
-              >
-                {editingId ? "Save Changes" : "Add Schedule"}
-              </button>
-            </div>
-          </div>
+            </Select>
+          </Field>
         </div>
-      )}
+      </Modal>
 
-      {/* Jobs list */}
-      {!showForm && (
-        <div className="flex-1 overflow-y-auto p-8">
-          {jobs.length === 0 ? (
-            /* Empty state */
-            <div className="flex items-center justify-center h-full animate-fade-in">
-              <div className="text-center">
-                <div
-                  className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-                  style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
-                >
-                  <Clock size={28} style={{ color: "var(--text-muted)", opacity: 0.4 }} />
-                </div>
-                <h3 className="text-[14px] font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
-                  No schedules yet
-                </h3>
-                <p className="text-[12px] mb-4" style={{ color: "var(--text-secondary)" }}>
-                  Create your first cron job to automate agent tasks.
-                </p>
-                <button
-                  onClick={() => {
-                    resetForm();
-                    setShowForm(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12px] font-medium transition-colors"
-                  style={{ background: "var(--accent)", color: "#fff" }}
-                >
-                  <Plus size={13} /> Create Schedule
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* Job cards */
-            <div className="max-w-2xl mx-auto space-y-3">
-              {jobs.map((job) => (
-                <div
-                  key={job.id}
-                  className="rounded-xl p-5 transition-all duration-200 animate-slide-up"
-                  style={{
-                    background: "var(--bg-secondary)",
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  {/* Delete confirmation */}
-                  {deleteConfirmId === job.id && (
-                    <div
-                      className="mb-4 rounded-lg p-3 flex items-center justify-between"
-                      style={{
-                        background: "rgba(239, 68, 68, 0.1)",
-                        border: "1px solid rgba(239, 68, 68, 0.2)",
-                      }}
-                    >
-                      <span className="text-[11.5px]" style={{ color: "var(--error)" }}>
-                        Delete this schedule?
-                      </span>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setDeleteConfirmId(null)}
-                          className="rounded px-2.5 py-1 text-[11px] transition-colors"
-                          style={{
-                            background: "var(--bg-tertiary)",
-                            color: "var(--text-secondary)",
-                          }}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={() => deleteJob(job.id)}
-                          className="rounded px-2.5 py-1 text-[11px] transition-colors"
-                          style={{ background: "var(--error)", color: "#fff" }}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex items-start gap-4">
-                    {/* Status indicator */}
-                    <div className="flex-shrink-0 mt-0.5">
-                      <div
-                        className="w-2.5 h-2.5 rounded-full"
-                        style={{
-                          background: job.status === "active" ? "var(--success)" : "var(--text-muted)",
-                          boxShadow:
-                            job.status === "active"
-                              ? "0 0 8px rgba(34, 197, 94, 0.5)"
-                              : "none",
-                        }}
-                      />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      {/* Top row: name + actions */}
-                      <div className="flex items-center justify-between mb-1.5">
-                        <h3
-                          className="text-[13px] font-semibold truncate"
-                          style={{ color: "var(--text-primary)" }}
-                        >
-                          {job.name}
-                        </h3>
-                        <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                          {/* Toggle play/pause */}
-                          <button
-                            onClick={() => toggleStatus(job.id)}
-                            className="p-1.5 rounded-md transition-colors"
-                            style={{ color: "var(--text-muted)" }}
-                            title={job.status === "active" ? "Pause" : "Resume"}
-                          >
-                            {job.status === "active" ? (
-                              <Pause size={14} />
-                            ) : (
-                              <Play size={14} />
-                            )}
-                          </button>
-                          {/* Edit */}
-                          <button
-                            onClick={() => startEdit(job)}
-                            className="p-1.5 rounded-md transition-colors"
-                            style={{ color: "var(--text-muted)" }}
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          {/* Delete */}
-                          <button
-                            onClick={() =>
-                              setDeleteConfirmId(
-                                deleteConfirmId === job.id ? null : job.id
-                              )
-                            }
-                            className="p-1.5 rounded-md transition-colors"
-                            style={{ color: "var(--text-muted)" }}
-                            title="Delete"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Schedule description */}
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <Clock size={11} style={{ color: "var(--text-muted)" }} />
-                        <code
-                          className="text-[11px] font-mono"
-                          style={{ color: "var(--text-secondary)" }}
-                        >
-                          {job.schedule}
-                        </code>
-                        <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                          · {job.scheduleHuman}
-                        </span>
-                      </div>
-
-                      {/* Prompt preview */}
-                      <p
-                        className="text-[11.5px] leading-relaxed mb-3 line-clamp-2"
-                        style={{ color: "var(--text-secondary)" }}
-                      >
-                        {job.prompt}
-                      </p>
-
-                      {/* Meta row */}
-                      <div className="flex items-center gap-4 flex-wrap">
-                        <span
-                          className="text-[10.5px] flex items-center gap-1"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          <Timer size={11} />
-                          Next: {job.nextRun}
-                        </span>
-                        <span
-                          className="text-[10.5px] flex items-center gap-1"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          <Calendar size={11} />
-                          Last: {job.lastRun}
-                        </span>
-                        <span
-                          className="text-[10.5px] flex items-center gap-1"
-                          style={{ color: "var(--text-muted)" }}
-                        >
-                          <Bell size={11} />
-                          {job.deliveryTarget}
-                        </span>
-                        <span
-                          className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-                          style={{
-                            background:
-                              job.status === "active"
-                                ? "rgba(34, 197, 94, 0.1)"
-                                : "rgba(158, 158, 158, 0.1)",
-                            color: job.status === "active" ? "var(--success)" : "var(--text-muted)",
-                          }}
-                        >
-                          {job.status === "active" ? "Active" : "Paused"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Footer */}
-      {!showForm && jobs.length > 0 && (
-        <div
-          className="px-8 py-3 flex items-center gap-4 flex-shrink-0"
-          style={{ borderTop: "1px solid var(--border)", background: "var(--bg-secondary)" }}
-        >
-          <Bot size={13} style={{ color: "var(--text-muted)" }} />
-          <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-            Schedules run via the Hermes cron engine. Jobs execute automatically according to their
-            configured schedule.
-          </span>
-          <div className="flex-1" />
-          <span className="text-[10.5px] font-mono" style={{ color: "var(--text-muted)" }}>
-            {jobs.filter((j) => j.status === "active").length} of {jobs.length} active
-          </span>
-        </div>
-      )}
-    </div>
+      {/* Delete confirmation modal */}
+      <Modal
+        open={deleteConfirmId !== null}
+        onClose={() => setDeleteConfirmId(null)}
+        title="Delete schedule?"
+        width={420}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleteConfirmId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              leftIcon={<Trash2 size={14} />}
+              onClick={() => deleteConfirmId && deleteJob(deleteConfirmId)}
+            >
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[13px] text-[var(--text-2)]">
+          This will permanently remove the schedule. This action cannot be undone.
+        </p>
+      </Modal>
+    </Screen>
   );
 }

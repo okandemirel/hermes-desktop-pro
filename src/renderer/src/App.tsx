@@ -1,7 +1,8 @@
 import { useState, useCallback } from "react";
 import {
   MessageSquare, Clock, User, Brain, Cpu, HardDrive,
-  Heart, Wrench, Calendar, Radio, Layout, Settings, Zap, Box, Package, Search
+  Heart, Wrench, Calendar, Radio, Layout, Settings, Box, Package,
+  PanelLeftClose, PanelLeft, Plus,
 } from "lucide-react";
 import ChatView from "./components/ChatView";
 import SessionsView from "./components/SessionsView";
@@ -17,26 +18,35 @@ import SchedulesView from "./screens/Schedules/Schedules";
 import GatewayView from "./screens/Gateway/Gateway";
 import KanbanView from "./screens/Kanban/Kanban";
 import OfficeView from "./screens/Office/Office";
+import { BrandMark, HermesWordmark } from "./components/BrandMark";
+import { cx, StatusDot } from "./ui";
 import type { ChatTab, ProviderId, ProviderInfo } from "@shared/types";
 
 type NavScreen = "chat" | "sessions" | "profiles" | "providers" | "skills" | "models" | "memory" | "soul" | "tools" | "schedules" | "gateway" | "kanban" | "office" | "settings";
+type NavItem = { id: NavScreen; label: string; icon: typeof MessageSquare };
 
-const NAV_ITEMS: { id: NavScreen; label: string; icon: typeof MessageSquare; section?: string }[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "sessions", label: "Sessions", icon: Clock },
-  { id: "profiles", label: "Profiles", icon: User, section: "agents" },
-  { id: "providers", label: "Providers", icon: Cpu },
-  { id: "skills", label: "Skills", icon: Package },
-  { id: "models", label: "Models", icon: Box },
-  { id: "memory", label: "Memory", icon: HardDrive },
-  { id: "soul", label: "Soul", icon: Heart },
-  { id: "tools", label: "Tools", icon: Wrench },
-  { id: "schedules", label: "Schedules", icon: Calendar },
-  { id: "gateway", label: "Gateway", icon: Radio },
-  { id: "kanban", label: "Kanban", icon: Layout },
-  { id: "office", label: "Office", icon: Zap },
-  { id: "settings", label: "Settings", icon: Settings, section: "bottom" },
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  { label: "Workspace", items: [
+    { id: "chat", label: "Chat", icon: MessageSquare },
+    { id: "sessions", label: "Sessions", icon: Clock },
+    { id: "profiles", label: "Profiles", icon: User },
+  ] },
+  { label: "Intelligence", items: [
+    { id: "providers", label: "Providers", icon: Cpu },
+    { id: "models", label: "Models", icon: Box },
+    { id: "skills", label: "Skills", icon: Package },
+    { id: "memory", label: "Memory", icon: HardDrive },
+    { id: "soul", label: "Soul", icon: Heart },
+  ] },
+  { label: "Automation", items: [
+    { id: "tools", label: "Tools", icon: Wrench },
+    { id: "schedules", label: "Schedules", icon: Calendar },
+    { id: "gateway", label: "Gateway", icon: Radio },
+    { id: "kanban", label: "Kanban", icon: Layout },
+    { id: "office", label: "Office", icon: Brain },
+  ] },
 ];
+const SETTINGS_ITEM: NavItem = { id: "settings", label: "Settings", icon: Settings };
 
 const MOCK_PROVIDERS: ProviderInfo[] = [
   { id: "openrouter", label: "OpenRouter", capabilities: { streaming: true, reasoning: true, vision: true, toolUse: true, maxContextTokens: 200000 }, models: [{ id: "deepseek/deepseek-v4", name: "DeepSeek V4" }] },
@@ -72,11 +82,7 @@ export default function App() {
   const handleCloseTab = useCallback((id: string) => {
     setTabs(prev => {
       const next = prev.filter(t => t.id !== id);
-      if (next.length === 0) {
-        const fresh = createTab();
-        setActiveTabId(fresh.id);
-        return [fresh];
-      }
+      if (next.length === 0) { const fresh = createTab(); setActiveTabId(fresh.id); return [fresh]; }
       if (activeTabId === id) setActiveTabId(next[next.length - 1].id);
       return next;
     });
@@ -85,22 +91,13 @@ export default function App() {
   const handleUpdateProvider = useCallback((tabId: string, providerId: ProviderId) => {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, providerId, modelId: "" } : t));
   }, []);
-
   const handleUpdateModel = useCallback((tabId: string, modelId: string) => {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, modelId } : t));
   }, []);
 
-  const getActiveIcon = (id: NavScreen) => {
-    const item = NAV_ITEMS.find(n => n.id === id);
-    return item?.icon || MessageSquare;
-  };
-
   const renderScreen = () => {
     switch (activeScreen) {
-      case "chat":
-        return <ChatView tab={activeTab} providers={providers} allTabs={tabs}
-          onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId}
-          onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} />;
+      case "chat": return <ChatView tab={activeTab} providers={providers} allTabs={tabs} onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId} onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} />;
       case "sessions": return <SessionsView />;
       case "profiles": return <ProfilesView />;
       case "providers": return <ProvidersView providers={providers} />;
@@ -114,86 +111,71 @@ export default function App() {
       case "kanban": return <KanbanView />;
       case "office": return <OfficeView />;
       case "settings": return <SettingsView />;
-      default: return <ChatView tab={activeTab} providers={providers} allTabs={tabs}
-        onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId}
-        onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} />;
+      default: return null;
     }
   };
 
+  const renderNav = (item: NavItem) => {
+    const active = activeScreen === item.id;
+    return (
+      <button key={item.id} className={cx("ui-nav no-drag", collapsed && "justify-center px-0")} data-active={active}
+        onClick={() => setActiveScreen(item.id)} title={collapsed ? item.label : undefined}>
+        <item.icon size={17} className="shrink-0" strokeWidth={active ? 2.2 : 1.9} />
+        {!collapsed && <span className="truncate">{item.label}</span>}
+      </button>
+    );
+  };
+
   return (
-    <div className="flex h-screen bg-[#0D0D0D] overflow-hidden">
-      {/* Sidebar */}
-      <div className={`flex flex-col shrink-0 border-r border-white/5 bg-[#0D0D0D] transition-all duration-200 ${collapsed ? "w-[52px]" : "w-[220px]"}`}>
-        {/* Traffic light spacer (macOS) */}
-        <div className="h-[38px] shrink-0" style={{ WebkitAppRegion: "drag" } as React.CSSProperties} />
-
-        {/* Logo */}
-        <div className="px-4 py-3 flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-[#0A84FF] flex items-center justify-center shrink-0">
-            <Zap size={14} className="text-white" fill="currentColor" />
-          </div>
-          {!collapsed && <span className="text-sm font-semibold text-white tracking-tight">Hermes Pro</span>}
+    <div className="ui-shell flex overflow-hidden">
+      <aside className={cx("ui-sidebar flex flex-col shrink-0 transition-[width] duration-200", collapsed ? "w-[58px]" : "w-[232px]")}>
+        <div className="h-[38px] shrink-0 drag" />
+        <div className={cx("flex items-center h-12 drag", collapsed ? "justify-center px-0" : "gap-2.5 px-4")}>
+          <BrandMark size={collapsed ? 22 : 25} />
+          {!collapsed && <HermesWordmark />}
+          {!collapsed && <span className="ml-auto ui-tag ui-tag-gold no-drag">PRO</span>}
         </div>
 
-        {/* Nav items */}
-        <div className="flex-1 overflow-y-auto px-2 py-1 space-y-0.5">
-          {NAV_ITEMS.filter(n => n.section !== "bottom").map(item => (
-            <button
-              key={item.id}
-              onClick={() => { setActiveScreen(item.id); if (item.id === "chat") setCollapsed(false); }}
-              className={`w-full flex items-center gap-2.5 rounded-lg transition-all duration-150 ${
-                collapsed ? "justify-center px-0 py-2.5" : "px-2.5 py-2"
-              } ${
-                activeScreen === item.id
-                  ? "bg-[#0A84FF]/10 text-[#0A84FF]"
-                  : "text-white/35 hover:text-white/60 hover:bg-white/5"
-              }`}
-              title={collapsed ? item.label : undefined}
-            >
-              <item.icon size={17} className="shrink-0" />
-              {!collapsed && <span className="text-[13px] font-medium truncate">{item.label}</span>}
+        <div className={cx("no-drag", collapsed ? "px-2 pt-2 pb-1 flex justify-center" : "px-3 pt-2 pb-1")}>
+          {collapsed ? (
+            <button className="ui-iconbtn" title="New chat" onClick={handleNewTab}><Plus size={18} /></button>
+          ) : (
+            <button className="ui-btn ui-btn-primary ui-btn-sm w-full" onClick={handleNewTab}>
+              <Plus size={15} strokeWidth={2.4} /> New chat
             </button>
-          ))}
+          )}
         </div>
 
-        {/* Bottom items */}
-        <div className="px-2 py-2 border-t border-white/5 space-y-0.5">
-          {NAV_ITEMS.filter(n => n.section === "bottom").map(item => (
-            <button
-              key={item.id}
-              onClick={() => setActiveScreen(item.id)}
-              className={`w-full flex items-center gap-2.5 rounded-lg transition-all duration-150 ${
-                collapsed ? "justify-center px-0 py-2.5" : "px-2.5 py-2"
-              } ${
-                activeScreen === item.id
-                  ? "bg-[#0A84FF]/10 text-[#0A84FF]"
-                  : "text-white/35 hover:text-white/60 hover:bg-white/5"
-              }`}
-              title={collapsed ? item.label : undefined}
-            >
-              <item.icon size={17} className="shrink-0" />
-              {!collapsed && <span className="text-[13px] font-medium truncate">{item.label}</span>}
-            </button>
+        <nav className="flex-1 overflow-y-auto px-2.5 py-2 flex flex-col gap-2.5">
+          {NAV_GROUPS.map((g, gi) => (
+            <div key={g.label} className="flex flex-col gap-0.5">
+              {!collapsed
+                ? <div className="ui-navgroup-label">{g.label}</div>
+                : gi > 0 && <div className="mx-auto my-1 h-px w-5 bg-[var(--border)]" />}
+              {g.items.map(renderNav)}
+            </div>
           ))}
+        </nav>
 
-          {/* Collapse toggle */}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-white/20 hover:text-white/40 hover:bg-white/5 transition-all"
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`shrink-0 transition-transform ${collapsed ? "rotate-180" : ""}`}>
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-            {!collapsed && <span className="text-[13px] font-medium truncate">Collapse</span>}
+        <div className="px-2.5 py-2 border-t border-[var(--border)] flex flex-col gap-0.5">
+          {!collapsed && (
+            <div className="flex items-center gap-2.5 px-2 py-1.5 mb-1 no-drag">
+              <BrandMark size={22} glow={false} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[12.5px] font-medium text-[var(--text)] truncate leading-tight">Hermes Agent</div>
+                <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-3)] mt-0.5"><StatusDot color="var(--success)" /> Local · Connected</div>
+              </div>
+            </div>
+          )}
+          {renderNav(SETTINGS_ITEM)}
+          <button className={cx("ui-nav no-drag", collapsed && "justify-center px-0")} onClick={() => setCollapsed(c => !c)} title={collapsed ? "Expand" : "Collapse"}>
+            {collapsed ? <PanelLeft size={17} className="shrink-0" /> : <PanelLeftClose size={17} className="shrink-0" />}
+            {!collapsed && <span className="truncate">Collapse</span>}
           </button>
         </div>
-      </div>
+      </aside>
 
-      {/* Main content */}
-      <div className="flex-1 overflow-hidden">
-        {renderScreen()}
-      </div>
+      <main className="ui-main flex-1 min-w-0 overflow-hidden">{renderScreen()}</main>
     </div>
   );
 }

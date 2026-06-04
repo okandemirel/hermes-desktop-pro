@@ -1,17 +1,6 @@
 import { useState, useMemo } from "react";
-import { Brain, Search, Plus, Trash2, Download, Sparkles } from "../../components/Icons";
-
-// ─── Missing icons defined locally ──────────────────────────
-
-function SvgIcon({ paths, circle, size = 16, style }: { paths: string[]; circle?: [number, number, number]; size?: number; style?: React.CSSProperties }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-      {circle && <circle cx={circle[0]} cy={circle[1]} r={circle[2]} />}
-      {paths.map((d, i) => <path key={i} d={d} />)}
-    </svg>
-  );
-}
-const Package = (p: { size?: number; style?: React.CSSProperties }) => <SvgIcon paths={["M16.5 9.4 7.55 4.24", "M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z", "M3.29 7 12 12l8.71-5", "M12 22V12"]} {...p} />;
+import { Brain, Search, Trash2, Download, Sparkles, Check, Package } from "lucide-react";
+import { Screen, Card, Button, Badge, Tag, SectionLabel, Input, EmptyState, IconChip, cx } from "../../ui";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -88,123 +77,79 @@ export default function SkillsView() {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0" style={{ background: "#0D0D0D" }}>
-      {/* Header */}
-      <div className="px-8 py-5 flex-shrink-0 mac-drag-region" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: "rgba(10,132,255,0.1)", border: "1px solid rgba(10,132,255,0.15)" }}>
-              <Brain size={18} style={{ color: "#0A84FF" }} />
-            </div>
-            <div>
-              <h1 className="text-[15px] font-bold" style={{ color: "#fff" }}>Skills</h1>
-              <p className="text-[11.5px] mt-0.5" style={{ color: "rgba(255,255,255,0.45)" }}>
-                {installedCount} of {skills.length} installed
-              </p>
-            </div>
-          </div>
+    <Screen
+      icon={<Brain size={19} />}
+      title="Skills"
+      sub={`Extend your agent with reusable skills and workflows — ${installedCount} of ${skills.length} installed.`}
+      actions={<Badge variant="success"><Check size={11} /> {installedCount} active</Badge>}
+    >
+      {/* Install + search toolbar */}
+      <Card pad className="flex flex-col gap-3">
+        <SectionLabel className="flex items-center gap-1.5">
+          <Download size={12} /> Install New Skill
+        </SectionLabel>
+        <div className="flex flex-col sm:flex-row gap-2.5">
+          <Input
+            value={installId}
+            onChange={e => setInstallId(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleInstall(); }}
+            placeholder="Enter a skill name or URL to install…"
+            className="flex-1"
+          />
+          <Button
+            variant="primary"
+            onClick={handleInstall}
+            disabled={!installId.trim() || installing}
+            leftIcon={<Download size={15} />}
+          >
+            {installing ? "Installing…" : "Install"}
+          </Button>
         </div>
-        <div className="relative max-w-md mac-no-drag">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "rgba(255,255,255,0.35)" }} />
+        <div className="ui-search">
+          <Search size={16} className="shrink-0" />
           <input
-            type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search skills by name, tag, or description..."
-            className="w-full pl-9 pr-3 py-2 rounded-lg text-[12px] outline-none transition-colors"
-            style={{ background: "#1A1A1A", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-            onFocus={e => { e.currentTarget.style.borderColor = "#0A84FF"; }}
-            onBlur={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
+            placeholder="Search skills by name, tag, or description…"
           />
         </div>
-      </div>
+      </Card>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        {filtered.length === 0 ? (
-          /* Empty state */
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center animate-fade-in">
-              <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "#1A1A1A" }}>
-                <Brain size={40} style={{ color: "rgba(255,255,255,0.2)" }} />
-              </div>
-              <h2 className="text-[16px] font-semibold mb-1" style={{ color: "#fff" }}>No skills found</h2>
-              <p className="text-[12px]" style={{ color: "rgba(255,255,255,0.4)" }}>
-                {query ? "Try a different search term" : "Install your first skill below"}
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="max-w-2xl mx-auto py-6 px-8 space-y-8">
-            {/* Bundled Skills */}
-            {bundled.length > 0 && (
-              <Section
-                title="Bundled Skills"
-                subtitle="Core skills included with Hermes Agent"
-                icon={<Sparkles size={14} style={{ color: "#0A84FF" }} />}
-                skills={bundled}
-                onToggle={toggleInstall}
-              />
-            )}
-
-            {/* Custom Skills */}
-            {custom.length > 0 && (
-              <Section
-                title="Custom Skills"
-                subtitle="Community and custom installed skills"
-                icon={<Package size={14} style={{ color: "rgba(255,255,255,0.55)" }} />}
-                skills={custom}
-                onToggle={toggleInstall}
-              />
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Install new skill */}
-      <div className="flex-shrink-0 px-8 py-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "#0D0D0D" }}>
-        <div className="max-w-2xl mx-auto">
-          <div className="flex items-center gap-1.5 mb-2">
-            <Download size={12} style={{ color: "rgba(255,255,255,0.4)" }} />
-            <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.4)" }}>Install New Skill</span>
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={installId}
-              onChange={e => setInstallId(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") handleInstall(); }}
-              placeholder="Enter skill name or URL..."
-              className="flex-1 rounded-lg px-3 py-2 text-[12px] outline-none transition-colors"
-              style={{ background: "#1A1A1A", border: "1px solid rgba(255,255,255,0.1)", color: "#fff" }}
-              onFocus={e => { e.currentTarget.style.borderColor = "#0A84FF"; }}
-              onBlur={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
-            />
-            <button
-              onClick={handleInstall}
-              disabled={!installId.trim() || installing}
-              className="rounded-lg px-4 py-2 text-[12px] font-medium transition-all flex items-center gap-1.5"
-              style={{
-                background: installId.trim() ? "#0A84FF" : "#242424",
-                color: "#fff",
-                opacity: installId.trim() ? 1 : 0.5,
-                cursor: installId.trim() ? "pointer" : "not-allowed",
-              }}
-            >
-              {installing ? (
-                <span className="inline-flex gap-1" style={{ padding: "2px 0" }}>
-                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#fff", animation: "typingBounce 1.2s infinite" }} />
-                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#fff", animation: "typingBounce 1.2s infinite", animationDelay: "0.15s" }} />
-                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#fff", animation: "typingBounce 1.2s infinite", animationDelay: "0.3s" }} />
-                </span>
-              ) : (
-                <><Download size={13} /> Install</>
-              )}
-            </button>
-          </div>
+      {filtered.length === 0 ? (
+        <div className="mt-6">
+          <EmptyState
+            icon={<Brain size={24} />}
+            title="No skills found"
+            sub={query ? "Try a different search term." : "Install your first skill above."}
+          />
         </div>
-      </div>
-    </div>
+      ) : (
+        <div className="flex flex-col gap-8 mt-6 fade-in">
+          {bundled.length > 0 && (
+            <Section
+              title="Bundled Skills"
+              subtitle="Core skills included with Hermes Agent"
+              icon={<Sparkles size={15} />}
+              count={bundled.length}
+              skills={bundled}
+              onToggle={toggleInstall}
+            />
+          )}
+
+          {custom.length > 0 && (
+            <Section
+              title="Custom Skills"
+              subtitle="Community and custom installed skills"
+              icon={<Package size={15} />}
+              count={custom.length}
+              skills={custom}
+              onToggle={toggleInstall}
+            />
+          )}
+        </div>
+      )}
+    </Screen>
   );
 }
 
@@ -214,25 +159,30 @@ function Section({
   title,
   subtitle,
   icon,
+  count,
   skills,
   onToggle,
 }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
+  count: number;
   skills: Skill[];
   onToggle: (id: string) => void;
 }) {
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        {icon}
-        <div>
-          <h2 className="text-[13px] font-semibold" style={{ color: "#fff" }}>{title}</h2>
-          <p className="text-[10.5px]" style={{ color: "rgba(255,255,255,0.35)" }}>{subtitle}</p>
+      <div className="flex items-center gap-3 mb-4">
+        <IconChip>{icon}</IconChip>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-[14px] font-semibold text-[var(--text)]">{title}</h2>
+            <Badge variant="accent">{count}</Badge>
+          </div>
+          <p className="text-[12.5px] text-[var(--text-2)]">{subtitle}</p>
         </div>
       </div>
-      <div className="space-y-2">
+      <div className="ui-grid stagger">
         {skills.map(skill => (
           <SkillCard key={skill.id} skill={skill} onToggle={onToggle} />
         ))}
@@ -245,62 +195,46 @@ function Section({
 
 function SkillCard({ skill, onToggle }: { skill: Skill; onToggle: (id: string) => void }) {
   return (
-    <div
-      className="rounded-xl p-4 transition-all duration-200 animate-slide-up flex items-start gap-3"
-      style={{
-        background: "#242424",
-        border: `1px solid ${skill.installed ? "rgba(10,132,255,0.12)" : "rgba(255,255,255,0.05)"}`,
-      }}
-    >
-      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-        style={{ background: skill.installed ? "rgba(10,132,255,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${skill.installed ? "rgba(10,132,255,0.15)" : "rgba(255,255,255,0.06)"}` }}>
-        {skill.isBundled ? <Sparkles size={15} style={{ color: skill.installed ? "#0A84FF" : "rgba(255,255,255,0.3)" }} /> : <Package size={15} style={{ color: skill.installed ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.3)" }} />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
-          <h3 className="text-[13px] font-semibold truncate" style={{ color: "#fff" }}>{skill.name}</h3>
-          <span className="text-[10px] font-mono flex-shrink-0" style={{ color: "rgba(255,255,255,0.3)" }}>v{skill.version}</span>
+    <Card pad interactive active={skill.installed} className="flex flex-col gap-3.5">
+      {/* Head */}
+      <div className="flex items-start gap-3">
+        <IconChip className={cx(!skill.installed && "!bg-[var(--surface-3)] !text-[var(--text-3)] !border-[var(--border)]")}>
+          {skill.isBundled ? <Sparkles size={18} /> : <Package size={18} />}
+        </IconChip>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{skill.name}</h3>
+            <span className="text-[11px] font-mono shrink-0 text-[var(--text-3)]">v{skill.version}</span>
+          </div>
+          <p className="text-[11.5px] text-[var(--text-3)]">{skill.author}</p>
         </div>
-        <p className="text-[11.5px] mb-2 leading-relaxed" style={{ color: "rgba(255,255,255,0.5)" }}>{skill.description}</p>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[9.5px] flex-shrink-0" style={{ color: "rgba(255,255,255,0.3)" }}>{skill.author}</span>
-          {skill.tags.map(tag => (
-            <span key={tag} className="text-[9.5px] px-2 py-0.5 rounded-full font-medium"
-              style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.45)", border: "1px solid rgba(255,255,255,0.06)" }}>
-              {tag}
-            </span>
-          ))}
-        </div>
+        {skill.installed && (
+          <Badge variant="success"><Check size={11} /> Installed</Badge>
+        )}
       </div>
-      <button
-        onClick={() => onToggle(skill.id)}
-        className={`rounded-lg px-3 py-1.5 text-[11px] font-medium flex items-center gap-1.5 flex-shrink-0 transition-all ${skill.installed ? "" : ""}`}
-        style={{
-          background: skill.installed ? "transparent" : "#0A84FF",
-          color: skill.installed ? "rgba(255,255,255,0.4)" : "#fff",
-          border: skill.installed ? "1px solid rgba(255,255,255,0.1)" : "none",
-        }}
-        onMouseEnter={e => {
-          if (skill.installed) {
-            e.currentTarget.style.background = "rgba(239,68,68,0.15)";
-            e.currentTarget.style.color = "#ef4444";
-            e.currentTarget.style.borderColor = "rgba(239,68,68,0.25)";
-          } else {
-            e.currentTarget.style.background = "#0070E0";
-          }
-        }}
-        onMouseLeave={e => {
-          if (skill.installed) {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "rgba(255,255,255,0.4)";
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
-          } else {
-            e.currentTarget.style.background = "#0A84FF";
-          }
-        }}
-      >
-        {skill.installed ? <><Trash2 size={11} /> Remove</> : <><Download size={11} /> Install</>}
-      </button>
-    </div>
+
+      {/* Description */}
+      <p className="text-[12.5px] leading-relaxed text-[var(--text-2)]">{skill.description}</p>
+
+      {/* Tags */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {skill.tags.map(tag => (
+          <Tag key={tag}>{tag}</Tag>
+        ))}
+      </div>
+
+      {/* Action */}
+      <div className="mt-auto pt-3.5 border-t border-[var(--border)]">
+        <Button
+          variant={skill.installed ? "danger" : "primary"}
+          size="sm"
+          className="w-full"
+          onClick={() => onToggle(skill.id)}
+          leftIcon={skill.installed ? <Trash2 size={14} /> : <Download size={14} />}
+        >
+          {skill.installed ? "Remove" : "Install"}
+        </Button>
+      </div>
+    </Card>
   );
 }

@@ -29,6 +29,22 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // Stream a believable simulated reply (used when there is no local backend,
+    // i.e. the demo/shell, or when the server is unreachable/errors).
+    const runSimulated = async (): Promise<void> => {
+      const simText = simulateResponse(text);
+      let content = "";
+      for (const ch of simText) {
+        if (controller.signal.aborted) return;
+        await new Promise(r => setTimeout(r, 11 + Math.random() * 17));
+        content += ch;
+        setMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, content } : m));
+      }
+      const promptTokens = Math.max(8, Math.round(text.length / 4));
+      const completionTokens = Math.round(simText.length / 4);
+      options.onTokenUsage?.({ promptTokens, completionTokens, totalTokens: promptTokens + completionTokens });
+    };
+
     try {
       const apiUrl = "http://127.0.0.1:8642/v1/chat/completions";
       const response = await fetch(apiUrl, {
@@ -79,18 +95,14 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
           }
         }
       } else {
-        // Fallback: simulate response
-        const simText = simulateResponse(text);
-        let content = "";
-        for (const char of simText) {
-          await new Promise(r => setTimeout(r, 15 + Math.random() * 20));
-          content += char;
-          setMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, content } : m));
-        }
+        // Server reachable but returned an error — fall back to a simulated reply.
+        await runSimulated();
       }
     } catch (err: any) {
+      // No local backend (mock shell) or a network error → simulate gracefully
+      // instead of surfacing a raw "Failed to fetch".
       if (err.name !== "AbortError") {
-        setMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, content: `Error: ${err.message}` } : m));
+        await runSimulated();
       }
     } finally {
       setIsStreaming(false);
