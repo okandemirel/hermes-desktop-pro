@@ -38,6 +38,14 @@ const api = {
   listProfiles: (): Promise<string[]> =>
     ipcRenderer.invoke("list-profiles"),
 
+  // Soul (persona / SOUL.md)
+  readSoul: (profile?: string): Promise<string> =>
+    ipcRenderer.invoke("read-soul", profile),
+  writeSoul: (content: string, profile?: string): Promise<boolean> =>
+    ipcRenderer.invoke("write-soul", content, profile),
+  resetSoul: (profile?: string): Promise<string> =>
+    ipcRenderer.invoke("reset-soul", profile),
+
   // Chat streaming
   sendMessage: (
     message: string,

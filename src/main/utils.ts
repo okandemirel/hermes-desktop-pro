@@ -1,6 +1,13 @@
 import { execFileSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
+import { basename, dirname, join } from "path";
 import { getHermesHome } from "./config";
 
 // eslint-disable-next-line no-control-regex
@@ -89,6 +96,34 @@ export function pidIsAliveAs(
   return expectedImagePrefixes.some((prefix) =>
     lower.startsWith(prefix.toLowerCase()),
   );
+}
+
+export function safeWriteFile(filePath: string, content: string): void {
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  const tempPath = join(
+    dir,
+    `.${basename(filePath)}.${process.pid}.${Date.now()}.${Math.random()
+      .toString(16)
+      .slice(2)}.tmp`,
+  );
+
+  let tempWritten = false;
+  try {
+    writeFileSync(tempPath, content, "utf-8");
+    tempWritten = true;
+    renameSync(tempPath, filePath);
+  } catch (err) {
+    if (tempWritten) {
+      try {
+        unlinkSync(tempPath);
+      } catch {
+        // Best-effort cleanup. Preserve the original write/rename error.
+      }
+    }
+    throw err;
+  }
 }
 
 export function getActiveProfileNameSync(): string {

@@ -46,7 +46,14 @@ import {
   testSshConnection,
 } from "./ssh-tunnel";
 
-import { sshReadRemoteApiKey } from "./ssh-remote";
+import {
+  sshReadRemoteApiKey,
+  sshReadSoul,
+  sshWriteSoul,
+  sshResetSoul,
+} from "./ssh-remote";
+
+import { readSoul, writeSoul, resetSoul } from "./soul";
 
 import type { Attachment } from "../shared/attachments";
 
@@ -270,6 +277,29 @@ function registerIpcHandlers(): void {
 
   // Profiles
   ipcMain.handle("list-profiles", () => listProfiles());
+
+  // ── Soul (persona / SOUL.md) ──────────────────────────
+  ipcMain.handle("read-soul", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshReadSoul(conn.ssh, profile);
+    return readSoul(profile);
+  });
+
+  ipcMain.handle(
+    "write-soul",
+    (_event, content: string, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshWriteSoul(conn.ssh, content, profile);
+      return writeSoul(content, profile);
+    },
+  );
+
+  ipcMain.handle("reset-soul", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshResetSoul(conn.ssh, profile);
+    return resetSoul(profile);
+  });
 
   // ── Chat streaming ────────────────────────────────────
   ipcMain.handle(

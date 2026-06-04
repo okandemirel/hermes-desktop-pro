@@ -119,6 +119,20 @@ async function sshReadFile(
   }
 }
 
+async function sshWriteFile(
+  config: SshConfig,
+  remotePath: string,
+  content: string,
+): Promise<void> {
+  const p = normalizeRemotePath(remotePath);
+  const dir = p.includes("/") ? p.substring(0, p.lastIndexOf("/")) : ".";
+  await sshExec(
+    config,
+    `bash -c 'expand(){ case "$1" in "~/"*) printf "%s" "$HOME/\${1#~/}" ;; "\\$HOME/"*) printf "%s" "$HOME/\${1#\\$HOME/}" ;; *) printf "%s" "$1" ;; esac; }; dir=$(expand "$1"); file=$(expand "$2"); mkdir -p -- "$dir" && cat > "$file"' -- ${shellQuote(dir)} ${shellQuote(p)}`,
+    content,
+  );
+}
+
 // ── Env ───────────────────────────────────────────────────────────────────────
 
 function remoteEnvPath(profile?: string): string {
@@ -278,4 +292,47 @@ export function buildRemoteHermesCmd(args: string[], extraShell = ""): string {
     .join("; ");
   const script = `${probe}; command -v hermes >/dev/null && exec hermes ${quotedArgs}${extraShell}; echo "ERR: hermes CLI not found on remote PATH or in any known venv location" >&2; exit 1`;
   return `bash -c ${shellQuote(script)}`;
+}
+
+// ── Soul ─────────────────────────────────────────────────────────────────────
+
+const DEFAULT_SOUL = `You are Hermes, a helpful AI assistant. You are friendly, knowledgeable, and always eager to help.
+
+You communicate clearly and concisely. When asked to perform tasks, you think step-by-step and explain your reasoning. You are honest about your limitations and ask for clarification when needed.
+
+You strive to be helpful while being safe and responsible. You respect the user's privacy and handle sensitive information carefully.
+`;
+
+function remoteSoulPath(profile?: string): string {
+  if (profile && profile !== "default")
+    return `~/.hermes/profiles/${profile}/SOUL.md`;
+  return "~/.hermes/SOUL.md";
+}
+
+export async function sshReadSoul(
+  config: SshConfig,
+  profile?: string,
+): Promise<string> {
+  return await sshReadFile(config, remoteSoulPath(profile));
+}
+
+export async function sshWriteSoul(
+  config: SshConfig,
+  content: string,
+  profile?: string,
+): Promise<boolean> {
+  try {
+    await sshWriteFile(config, remoteSoulPath(profile), content);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function sshResetSoul(
+  config: SshConfig,
+  profile?: string,
+): Promise<string> {
+  await sshWriteSoul(config, DEFAULT_SOUL, profile);
+  return DEFAULT_SOUL;
 }
