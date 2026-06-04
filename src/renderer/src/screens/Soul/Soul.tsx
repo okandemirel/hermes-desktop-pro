@@ -254,8 +254,8 @@ export default function SoulEditor() {
         }
       >
         <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
-          This replaces the editor contents with the default SOUL.md. Your saved file is unchanged
-          until you save.
+          This immediately resets SOUL.md to the default and overwrites your saved persona. This
+          cannot be undone.
         </p>
       </Modal>
     </Screen>
