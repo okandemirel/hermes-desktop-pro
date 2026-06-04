@@ -7,6 +7,7 @@ import type {
   ProfileInfo,
   InstalledSkill,
   SkillSearchResult,
+  CronJob,
 } from "../shared/types";
 
 const api = {
@@ -82,6 +83,48 @@ const api = {
     profile?: string,
   ): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("uninstall-skill", name, profile),
+
+  // Schedules / Cron (cron/jobs.json + hermes cron CLI / gateway API)
+  listCronJobs: (
+    includeDisabled?: boolean,
+    profile?: string,
+  ): Promise<CronJob[]> =>
+    ipcRenderer.invoke("list-cron-jobs", includeDisabled, profile),
+  createCronJob: (
+    schedule: string,
+    prompt?: string,
+    name?: string,
+    deliver?: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke(
+      "create-cron-job",
+      schedule,
+      prompt,
+      name,
+      deliver,
+      profile,
+    ),
+  removeCronJob: (
+    jobId: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("remove-cron-job", jobId, profile),
+  pauseCronJob: (
+    jobId: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("pause-cron-job", jobId, profile),
+  resumeCronJob: (
+    jobId: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("resume-cron-job", jobId, profile),
+  triggerCronJob: (
+    jobId: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("trigger-cron-job", jobId, profile),
 
   // Tools (platform_toolsets.cli)
   getToolsets: (profile?: string): Promise<ToolsetInfo[]> =>

@@ -126,6 +126,15 @@ import {
   type Claw3dSetupProgress,
 } from "./claw3d";
 
+import {
+  listCronJobs,
+  createCronJob,
+  removeCronJob,
+  pauseCronJob,
+  resumeCronJob,
+  triggerCronJob,
+} from "./cronjobs";
+
 import icon from "../../resources/icon.png?asset";
 
 // Type assertion for the preload API
@@ -766,6 +775,40 @@ function registerIpcHandlers(): void {
     return true;
   });
   ipcMain.handle("claw3d-get-logs", () => getClaw3dLogs());
+
+  // ── Schedules / Cron (cron/jobs.json + hermes cron CLI / gateway API) ──
+  // The cronjobs module branches internally between local file/CLI and the
+  // remote gateway over the tunnel — these handlers stay thin (no mode branch).
+  ipcMain.handle(
+    "list-cron-jobs",
+    (_event, includeDisabled?: boolean, profile?: string) =>
+      listCronJobs(includeDisabled, profile),
+  );
+  ipcMain.handle(
+    "create-cron-job",
+    (
+      _event,
+      schedule: string,
+      prompt?: string,
+      name?: string,
+      deliver?: string,
+      profile?: string,
+    ) => createCronJob(schedule, prompt, name, deliver, profile),
+  );
+  ipcMain.handle("remove-cron-job", (_event, jobId: string, profile?: string) =>
+    removeCronJob(jobId, profile),
+  );
+  ipcMain.handle("pause-cron-job", (_event, jobId: string, profile?: string) =>
+    pauseCronJob(jobId, profile),
+  );
+  ipcMain.handle("resume-cron-job", (_event, jobId: string, profile?: string) =>
+    resumeCronJob(jobId, profile),
+  );
+  ipcMain.handle(
+    "trigger-cron-job",
+    (_event, jobId: string, profile?: string) =>
+      triggerCronJob(jobId, profile),
+  );
 
   // External links — open in the user's default browser.
   ipcMain.handle("open-external", (_event, url: string) => {
