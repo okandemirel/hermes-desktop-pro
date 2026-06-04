@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   MessageSquare, Clock, User, Brain, Cpu, HardDrive,
   Heart, Wrench, Calendar, Radio, Layout, Settings, Box, Package,
@@ -69,8 +69,27 @@ export default function App() {
   const [activeTabId, setActiveTabId] = useState(tabs[0].id);
   const [providers] = useState<ProviderInfo[]>(MOCK_PROVIDERS);
   const [collapsed, setCollapsed] = useState(false);
+  const [connStatus, setConnStatus] = useState<{ ok: boolean; mode: string }>({ ok: false, mode: "local" });
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+  // Live connection status for the sidebar footer — poll every 10s.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const r = await window.hermes.testConnection();
+        if (!cancelled && r) setConnStatus({ ok: !!r.ok, mode: r.mode || "local" });
+      } catch {
+        if (!cancelled) setConnStatus(s => ({ ...s, ok: false }));
+      }
+    };
+    check();
+    const id = setInterval(check, 10_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  const connLabel = connStatus.mode.charAt(0).toUpperCase() + connStatus.mode.slice(1);
 
   const handleNewTab = useCallback(() => {
     const tab = createTab(activeTab.providerId);
@@ -164,7 +183,7 @@ export default function App() {
               <BrandMark size={22} glow={false} />
               <div className="min-w-0 flex-1">
                 <div className="text-[12.5px] font-medium text-[var(--text)] truncate leading-tight">Hermes Agent</div>
-                <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-3)] mt-0.5"><StatusDot color="var(--success)" /> Local · Connected</div>
+                <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-3)] mt-0.5"><StatusDot color={connStatus.ok ? "var(--success)" : "var(--error)"} /> {connLabel} · {connStatus.ok ? "Connected" : "Disconnected"}</div>
               </div>
             </div>
           )}

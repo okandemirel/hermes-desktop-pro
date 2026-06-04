@@ -1,0 +1,103 @@
+import { execFileSync } from "child_process";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { getHermesHome } from "./config";
+
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]|\x1B\][^\x07]*\x07|\x1B\(B|\r/g;
+
+export function stripAnsi(str: string): string {
+  return str.replace(ANSI_RE, "");
+}
+
+const PROFILE_NAME_RE = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+
+function isValidNamedProfileName(profile: unknown): profile is string {
+  return typeof profile === "string" && PROFILE_NAME_RE.test(profile);
+}
+
+export function normalizeProfileName(profile?: unknown): string | undefined {
+  if (profile === undefined || profile === "" || profile === "default") {
+    return undefined;
+  }
+
+  if (!isValidNamedProfileName(profile)) {
+    throw new Error(
+      "Profile names may contain lowercase letters, numbers, underscores, and hyphens, and cannot start with a hyphen.",
+    );
+  }
+
+  return profile;
+}
+
+export function profileHome(profile?: unknown): string {
+  const normalized = normalizeProfileName(profile);
+  return normalized
+    ? join(getHermesHome(), "profiles", normalized)
+    : getHermesHome();
+}
+
+export function profilePaths(profile?: unknown): {
+  envFile: string;
+  configFile: string;
+  home: string;
+} {
+  const home = profileHome(profile);
+  return {
+    home,
+    envFile: join(home, ".env"),
+    configFile: join(home, "config.yaml"),
+  };
+}
+
+function pidIsAlive(pid: number): boolean {
+  if (!pid || !Number.isFinite(pid)) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code !== "ESRCH";
+  }
+}
+
+function getProcessImageNameWin(pid: number): string | null {
+  if (process.platform !== "win32") return null;
+  if (!pid || !Number.isFinite(pid)) return null;
+  try {
+    const output = execFileSync(
+      "tasklist",
+      ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"],
+      { encoding: "utf-8", timeout: 5000, windowsHide: true },
+    );
+    const m = output.match(/^"([^"]+)"/);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+export function pidIsAliveAs(
+  pid: number,
+  expectedImagePrefixes: string[],
+): boolean {
+  if (!pidIsAlive(pid)) return false;
+  if (process.platform !== "win32") return true;
+  const image = getProcessImageNameWin(pid);
+  if (!image) return true;
+  const lower = image.toLowerCase();
+  return expectedImagePrefixes.some((prefix) =>
+    lower.startsWith(prefix.toLowerCase()),
+  );
+}
+
+export function getActiveProfileNameSync(): string {
+  try {
+    const activeFile = join(getHermesHome(), "active_profile");
+    if (!existsSync(activeFile)) return "default";
+    const name = readFileSync(activeFile, "utf-8").trim();
+    return name || "default";
+  } catch {
+    return "default";
+  }
+}

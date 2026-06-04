@@ -41,21 +41,16 @@ const api = {
   // Chat streaming
   sendMessage: (
     message: string,
-    options?: {
+    options: {
       profile?: string;
       resumeSessionId?: string;
       history?: Array<{ role: string; content: string }>;
       attachments?: Attachment[];
-      model?: string;
-      provider?: string;
-      baseUrl?: string;
-    },
-  ): { abort: () => void } => {
-    const channel = new MessageChannel();
-    ipcRenderer.postMessage("chat-stream", options || {}, [channel.port2]);
-    // Actual SSE streaming will be handled via HTTP in main process
-    return { abort: () => ipcRenderer.send("chat-abort") };
-  },
+      contextFolder?: string;
+    } = {},
+  ): Promise<{ response: string; sessionId?: string }> =>
+    ipcRenderer.invoke("send-message", message, options),
+  abortChat: (): void => ipcRenderer.send("chat-abort"),
 
   // Session history
   listSessions: (
@@ -186,6 +181,33 @@ const api = {
   // External links
   openExternal: (url: string): Promise<void> =>
     ipcRenderer.invoke("open-external", url),
+
+  // Connection (local / remote / ssh)
+  getConnectionConfig: () => ipcRenderer.invoke("get-connection-config"),
+  setConnectionConfig: (input: {
+    mode: "local" | "remote" | "ssh";
+    remoteUrl?: string;
+    apiKey?: string;
+    ssh?: {
+      host: string;
+      port: number;
+      username: string;
+      keyPath: string;
+      remotePort: number;
+      localPort: number;
+    };
+  }) => ipcRenderer.invoke("set-connection-config", input),
+  testConnection: () => ipcRenderer.invoke("test-connection"),
+
+  // Gateway
+  gatewayStatus: () => ipcRenderer.invoke("gateway-status"),
+  gatewayStart: () => ipcRenderer.invoke("gateway-start"),
+  gatewayStop: () => ipcRenderer.invoke("gateway-stop"),
+
+  // SSH tunnel
+  sshTunnelActive: () => ipcRenderer.invoke("ssh-tunnel-active"),
+  startSshTunnel: () => ipcRenderer.invoke("start-ssh-tunnel"),
+  stopSshTunnel: () => ipcRenderer.invoke("stop-ssh-tunnel"),
 };
 
 contextBridge.exposeInMainWorld("hermes", api);

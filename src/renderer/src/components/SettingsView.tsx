@@ -1,13 +1,37 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Settings, Shield, Download, Upload, Moon, Sun, Laptop, Database, Terminal as TerminalIcon,
   Copy, Check, SlidersHorizontal, Globe, KeyRound, Palette,
 } from "lucide-react";
 import {
-  Screen, Card, Button, Input, Badge, Toggle, Segment, SegmentItem, IconButton, Field, Eyebrow, cx,
+  Screen, Card, Button, Input, Badge, Toggle, Segment, SegmentItem, IconButton, Field, Eyebrow, StatusDot, cx,
 } from "../ui";
 
-type ConnMode = "local" | "remote";
+type ConnMode = "local" | "remote" | "ssh";
+
+interface SshState {
+  host: string;
+  port: string;
+  username: string;
+  keyPath: string;
+  remotePort: string;
+  localPort: string;
+}
+
+interface TestResult {
+  ok: boolean;
+  mode: ConnMode;
+  latencyMs: number;
+  error?: string;
+}
+
+interface PublicConnConfig {
+  mode: ConnMode;
+  remoteUrl: string;
+  hasApiKey: boolean;
+  apiKeyLength: number;
+  ssh: { host: string; port: number; username: string; keyPath: string; remotePort: number; localPort: number };
+}
 type LogTab = "gateway" | "agent" | "error";
 type SectionId = "general" | "network" | "providers" | "appearance" | "backup" | "diagnostics";
 
@@ -87,8 +111,74 @@ export default function SettingsView() {
   const [localPort, setLocalPort] = useState("8642");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [ssh, setSsh] = useState<SshState>({ host: "", port: "22", username: "", keyPath: "~/.ssh/id_rsa", remotePort: "8642", localPort: "18642" });
   const [logTab, setLogTab] = useState<LogTab>("gateway");
   const [copied, setCopied] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  // Seed local state from the real connection config on mount. The API key is
+  // never returned — we only surface whether one is set via `hasApiKey`.
+  useEffect(() => {
+    let cancelled = false;
+    window.hermes.getConnectionConfig().then((cfg: PublicConnConfig) => {
+      if (cancelled || !cfg) return;
+      setMode(cfg.mode || "local");
+      setRemoteUrl(cfg.remoteUrl || "");
+      setHasApiKey(!!cfg.hasApiKey);
+      if (cfg.ssh) {
+        setSsh({
+          host: cfg.ssh.host || "",
+          port: String(cfg.ssh.port ?? 22),
+          username: cfg.ssh.username || "",
+          keyPath: cfg.ssh.keyPath || "~/.ssh/id_rsa",
+          remotePort: String(cfg.ssh.remotePort ?? 8642),
+          localPort: String(cfg.ssh.localPort ?? 18642),
+        });
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist to the backend. Blank apiKey is omitted so a saved key is never
+  // clobbered (the main process treats "" as "unchanged" too).
+  const persist = useCallback((next: { mode?: ConnMode; remoteUrl?: string; apiKey?: string; ssh?: SshState }) => {
+    const m = next.mode ?? mode;
+    const s = next.ssh ?? ssh;
+    const key = next.apiKey ?? apiKey;
+    window.hermes.setConnectionConfig({
+      mode: m,
+      remoteUrl: next.remoteUrl ?? remoteUrl,
+      ...(key ? { apiKey: key } : {}),
+      ssh: {
+        host: s.host,
+        port: Number(s.port) || 22,
+        username: s.username,
+        keyPath: s.keyPath,
+        remotePort: Number(s.remotePort) || 8642,
+        localPort: Number(s.localPort) || 18642,
+      },
+    });
+  }, [mode, remoteUrl, apiKey, ssh]);
+
+  const changeMode = (m: ConnMode) => { setMode(m); persist({ mode: m }); };
+  const updateSsh = (patch: Partial<SshState>) => {
+    setSsh(prev => { const s = { ...prev, ...patch }; persist({ ssh: s }); return s; });
+  };
+
+  const runTest = useCallback(async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const r = await window.hermes.testConnection();
+      setTestResult(r as TestResult);
+    } catch (err: any) {
+      setTestResult({ ok: false, mode, latencyMs: 0, error: err?.message ? String(err.message) : "Test failed" });
+    } finally {
+      setTesting(false);
+    }
+  }, [mode]);
 
   const copy = (t: string) => {
     navigator.clipboard.writeText(t).catch(() => {});
@@ -122,12 +212,13 @@ export default function SettingsView() {
                   <div className="min-w-0">
                     <div className="text-[14px] font-semibold text-[var(--text)]">Connection Mode</div>
                     <div className="text-[12.5px] text-[var(--text-2)] mt-0.5">
-                      {mode === "local" ? `Run Hermes on 127.0.0.1:${localPort}` : "Connect to a remote Hermes server"}
+                      {mode === "local" ? `Run Hermes on 127.0.0.1:${localPort}` : mode === "ssh" ? "Tunnel to a remote Hermes server over SSH" : "Connect to a remote Hermes server"}
                     </div>
                   </div>
                   <Segment>
-                    <SegmentItem active={mode === "local"} onClick={() => setMode("local")}>Local</SegmentItem>
-                    <SegmentItem active={mode === "remote"} onClick={() => setMode("remote")}>Remote</SegmentItem>
+                    <SegmentItem active={mode === "local"} onClick={() => changeMode("local")}>Local</SegmentItem>
+                    <SegmentItem active={mode === "remote"} onClick={() => changeMode("remote")}>Remote</SegmentItem>
+                    <SegmentItem active={mode === "ssh"} onClick={() => changeMode("ssh")}>SSH</SegmentItem>
                   </Segment>
                 </div>
               </div>
@@ -141,19 +232,63 @@ export default function SettingsView() {
           )}
 
           {section === "network" && (
-            <Card pad>
-              <div className="flex flex-col gap-4">
-                <Field label="Local Port">
-                  <Input value={localPort} onChange={e => setLocalPort(e.target.value)} className="font-mono" />
-                </Field>
-                <Field label="Remote URL" hint="Used when running in remote mode">
-                  <Input value={remoteUrl} onChange={e => setRemoteUrl(e.target.value)} placeholder="https://hermes.example.com" />
-                </Field>
-                <Field label="API Key" hint="Required for remote mode authentication">
-                  <Input value={apiKey} onChange={e => setApiKey(e.target.value)} type="password" placeholder="••••••••" />
-                </Field>
-              </div>
-            </Card>
+            <>
+              <Card pad>
+                <div className="flex flex-col gap-4">
+                  <Field label="Local Port">
+                    <Input value={localPort} onChange={e => setLocalPort(e.target.value)} className="font-mono" />
+                  </Field>
+                  <Field label="Remote URL" hint="Used when running in remote mode">
+                    <Input value={remoteUrl} onChange={e => setRemoteUrl(e.target.value)} onBlur={() => persist({ remoteUrl })} placeholder="https://hermes.example.com" />
+                  </Field>
+                  <Field label="API Key" hint={hasApiKey ? <span className="flex items-center gap-1.5"><Badge variant="success">Key set</Badge> Leave blank to keep the saved key</span> : "Required for remote mode authentication"}>
+                    <Input value={apiKey} onChange={e => setApiKey(e.target.value)} onBlur={() => { if (apiKey) { persist({ apiKey }); setHasApiKey(true); } }} type="password" placeholder={hasApiKey ? "••••••••" : "Enter API key"} />
+                  </Field>
+
+                  {mode === "ssh" && (
+                    <div className="flex flex-col gap-4 pt-1 mt-1 border-t border-[var(--border)]">
+                      <Field label="Host">
+                        <Input value={ssh.host} onChange={e => setSsh(p => ({ ...p, host: e.target.value }))} onBlur={() => updateSsh({})} placeholder="server.example.com" />
+                      </Field>
+                      <Field label="Port">
+                        <Input value={ssh.port} onChange={e => setSsh(p => ({ ...p, port: e.target.value }))} onBlur={() => updateSsh({})} className="font-mono" placeholder="22" />
+                      </Field>
+                      <Field label="Username">
+                        <Input value={ssh.username} onChange={e => setSsh(p => ({ ...p, username: e.target.value }))} onBlur={() => updateSsh({})} placeholder="ubuntu" />
+                      </Field>
+                      <Field label="Key Path">
+                        <Input value={ssh.keyPath} onChange={e => setSsh(p => ({ ...p, keyPath: e.target.value }))} onBlur={() => updateSsh({})} className="font-mono" placeholder="~/.ssh/id_rsa" />
+                      </Field>
+                      <Field label="Remote Port" hint="Hermes port on the remote host">
+                        <Input value={ssh.remotePort} onChange={e => setSsh(p => ({ ...p, remotePort: e.target.value }))} onBlur={() => updateSsh({})} className="font-mono" placeholder="8642" />
+                      </Field>
+                      <Field label="Local Port" hint="Local forwarded port for the tunnel">
+                        <Input value={ssh.localPort} onChange={e => setSsh(p => ({ ...p, localPort: e.target.value }))} onBlur={() => updateSsh({})} className="font-mono" placeholder="18642" />
+                      </Field>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Card>
+                <Row
+                  title="Test Connection"
+                  desc="Verify the current connection settings reach Hermes"
+                  control={
+                    <div className="flex items-center gap-2.5">
+                      {testResult && (
+                        <span className="flex items-center gap-1.5 text-[12.5px] text-[var(--text-2)]">
+                          <StatusDot color={testResult.ok ? "var(--success)" : "var(--error)"} />
+                          {testResult.ok ? `${testResult.mode} · ${testResult.latencyMs}ms` : (testResult.error || "Unreachable")}
+                        </span>
+                      )}
+                      <Button variant="primary" size="sm" onClick={runTest} disabled={testing}>{testing ? "Testing…" : "Test connection"}</Button>
+                    </div>
+                  }
+                  last
+                />
+              </Card>
+            </>
           )}
 
           {section === "providers" && (

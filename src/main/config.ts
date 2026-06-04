@@ -1,14 +1,10 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { join, dirname } from "path";
-import { homedir } from "os";
 import * as YAML from "yaml";
-
-function hermesHome(): string {
-  return process.env.HERMES_HOME || join(homedir(), ".hermes");
-}
+import { HERMES_HOME } from "./installer";
 
 function configPath(profile?: string): string {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   if (profile && profile !== "default") {
     return join(home, "profiles", profile, "config.yaml");
   }
@@ -48,7 +44,7 @@ export function saveConfigYaml(
 }
 
 export function getHermesHome(): string {
-  return hermesHome();
+  return HERMES_HOME;
 }
 
 export function getModelConfig(
@@ -77,7 +73,7 @@ export function getEnvValue(
   key: string,
   profile?: string,
 ): string | undefined {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   const envPath =
     profile && profile !== "default"
       ? join(home, "profiles", profile, ".env")
@@ -105,7 +101,7 @@ export function setEnvValue(
   value: string,
   profile?: string,
 ): void {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   const envPath =
     profile && profile !== "default"
       ? join(home, "profiles", profile, ".env")
@@ -134,12 +130,11 @@ export function setEnvValue(
 }
 
 export function listProfiles(): string[] {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   const profilesDir = join(home, "profiles");
   const profiles = ["default"];
   try {
     if (existsSync(profilesDir)) {
-      const { readdirSync } = require("fs");
       for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
           profiles.push(entry.name);
@@ -151,7 +146,7 @@ export function listProfiles(): string[] {
 }
 
 export function getActiveProfileName(): string {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   const profileFile = join(home, "active_profile");
   try {
     if (existsSync(profileFile)) {
@@ -159,4 +154,175 @@ export function getActiveProfileName(): string {
     }
   } catch {}
   return "default";
+}
+
+// ── Connection Config (local / remote / ssh) ──────────────
+
+export interface SshConnectionConfig {
+  host: string;
+  port: number;
+  username: string;
+  keyPath: string;
+  remotePort: number;
+  localPort: number;
+}
+
+export interface ConnectionConfig {
+  mode: "local" | "remote" | "ssh";
+  remoteUrl: string;
+  apiKey: string;
+  ssh: SshConnectionConfig;
+}
+
+export interface PublicConnectionConfig {
+  mode: "local" | "remote" | "ssh";
+  remoteUrl: string;
+  hasApiKey: boolean;
+  apiKeyLength: number;
+  ssh: SshConnectionConfig;
+}
+
+/** Walk a dotted path through a parsed YAML object; return trimmed string or undefined. */
+function yamlGet(
+  obj: Record<string, unknown>,
+  dottedKey: string,
+): string | undefined {
+  const parts = dottedKey.split(".");
+  let cur: unknown = obj;
+  for (const part of parts) {
+    if (typeof cur !== "object" || cur === null) return undefined;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return typeof cur === "string" && cur.trim() ? cur.trim() : undefined;
+}
+
+function desktopConfigFile(): string {
+  return join(getHermesHome(), "desktop.json");
+}
+
+export function readDesktopConfig(): Record<string, unknown> {
+  try {
+    const f = desktopConfigFile();
+    if (!existsSync(f)) return {};
+    return JSON.parse(readFileSync(f, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+export function writeDesktopConfig(data: Record<string, unknown>): void {
+  const home = getHermesHome();
+  if (!existsSync(home)) mkdirSync(home, { recursive: true });
+  writeFileSync(desktopConfigFile(), JSON.stringify(data, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+}
+
+export function getConnectionConfig(): ConnectionConfig {
+  const d = readDesktopConfig();
+  const ssh = (d.sshConfig as Record<string, unknown>) || {};
+  return {
+    mode: (d.connectionMode as ConnectionConfig["mode"]) || "local",
+    remoteUrl: (d.remoteUrl as string) || "",
+    apiKey: (d.remoteApiKey as string) || "",
+    ssh: {
+      host: (ssh.host as string) || "",
+      port: (ssh.port as number) || 22,
+      username: (ssh.username as string) || "",
+      keyPath: (ssh.keyPath as string) || "",
+      remotePort: (ssh.remotePort as number) || 8642,
+      localPort: (ssh.localPort as number) || 18642,
+    },
+  };
+}
+
+export function getPublicConnectionConfig(): PublicConnectionConfig {
+  const c = getConnectionConfig();
+  return {
+    mode: c.mode,
+    remoteUrl: c.remoteUrl,
+    hasApiKey: !!c.apiKey,
+    apiKeyLength: c.apiKey.length,
+    ssh: c.ssh,
+  };
+}
+
+export function setConnectionConfig(input: {
+  mode: ConnectionConfig["mode"];
+  remoteUrl?: string;
+  apiKey?: string;
+  ssh?: SshConnectionConfig;
+}): void {
+  const d = readDesktopConfig();
+  d.connectionMode = input.mode;
+  if (input.remoteUrl !== undefined) d.remoteUrl = input.remoteUrl;
+  // empty/undefined apiKey is treated as "unchanged" — never clobber a saved key with a blank
+  if (input.apiKey !== undefined && input.apiKey !== "")
+    d.remoteApiKey = input.apiKey;
+  // ssh config only persisted in ssh mode (intentional)
+  if (input.mode === "ssh" && input.ssh) d.sshConfig = input.ssh;
+  writeDesktopConfig(d);
+}
+
+// ── API Server Key resolution ─────────────────────────────
+
+/**
+ * Resolve the API server's shared secret from 6 sources in precedence order:
+ *
+ *   1. Profile config.yaml top-level `API_SERVER_KEY` (legacy override)
+ *   2. Default config.yaml top-level `API_SERVER_KEY` (legacy override)
+ *   3. Profile .env `API_SERVER_KEY`
+ *   4. Default .env `API_SERVER_KEY`
+ *   5. Profile config.yaml `api_server.token` (canonical hermes-agent location)
+ *   6. Default config.yaml `api_server.token`
+ *
+ * Returns "" when none of the six locations are configured.
+ */
+/**
+ * Read a single dotted-path config value from the profile's config.yaml.
+ * Returns the trimmed string value or null if not found / not a string.
+ */
+export function getConfigValue(key: string, profile?: string): string | null {
+  const config = loadConfigYaml(profile);
+  const value = yamlGet(config, key);
+  return value != null ? value : null;
+}
+
+/**
+ * Write a single dotted-path config value to the profile's config.yaml.
+ * Delegates to saveConfigYaml which handles nested path creation.
+ */
+export function setConfigValue(
+  key: string,
+  value: string,
+  profile?: string,
+): void {
+  saveConfigYaml(key, value, profile);
+}
+
+export function getApiServerKey(profile?: string): string {
+  const isNamed = Boolean(profile && profile !== "default");
+  const profileConfig = loadConfigYaml(profile);
+  const defaultConfig = isNamed ? loadConfigYaml() : null;
+
+  const candidates: Array<string | undefined> = [
+    // 1. Profile config.yaml top-level API_SERVER_KEY
+    yamlGet(profileConfig, "API_SERVER_KEY"),
+    // 2. Default config.yaml top-level API_SERVER_KEY
+    isNamed && defaultConfig ? yamlGet(defaultConfig, "API_SERVER_KEY") : undefined,
+    // 3. Profile .env API_SERVER_KEY
+    getEnvValue("API_SERVER_KEY", profile),
+    // 4. Default .env API_SERVER_KEY
+    isNamed ? getEnvValue("API_SERVER_KEY") : undefined,
+    // 5. Profile config.yaml api_server.token
+    yamlGet(profileConfig, "api_server.token"),
+    // 6. Default config.yaml api_server.token
+    isNamed && defaultConfig ? yamlGet(defaultConfig, "api_server.token") : undefined,
+  ];
+
+  for (const v of candidates) {
+    if (v && v.trim()) return v.trim();
+  }
+  return "";
 }
