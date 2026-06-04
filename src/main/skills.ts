@@ -16,6 +16,7 @@ import {
   getEnhancedPath,
 } from "./installer";
 import { isValidNamedProfileName, profileHome } from "./utils";
+import { END_OF_OPTIONS, isValidSkillIdentifier } from "./cli-safety";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import type { InstalledSkill, SkillSearchResult } from "@shared/types";
 
@@ -330,8 +331,19 @@ export function installSkill(
   identifier: string,
   profile?: string,
 ): SkillCliResult {
+  if (!isValidSkillIdentifier(identifier)) {
+    return { success: false, error: "Invalid skill identifier." };
+  }
   try {
-    const args = hermesCliArgs(["skills", "install", identifier, "--yes"]);
+    // `--` separates options from the user-controlled identifier so it can
+    // never be parsed as a flag (flag-smuggling defense).
+    const args = hermesCliArgs([
+      "skills",
+      "install",
+      "--yes",
+      END_OF_OPTIONS,
+      identifier,
+    ]);
     if (profile && profile !== "default") {
       args.splice(process.platform === "win32" ? 2 : 1, 0, "-p", profile);
     }
@@ -363,8 +375,11 @@ export function installSkill(
 }
 
 export function uninstallSkill(name: string, profile?: string): SkillCliResult {
+  if (!isValidSkillIdentifier(name)) {
+    return { success: false, error: "Invalid skill identifier." };
+  }
   try {
-    const args = hermesCliArgs(["skills", "uninstall", name]);
+    const args = hermesCliArgs(["skills", "uninstall", END_OF_OPTIONS, name]);
     if (profile && profile !== "default") {
       args.splice(process.platform === "win32" ? 2 : 1, 0, "-p", profile);
     }

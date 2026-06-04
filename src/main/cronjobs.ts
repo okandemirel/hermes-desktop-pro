@@ -4,6 +4,7 @@ import { join } from "path";
 import { execFile } from "child_process";
 import { HERMES_HOME, HERMES_PYTHON, hermesCliArgs } from "./installer";
 import { profileHome } from "./utils";
+import { END_OF_OPTIONS, isSafePositional, isValidIdSlug } from "./cli-safety";
 import {
   isRemoteMode,
   getApiUrl,
@@ -233,10 +234,19 @@ export async function createCronJob(
     }
   }
 
-  const args = ["create", schedule];
-  if (prompt) args.push(prompt);
+  // `schedule` and `prompt` are user-controlled positionals. Reject a leading
+  // `-` so neither can be smuggled as a flag, and pass them after `--`.
+  if (!isSafePositional(schedule)) {
+    return { success: false, error: "Schedule must not start with '-'" };
+  }
+  if (prompt && !isSafePositional(prompt)) {
+    return { success: false, error: "Prompt must not start with '-'" };
+  }
+  const args = ["create"];
   if (name) args.push("--name", name);
   if (deliver) args.push("--deliver", deliver);
+  args.push(END_OF_OPTIONS, schedule);
+  if (prompt) args.push(prompt);
 
   const result = await runCronCommand(args, profile);
   return { success: result.success, error: result.error };
@@ -260,7 +270,8 @@ export async function removeCronJob(
       return { success: false, error: (err as Error).message };
     }
   }
-  const result = await runCronCommand(["remove", jobId], profile);
+  if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+  const result = await runCronCommand(["remove", END_OF_OPTIONS, jobId], profile);
   return { success: result.success, error: result.error };
 }
 
@@ -288,7 +299,8 @@ export async function pauseCronJob(
 ): Promise<{ success: boolean; error?: string }> {
   if (!jobId) return { success: false, error: "Missing job ID" };
   if (isRemoteMode()) return remoteJobAction(jobId, "pause");
-  const result = await runCronCommand(["pause", jobId], profile);
+  if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+  const result = await runCronCommand(["pause", END_OF_OPTIONS, jobId], profile);
   return { success: result.success, error: result.error };
 }
 
@@ -298,7 +310,8 @@ export async function resumeCronJob(
 ): Promise<{ success: boolean; error?: string }> {
   if (!jobId) return { success: false, error: "Missing job ID" };
   if (isRemoteMode()) return remoteJobAction(jobId, "resume");
-  const result = await runCronCommand(["resume", jobId], profile);
+  if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+  const result = await runCronCommand(["resume", END_OF_OPTIONS, jobId], profile);
   return { success: result.success, error: result.error };
 }
 
@@ -308,6 +321,7 @@ export async function triggerCronJob(
 ): Promise<{ success: boolean; error?: string }> {
   if (!jobId) return { success: false, error: "Missing job ID" };
   if (isRemoteMode()) return remoteJobAction(jobId, "run");
-  const result = await runCronCommand(["run", jobId], profile);
+  if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+  const result = await runCronCommand(["run", END_OF_OPTIONS, jobId], profile);
   return { success: result.success, error: result.error };
 }

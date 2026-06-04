@@ -205,9 +205,12 @@ export function createProfile(
   }
 
   try {
+    // `--` end-of-options separator before the user-controlled name so the
+    // CLI never parses it as a flag (defense in depth; isValidNamedProfileName
+    // already rejects a leading `-`).
     const args = clone
-      ? ["profile", "create", name, "--clone"]
-      : ["profile", "create", name];
+      ? ["profile", "create", "--clone", "--", name]
+      : ["profile", "create", "--", name];
     execFileSync(HERMES_PYTHON, hermesCliArgs(args), {
       cwd: join(HERMES_HOME, "hermes-agent"),
       env: {
@@ -239,7 +242,7 @@ export function deleteProfile(name: string): {
   try {
     execFileSync(
       HERMES_PYTHON,
-      hermesCliArgs(["profile", "delete", name, "--yes"]),
+      hermesCliArgs(["profile", "delete", "--yes", "--", name]),
       {
         cwd: join(HERMES_HOME, "hermes-agent"),
         env: {
@@ -265,7 +268,7 @@ export function setActiveProfile(name: string): void {
   }
 
   try {
-    execFileSync(HERMES_PYTHON, hermesCliArgs(["profile", "use", name]), {
+    execFileSync(HERMES_PYTHON, hermesCliArgs(["profile", "use", "--", name]), {
       cwd: join(HERMES_HOME, "hermes-agent"),
       env: {
         ...process.env,

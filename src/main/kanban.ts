@@ -22,6 +22,7 @@ import {
 import { isRemoteOnlyMode } from "./hermes";
 import { getConnectionConfig } from "./config";
 import { sshRunKanban, sshListClaw3dHqTasks } from "./ssh-remote";
+import { END_OF_OPTIONS, isSafePositional, isValidIdSlug } from "./cli-safety";
 import type {
   KanbanTask,
   KanbanBoard,
@@ -131,7 +132,10 @@ export async function switchBoard(
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
   if (!slug) return { success: false, error: "Missing board slug" };
-  const res = await runKanban(["boards", "switch", slug], { profile });
+  if (!isValidIdSlug(slug)) return { success: false, error: "Invalid board slug" };
+  const res = await runKanban(["boards", "switch", END_OF_OPTIONS, slug], {
+    profile,
+  });
   return { success: res.success, error: res.error };
 }
 
@@ -143,9 +147,12 @@ export async function createBoard(
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
   if (!slug) return { success: false, error: "Missing board slug" };
-  const args = ["boards", "create", slug];
+  if (!isValidIdSlug(slug)) return { success: false, error: "Invalid board slug" };
+  const args = ["boards", "create"];
   if (name) args.push("--name", name);
   if (switchAfter) args.push("--switch");
+  // user-controlled slug last, after the end-of-options separator
+  args.push(END_OF_OPTIONS, slug);
   const res = await runKanban(args, { profile });
   return { success: res.success, error: res.error };
 }
@@ -176,7 +183,8 @@ export async function getTask(
 ): Promise<KanbanResult<KanbanTaskDetail>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
   if (!taskId) return { success: false, error: "Missing task ID" };
-  const res = await runKanban(["show", taskId, "--json"], {
+  if (!isValidIdSlug(taskId)) return { success: false, error: "Invalid task ID" };
+  const res = await runKanban(["show", "--json", END_OF_OPTIONS, taskId], {
     profile,
     parseJson: true,
   });
@@ -204,7 +212,12 @@ export async function createTask(
   if (!input.title?.trim()) {
     return { success: false, error: "Title is required" };
   }
-  const args = ["create", input.title];
+  // The title is a user-controlled positional. Reject a leading `-` so it
+  // cannot be smuggled as a flag (it also goes after `--` below).
+  if (!isSafePositional(input.title)) {
+    return { success: false, error: "Title must not start with '-'" };
+  }
+  const args = ["create"];
   if (input.body) args.push("--body", input.body);
   if (input.assignee) args.push("--assignee", input.assignee);
   if (input.priority !== undefined)
@@ -218,6 +231,8 @@ export async function createTask(
     args.push("--skill", skill);
   }
   args.push("--json");
+  // user-controlled title last, after the end-of-options separator
+  args.push(END_OF_OPTIONS, input.title);
 
   const res = await runKanban(args, { profile, parseJson: true });
   if (!res.success) return { success: false, error: res.error };
@@ -231,9 +246,15 @@ export async function assignTask(
   profile?: string,
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
-  const res = await runKanban(["assign", taskId, assignee || "none"], {
-    profile,
-  });
+  if (!isValidIdSlug(taskId)) return { success: false, error: "Invalid task ID" };
+  const assigneeArg = assignee || "none";
+  if (!isSafePositional(assigneeArg)) {
+    return { success: false, error: "Invalid assignee" };
+  }
+  const res = await runKanban(
+    ["assign", END_OF_OPTIONS, taskId, assigneeArg],
+    { profile },
+  );
   return { success: res.success, error: res.error };
 }
 
@@ -243,8 +264,10 @@ export async function completeTask(
   profile?: string,
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
-  const args = ["complete", taskId];
+  if (!isValidIdSlug(taskId)) return { success: false, error: "Invalid task ID" };
+  const args = ["complete"];
   if (result) args.push("--result", result);
+  args.push(END_OF_OPTIONS, taskId);
   const res = await runKanban(args, { profile });
   return { success: res.success, error: res.error };
 }
@@ -255,7 +278,11 @@ export async function blockTask(
   profile?: string,
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
-  const args = ["block", taskId];
+  if (!isValidIdSlug(taskId)) return { success: false, error: "Invalid task ID" };
+  if (reason !== undefined && reason !== "" && !isSafePositional(reason)) {
+    return { success: false, error: "Reason must not start with '-'" };
+  }
+  const args = ["block", END_OF_OPTIONS, taskId];
   if (reason) args.push(reason);
   const res = await runKanban(args, { profile });
   return { success: res.success, error: res.error };
@@ -266,7 +293,8 @@ export async function unblockTask(
   profile?: string,
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
-  const res = await runKanban(["unblock", taskId], { profile });
+  if (!isValidIdSlug(taskId)) return { success: false, error: "Invalid task ID" };
+  const res = await runKanban(["unblock", END_OF_OPTIONS, taskId], { profile });
   return { success: res.success, error: res.error };
 }
 
@@ -275,7 +303,8 @@ export async function archiveTask(
   profile?: string,
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
-  const res = await runKanban(["archive", taskId], { profile });
+  if (!isValidIdSlug(taskId)) return { success: false, error: "Invalid task ID" };
+  const res = await runKanban(["archive", END_OF_OPTIONS, taskId], { profile });
   return { success: res.success, error: res.error };
 }
 
@@ -286,7 +315,13 @@ export async function commentTask(
 ): Promise<KanbanResult<void>> {
   if (isRemoteOnlyMode()) return unsupportedInRemote();
   if (!body.trim()) return { success: false, error: "Empty comment" };
-  const res = await runKanban(["comment", taskId, body], { profile });
+  if (!isValidIdSlug(taskId)) return { success: false, error: "Invalid task ID" };
+  if (!isSafePositional(body)) {
+    return { success: false, error: "Comment must not start with '-'" };
+  }
+  const res = await runKanban(["comment", END_OF_OPTIONS, taskId, body], {
+    profile,
+  });
   return { success: res.success, error: res.error };
 }
 

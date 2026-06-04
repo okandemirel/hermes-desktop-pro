@@ -10,6 +10,12 @@ import { homedir } from "os";
 import { join } from "path";
 import type { SshConfig } from "./ssh-tunnel";
 import { buildSshControlOptions, assertSafeSshConfig } from "./ssh-options";
+import { isValidNamedProfileName } from "./utils";
+import {
+  END_OF_OPTIONS,
+  isValidIdSlug,
+  isValidSkillIdentifier,
+} from "./cli-safety";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { t } from "../shared/i18n";
 import { getAppLocale } from "./locale";
@@ -612,10 +618,16 @@ export async function sshInstallSkill(
   config: SshConfig,
   identifier: string,
 ): Promise<{ success: boolean; error?: string }> {
+  if (!isValidSkillIdentifier(identifier)) {
+    return { success: false, error: "Invalid skill identifier." };
+  }
   try {
+    // `--` separates options from the user-controlled identifier so a leading
+    // `-` can't be parsed as a flag by the remote CLI. shellQuote still guards
+    // the shell layer.
     const stdout = await sshExec(
       config,
-      `hermes skills install ${shellQuote(identifier)} --yes 2>&1`,
+      `hermes skills install --yes ${END_OF_OPTIONS} ${shellQuote(identifier)} 2>&1`,
       undefined,
       120000,
     );
@@ -629,10 +641,13 @@ export async function sshUninstallSkill(
   config: SshConfig,
   name: string,
 ): Promise<{ success: boolean; error?: string }> {
+  if (!isValidSkillIdentifier(name)) {
+    return { success: false, error: "Invalid skill identifier." };
+  }
   try {
     const stdout = await sshExec(
       config,
-      `hermes skills uninstall ${shellQuote(name)} 2>&1`,
+      `hermes skills uninstall ${END_OF_OPTIONS} ${shellQuote(name)} 2>&1`,
     );
     return classifySkillCliOutput(stdout ?? "");
   } catch (err) {
@@ -1319,14 +1334,16 @@ export async function sshCreateProfile(
   clone: boolean,
 ): Promise<boolean> {
   try {
-    const safe = name.replace(/[^a-zA-Z0-9_-]/g, "");
-    if (!safe) return false;
+    // Strict validation rejects a leading `-` (flag smuggling) and constrains
+    // length/charset, replacing the old lossy `.replace()` strip which left a
+    // leading `-` intact. `--` separates options from the name on the CLI path.
+    if (!isValidNamedProfileName(name)) return false;
     const args = clone
-      ? ["profile", "create", safe, "--clone"]
-      : ["profile", "create", safe];
+      ? ["profile", "create", "--clone", END_OF_OPTIONS, name]
+      : ["profile", "create", END_OF_OPTIONS, name];
     const cmd =
       buildRemoteHermesCmd(args) +
-      ` 2>&1 || mkdir -p ~/.hermes/profiles/${shellQuote(safe)}`;
+      ` 2>&1 || mkdir -p ~/.hermes/profiles/${shellQuote(name)}`;
     await sshExec(config, cmd);
     return true;
   } catch {
@@ -1339,11 +1356,13 @@ export async function sshDeleteProfile(
   name: string,
 ): Promise<boolean> {
   try {
-    const safe = name.replace(/[^a-zA-Z0-9_-]/g, "");
-    if (!safe || safe === "default") return false;
+    // Strict validation rejects a leading `-` and `default`; replaces the old
+    // lossy `.replace()` strip. `rm -rf ~/.hermes/profiles/<name>` is only
+    // reached as a fallback and `name` is already constrained to a safe slug.
+    if (!isValidNamedProfileName(name) || name === "default") return false;
     const cmd =
-      buildRemoteHermesCmd(["profile", "delete", safe, "--yes"]) +
-      ` 2>&1 || rm -rf ~/.hermes/profiles/${shellQuote(safe)}`;
+      buildRemoteHermesCmd(["profile", "delete", "--yes", END_OF_OPTIONS, name]) +
+      ` 2>&1 || rm -rf ~/.hermes/profiles/${shellQuote(name)}`;
     await sshExec(config, cmd);
     return true;
   } catch {
