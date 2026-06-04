@@ -30,6 +30,9 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   const onTokenUsageRef = useRef(options.onTokenUsage);
   useEffect(() => { onTokenUsageRef.current = options.onTokenUsage; }, [options.onTokenUsage]);
 
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
   const patchActive = useCallback((patch: (m: ChatMessage) => ChatMessage) => {
     const id = activeAssistantId.current;
     if (!id) return;
@@ -70,7 +73,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
       unsubError();
       unsubDone();
     };
-  }, [patchActive]);
+  }, []);
 
   const sendMessage = useCallback(async (text: string) => {
     const userMsg: ChatMessage = { id: `msg-${++msgIdCounter.current}`, role: "user", content: text, timestamp: Date.now() };
@@ -78,7 +81,9 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "", timestamp: Date.now() };
 
     // Build history from prior messages (before this turn) — user/assistant only.
-    const history = messages
+    // messagesRef.current reflects the last-rendered messages, captured before
+    // the setMessages push below, so history never includes the new bubbles.
+    const history = messagesRef.current
       .filter(m => m.role === "user" || m.role === "assistant")
       .map(m => ({ role: m.role, content: m.content }));
 
@@ -100,7 +105,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
       activeAssistantId.current = null;
       setIsStreaming(false);
     }
-  }, [messages]);
+  }, []);
 
   const abortStream = useCallback(() => {
     window.hermes.abortChat();
