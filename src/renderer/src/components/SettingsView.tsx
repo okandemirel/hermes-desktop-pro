@@ -44,16 +44,12 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Settings; desc: str
   { id: "diagnostics", label: "Diagnostics", icon: TerminalIcon, desc: "Live gateway, agent and error logs" },
 ];
 
-const MOCK_LOGS = [
-  "[2026-06-03 14:32:01] INFO  Gateway started on port 8642",
-  "[2026-06-03 14:32:02] INFO  Platform 'telegram' connected",
-  "[2026-06-03 14:32:05] INFO  SSE stream established for session abc123",
-  "[2026-06-03 14:32:10] DEBUG Tool 'web_search' completed in 1.2s",
-  "[2026-06-03 14:32:15] INFO  Session abc123 saved to state.db",
-  "[2026-06-03 14:32:20] WARN  Rate limit approaching for provider 'deepseek'",
-  "[2026-06-03 14:32:25] ERROR Failed to connect to MCP server 'filesystem': connection refused",
-  "[2026-06-03 14:32:30] INFO  Cron job 'daily-summary' completed successfully",
-];
+// Map the diagnostics tab to its on-disk log file name in ~/.hermes/logs.
+const LOG_FILE_FOR_TAB: Record<LogTab, string> = {
+  gateway: "gateway.log",
+  agent: "agent.log",
+  error: "errors.log",
+};
 
 const PROVIDER_KEYS: [string, string, string][] = [
   ["OpenRouter", "OPENROUTER_API_KEY", "●●●●●●●●●●●●●●ab12"],
@@ -114,6 +110,9 @@ export default function SettingsView() {
   const [hasApiKey, setHasApiKey] = useState(false);
   const [ssh, setSsh] = useState<SshState>({ host: "", port: "22", username: "", keyPath: "~/.ssh/id_rsa", remotePort: "8642", localPort: "18642" });
   const [logTab, setLogTab] = useState<LogTab>("gateway");
+  const [logLines, setLogLines] = useState<string[]>([]);
+  const [logPath, setLogPath] = useState<string>("");
+  const [logLoading, setLogLoading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testing, setTesting] = useState(false);
@@ -140,6 +139,27 @@ export default function SettingsView() {
     }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  // Load real logs from ~/.hermes/logs whenever the Diagnostics section is
+  // open and the active tab changes. Honest empty/error state — no mocks.
+  useEffect(() => {
+    if (section !== "diagnostics") return;
+    let cancelled = false;
+    setLogLoading(true);
+    window.hermes.readLogs(LOG_FILE_FOR_TAB[logTab], 50)
+      .then(({ content, path }: { content: string; path: string }) => {
+        if (cancelled) return;
+        setLogPath(path || "");
+        setLogLines(content ? content.split("\n").filter((l: string) => l.length > 0) : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLogPath("");
+        setLogLines([]);
+      })
+      .finally(() => { if (!cancelled) setLogLoading(false); });
+    return () => { cancelled = true; };
+  }, [section, logTab]);
 
   // Persist to the backend. Blank apiKey is omitted so a saved key is never
   // clobbered (the main process treats "" as "unchanged" too).
@@ -394,22 +414,28 @@ export default function SettingsView() {
               <Card className="overflow-hidden">
                 <div className="flex items-center gap-2.5 px-4 h-11 border-b border-[var(--border)] bg-[var(--surface-2)]">
                   <TerminalIcon size={14} className="text-[var(--accent-text)]" />
-                  <span className="text-[12px] font-mono text-[var(--text-2)]">~/.hermes/logs/{logTab}.log</span>
-                  <span className="text-[11.5px] text-[var(--text-3)] ml-auto">Last 50 lines</span>
+                  <span className="text-[12px] font-mono text-[var(--text-2)]">{logPath || `~/.hermes/logs/${LOG_FILE_FOR_TAB[logTab]}`}</span>
+                  <span className="text-[11.5px] text-[var(--text-3)] ml-auto">{logLoading ? "Loading…" : "Last 50 lines"}</span>
                 </div>
                 <div className="p-4 text-[12.5px] leading-relaxed font-mono overflow-x-auto bg-[var(--bg)]">
-                  {MOCK_LOGS.map((line, i) => {
-                    const isError = line.includes("ERROR");
-                    const isWarn = line.includes("WARN");
-                    return (
-                      <div
-                        key={i}
-                        className={cx(isError ? "text-[var(--error)]" : isWarn ? "text-[var(--warning)]" : "text-[var(--text-2)]")}
-                      >
-                        {line}
-                      </div>
-                    );
-                  })}
+                  {logLoading ? (
+                    <div className="text-[var(--text-3)]">Reading log…</div>
+                  ) : logLines.length === 0 ? (
+                    <div className="text-[var(--text-3)]">No log entries yet.</div>
+                  ) : (
+                    logLines.map((line, i) => {
+                      const isError = line.includes("ERROR");
+                      const isWarn = line.includes("WARN");
+                      return (
+                        <div
+                          key={i}
+                          className={cx(isError ? "text-[var(--error)]" : isWarn ? "text-[var(--warning)]" : "text-[var(--text-2)]")}
+                        >
+                          {line}
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </Card>
             </>

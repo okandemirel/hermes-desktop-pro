@@ -22,6 +22,11 @@ const api = {
     ipcRenderer.invoke("get-active-profile"),
   readEnv: (profile?: string): Promise<Record<string, string>> =>
     ipcRenderer.invoke("read-env", profile),
+  readLogs: (
+    logFile?: string,
+    lines?: number,
+  ): Promise<{ content: string; path: string }> =>
+    ipcRenderer.invoke("read-logs", logFile, lines),
   getConfigValue: (key: string, profile?: string): Promise<any> =>
     ipcRenderer.invoke("get-config-value", key, profile),
   setConfigValue: (key: string, value: any, profile?: string): Promise<boolean> =>

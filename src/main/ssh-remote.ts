@@ -1630,3 +1630,36 @@ export async function sshListClaw3dHqTasks(
   // renderer can still show an empty HQ board placeholder.
   return { success: true, tasks: [] };
 }
+
+// ── Logs ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Read the tail of a remote Hermes log file from `~/.hermes/logs`. Only the
+ * three known file names are accepted; anything else is coerced to
+ * `agent.log`. Both the file name and the line count are passed as `bash`
+ * positionals (never interpolated into the command) so a malicious value
+ * can't break out into a new shell command. Returns empty content on any
+ * failure rather than throwing.
+ */
+export async function sshReadLogs(
+  config: SshConfig,
+  logFile?: string,
+  lines = 200,
+): Promise<{ content: string; path: string }> {
+  const allowed = ["agent.log", "errors.log", "gateway.log"];
+  const file = logFile && allowed.includes(logFile) ? logFile : "agent.log";
+  const remotePath = `$HOME/.hermes/logs/${file}`;
+  try {
+    const safeLines = Math.max(
+      1,
+      Math.min(5000, Number.parseInt(String(lines), 10) || 200),
+    );
+    const content = await sshExec(
+      config,
+      `bash -c 'case "$2" in "~/"*) p="$HOME/\${2#~/}" ;; "\\$HOME/"*) p="$HOME/\${2#\\$HOME/}" ;; *) p="$2" ;; esac; tail -n "$1" -- "$p" 2>/dev/null || echo ""' -- ${shellQuote(String(safeLines))} ${shellQuote(remotePath)}`,
+    );
+    return { content: content.trim(), path: `~/.hermes/logs/${file}` };
+  } catch {
+    return { content: "", path: `~/.hermes/logs/${file}` };
+  }
+}

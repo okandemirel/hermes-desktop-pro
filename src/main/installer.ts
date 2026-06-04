@@ -157,3 +157,32 @@ export function hermesCliArgs(args: string[] = []): string[] {
   }
   return [HERMES_SCRIPT, ...args];
 }
+
+/**
+ * Read the tail of a Hermes log file from `~/.hermes/logs`. Only the three
+ * known log file names are accepted — anything else is coerced to
+ * `agent.log` so the renderer can never read an arbitrary path. Returns the
+ * last `lines` lines and the resolved path. Missing/unreadable files yield
+ * empty content (honest empty state, never an error).
+ */
+export function readLogs(
+  logFile = "agent.log",
+  lines = 200,
+): { content: string; path: string } {
+  const logsDir = join(HERMES_HOME, "logs");
+  const allowed = ["agent.log", "errors.log", "gateway.log"];
+  const file = allowed.includes(logFile) ? logFile : "agent.log";
+  const fullPath = join(logsDir, file);
+
+  if (!existsSync(fullPath)) {
+    return { content: "", path: fullPath };
+  }
+  try {
+    const content = readFileSync(fullPath, "utf-8");
+    const allLines = content.split("\n");
+    const tail = allLines.slice(-lines).join("\n");
+    return { content: tail, path: fullPath };
+  } catch {
+    return { content: "", path: fullPath };
+  }
+}

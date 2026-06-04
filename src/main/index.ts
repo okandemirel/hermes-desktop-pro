@@ -79,7 +79,10 @@ import {
   sshGetPlatformEnabled,
   sshSetPlatformEnabled,
   sshGatewayStatus,
+  sshReadLogs,
 } from "./ssh-remote";
+
+import { readLogs } from "./installer";
 
 import {
   listSessions,
@@ -302,6 +305,16 @@ function registerIpcHandlers(): void {
     } catch {}
     return {};
   });
+
+  ipcMain.handle(
+    "read-logs",
+    (_event, logFile?: string, lines?: number) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshReadLogs(conn.ssh, logFile, lines);
+      return readLogs(logFile, lines);
+    },
+  );
 
   ipcMain.handle(
     "get-config-value",
