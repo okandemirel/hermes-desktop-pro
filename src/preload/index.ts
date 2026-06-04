@@ -4,6 +4,7 @@ import type {
   ToolsetInfo,
   MemoryInfo,
   SavedModel,
+  ProfileInfo,
 } from "../shared/types";
 
 const api = {
@@ -40,8 +41,19 @@ const api = {
     ipcRenderer.invoke("set-env-value", key, value, profile),
 
   // Profiles
-  listProfiles: (): Promise<string[]> =>
+  listProfiles: (): Promise<ProfileInfo[]> =>
     ipcRenderer.invoke("list-profiles"),
+  createProfile: (
+    name: string,
+    clone: boolean,
+  ): Promise<{ success: boolean; error?: string } | boolean> =>
+    ipcRenderer.invoke("create-profile", name, clone),
+  deleteProfile: (
+    name: string,
+  ): Promise<{ success: boolean; error?: string } | boolean> =>
+    ipcRenderer.invoke("delete-profile", name),
+  setActiveProfile: (name: string): Promise<boolean> =>
+    ipcRenderer.invoke("set-active-profile", name),
 
   // Soul (persona / SOUL.md)
   readSoul: (profile?: string): Promise<string> =>

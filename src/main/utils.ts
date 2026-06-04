@@ -18,9 +18,15 @@ export function stripAnsi(str: string): string {
 }
 
 const PROFILE_NAME_RE = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+export const PROFILE_NAME_ERROR =
+  "Profile names may contain lowercase letters, numbers, underscores, and hyphens, and cannot start with a hyphen.";
 
-function isValidNamedProfileName(profile: unknown): profile is string {
+export function isValidNamedProfileName(profile: unknown): profile is string {
   return typeof profile === "string" && PROFILE_NAME_RE.test(profile);
+}
+
+export function isValidProfileName(profile: unknown): profile is string {
+  return profile === "default" || isValidNamedProfileName(profile);
 }
 
 export function normalizeProfileName(profile?: unknown): string | undefined {
@@ -29,9 +35,7 @@ export function normalizeProfileName(profile?: unknown): string | undefined {
   }
 
   if (!isValidNamedProfileName(profile)) {
-    throw new Error(
-      "Profile names may contain lowercase letters, numbers, underscores, and hyphens, and cannot start with a hyphen.",
-    );
+    throw new Error(PROFILE_NAME_ERROR);
   }
 
   return profile;

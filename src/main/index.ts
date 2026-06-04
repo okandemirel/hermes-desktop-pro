@@ -20,7 +20,6 @@ import {
   setModelConfig,
   getEnvValue,
   setEnvValue,
-  listProfiles,
   getActiveProfileName,
   getConnectionConfig,
   getPublicConnectionConfig,
@@ -37,6 +36,7 @@ import {
   isApiReady,
   testRemoteConnection,
   isRemoteMode,
+  notifyProfileSwitched,
 } from "./hermes";
 
 import {
@@ -65,6 +65,9 @@ import {
   sshListSessions,
   sshSearchSessions,
   sshGetSessionMessages,
+  sshListProfiles,
+  sshCreateProfile,
+  sshDeleteProfile,
 } from "./ssh-remote";
 
 import {
@@ -87,6 +90,13 @@ import {
 } from "./memory";
 
 import { listModels, addModel, removeModel, updateModel } from "./models";
+
+import {
+  listProfiles,
+  createProfile,
+  deleteProfile,
+  setActiveProfile,
+} from "./profiles";
 
 import type { Attachment } from "../shared/attachments";
 
@@ -309,7 +319,37 @@ function registerIpcHandlers(): void {
   );
 
   // Profiles
-  ipcMain.handle("list-profiles", () => listProfiles());
+  ipcMain.handle("list-profiles", async () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshListProfiles(conn.ssh);
+    return listProfiles();
+  });
+  ipcMain.handle("create-profile", (_event, name: string, clone: boolean) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshCreateProfile(conn.ssh, name, clone);
+    return createProfile(name, clone);
+  });
+  ipcMain.handle("delete-profile", (_event, name: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshDeleteProfile(conn.ssh, name);
+    return deleteProfile(name);
+  });
+  ipcMain.handle("set-active-profile", (_event, name: string) => {
+    if (getConnectionConfig().mode !== "ssh") {
+      setActiveProfile(name);
+      // The desktop now follows this profile: chat/health resolve their URL
+      // from the active profile's own port. Drop the cached health flag so the
+      // next check probes the new gateway rather than the previous profile's.
+      notifyProfileSwitched();
+      // Bring the activated profile's own gateway up if it isn't already —
+      // without stopping any other profile's gateway (their bots stay online).
+      if (!isRemoteMode() && !isGatewayRunning(name)) {
+        startGateway(name);
+      }
+    }
+    return true;
+  });
 
   // ── Soul (persona / SOUL.md) ──────────────────────────
   ipcMain.handle("read-soul", (_event, profile?: string) => {
