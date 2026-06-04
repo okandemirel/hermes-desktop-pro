@@ -209,7 +209,7 @@ function highlightTextMatch(text: string, query: string): string {
 }
 
 function fallbackSessionTitle(sessionId: string): string {
-  return `Sessions ${sessionId.slice(-6)}`;
+  return `Session ${sessionId.slice(-6)}`;
 }
 
 function highlightSessionMatch(
