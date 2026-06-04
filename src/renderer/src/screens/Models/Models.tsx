@@ -1,52 +1,30 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Cpu, Plus, Trash2, Pencil, Check, Star, Zap, Eye, Wrench, Brain,
-  Layers, Sparkles, Gauge, Database,
 } from "lucide-react";
+import type { SavedModel, ProviderId } from "@shared/types";
+import { getAllProviders, getProvider } from "@shared/providers";
 import {
   Screen, Card, Button, IconButton, IconChip, Badge, Tag,
   Field, Input, Select, Modal, EmptyState, SearchInput,
   Segment, SegmentItem, SectionLabel, StatusDot,
 } from "../../ui";
 
-// ─── Types ──────────────────────────────────────────────────
+// ─── Provider catalog (real backend providers) ──────────────
+// The provider key is what the backend stores on each SavedModel; the label is
+// display-only. Anything not in the registry (e.g. a hand-edited models.json)
+// falls back to showing the raw key.
+const ALL_PROVIDERS = getAllProviders();
 
-type Capability = "Streaming" | "Vision" | "Tools" | "Reasoning";
-
-interface ModelConfig {
-  id: string;
-  name: string;
-  provider: string;
-  modelId: string;
-  contextWindow: number;
-  temperature: number;
-  /** USD price per 1M input tokens */
-  priceIn: number;
-  /** USD price per 1M output tokens */
-  priceOut: number;
-  capabilities: Capability[];
-  recommended?: boolean;
+function providerLabel(key: string): string {
+  return getProvider(key as ProviderId)?.label ?? key;
 }
 
-const PROVIDERS = [
-  "OpenRouter", "Anthropic", "OpenAI", "Google",
-  "Grok", "DeepSeek", "OpenCode Zen", "OpenCode Go", "Local / Custom",
-];
-
-const CONTEXT_OPTIONS = [
-  { label: "4K", value: 4000 },
-  { label: "8K", value: 8000 },
-  { label: "16K", value: 16000 },
-  { label: "32K", value: 32000 },
-  { label: "64K", value: 64000 },
-  { label: "128K", value: 128000 },
-  { label: "200K", value: 200000 },
-  { label: "256K", value: 256000 },
-  { label: "1M", value: 1000000 },
-  { label: "2M", value: 2000000 },
-];
-
-const TEMP_OPTIONS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0];
+// ─── Capabilities (display-only, derived from the provider registry) ─────────
+// SavedModel has no capability data — the mock's per-model caps had no backend.
+// We surface the provider's declared capabilities instead, so the badges are
+// honest (they describe the provider, not a fabricated per-model spec).
+type Capability = "Streaming" | "Vision" | "Tools" | "Reasoning";
 
 const CAPABILITY_META: Record<Capability, { icon: typeof Zap }> = {
   Streaming: { icon: Zap },
@@ -55,48 +33,40 @@ const CAPABILITY_META: Record<Capability, { icon: typeof Zap }> = {
   Reasoning: { icon: Brain },
 };
 
-// Provider glyph (lucide stand-in for brand marks) + display order
-const PROVIDER_ICONS: Record<string, typeof Cpu> = {
-  Anthropic: Sparkles,
-  OpenAI: Brain,
-  Google: Layers,
-  Grok: Zap,
-  DeepSeek: Gauge,
-  OpenRouter: Database,
-  "OpenCode Zen": Cpu,
-  "OpenCode Go": Cpu,
-  "Local / Custom": Cpu,
-};
+function capabilitiesFor(provider: string): Capability[] {
+  const caps = getProvider(provider as ProviderId)?.capabilities;
+  if (!caps) return [];
+  const out: Capability[] = [];
+  if (caps.streaming) out.push("Streaming");
+  if (caps.vision) out.push("Vision");
+  if (caps.toolUse) out.push("Tools");
+  if (caps.reasoning) out.push("Reasoning");
+  return out;
+}
 
-// ─── Mock data ──────────────────────────────────────────────
+// Context window (display-only) — match the saved model id against the
+// provider's known models; fall back to the provider's max context.
+function contextFor(m: SavedModel): number | null {
+  const p = getProvider(m.provider as ProviderId);
+  if (!p) return null;
+  const known = p.models.find((mm) => mm.id === m.model);
+  if (known?.contextLength) return known.contextLength;
+  return p.capabilities.maxContextTokens || null;
+}
 
-const MOCK_MODELS: ModelConfig[] = [
-  { id: "m1", name: "Claude Sonnet 4", provider: "Anthropic", modelId: "claude-sonnet-4-20250514", contextWindow: 200000, temperature: 0.5, priceIn: 3, priceOut: 15, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"], recommended: true },
-  { id: "m2", name: "Claude Opus 4", provider: "Anthropic", modelId: "claude-opus-4-20250514", contextWindow: 200000, temperature: 0.4, priceIn: 15, priceOut: 75, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"], recommended: true },
-  { id: "m3", name: "GPT-4o", provider: "OpenAI", modelId: "gpt-4o", contextWindow: 128000, temperature: 0.8, priceIn: 2.5, priceOut: 10, capabilities: ["Streaming", "Vision", "Tools"], recommended: true },
-  { id: "m4", name: "o3", provider: "OpenAI", modelId: "o3", contextWindow: 200000, temperature: 1.0, priceIn: 10, priceOut: 40, capabilities: ["Streaming", "Tools", "Reasoning"] },
-  { id: "m5", name: "Gemini 3 Pro", provider: "Google", modelId: "gemini-3-pro", contextWindow: 1000000, temperature: 0.6, priceIn: 1.25, priceOut: 5, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"], recommended: true },
-  { id: "m6", name: "Gemini 3 Flash", provider: "Google", modelId: "gemini-3-flash", contextWindow: 1000000, temperature: 0.7, priceIn: 0.075, priceOut: 0.3, capabilities: ["Streaming", "Vision", "Tools"] },
-  { id: "m7", name: "Grok 4", provider: "Grok", modelId: "grok-4", contextWindow: 256000, temperature: 0.7, priceIn: 5, priceOut: 15, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"] },
-  { id: "m8", name: "DeepSeek V4 Pro", provider: "DeepSeek", modelId: "deepseek-v4-pro", contextWindow: 128000, temperature: 0.7, priceIn: 0.27, priceOut: 1.1, capabilities: ["Streaming", "Tools", "Reasoning"] },
-  { id: "m9", name: "DeepSeek R2", provider: "DeepSeek", modelId: "deepseek-r2", contextWindow: 64000, temperature: 0.6, priceIn: 0.55, priceOut: 2.19, capabilities: ["Streaming", "Reasoning"] },
-  { id: "m10", name: "Sonnet (Zen)", provider: "OpenCode Zen", modelId: "claude-sonnet-4", contextWindow: 200000, temperature: 0.5, priceIn: 0, priceOut: 0, capabilities: ["Streaming", "Vision", "Tools", "Reasoning"] },
-  { id: "m11", name: "DeepSeek (Go)", provider: "OpenCode Go", modelId: "deepseek-v4-pro", contextWindow: 128000, temperature: 0.7, priceIn: 0, priceOut: 0, capabilities: ["Streaming", "Tools"] },
-  { id: "m12", name: "Llama 4 Maverick", provider: "Local / Custom", modelId: "llama-4-maverick-local", contextWindow: 32000, temperature: 0.8, priceIn: 0, priceOut: 0, capabilities: ["Streaming", "Tools"] },
-];
-
-const DEFAULT_MODEL_ID = "m1";
-
-// ─── Helpers ────────────────────────────────────────────────
-
-const fmtCtx = (n: number) => (n >= 1000000 ? `${n / 1000000}M` : `${Math.round(n / 1000)}K`);
-const fmtPrice = (n: number) => (n === 0 ? "Free" : `$${n}`);
+const fmtCtx = (n: number) =>
+  n >= 1000000 ? `${n / 1000000}M` : `${Math.round(n / 1000)}K`;
 
 // ─── Component ──────────────────────────────────────────────
 
 export default function ModelsView() {
-  const [models, setModels] = useState<ModelConfig[]>(MOCK_MODELS);
-  const [defaultId, setDefaultId] = useState<string>(DEFAULT_MODEL_ID);
+  const [models, setModels] = useState<SavedModel[]>([]);
+  // Active model config = the real default (model.default / model.provider in
+  // config.yaml). There is no "default" flag in models.json — the star writes
+  // the active model config instead.
+  const [active, setActive] = useState<{ model: string; provider: string } | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState("All");
   const [showForm, setShowForm] = useState(false);
@@ -105,133 +75,182 @@ export default function ModelsView() {
 
   // Form state
   const [formName, setFormName] = useState("");
-  const [formProvider, setFormProvider] = useState(PROVIDERS[0]);
-  const [formModelId, setFormModelId] = useState("");
-  const [formContext, setFormContext] = useState(128000);
-  const [formTemp, setFormTemp] = useState(0.7);
+  const [formProvider, setFormProvider] = useState<string>(ALL_PROVIDERS[0]?.id ?? "openrouter");
+  const [formModel, setFormModel] = useState("");
+  const [formBaseUrl, setFormBaseUrl] = useState("");
+
+  // Load the real model library + active model config on mount.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [list, cfg] = await Promise.all([
+          window.hermes.listModels(),
+          window.hermes.getModelConfig(),
+        ]);
+        if (!alive) return;
+        setModels(list);
+        setActive({ model: cfg.model, provider: cfg.provider });
+      } catch {
+        // honest empty state — no mock fallback
+      } finally {
+        if (alive) setLoaded(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const isDefault = (m: SavedModel) =>
+    !!active && active.model === m.model && active.provider === m.provider;
 
   const resetForm = () => {
-    setFormName(""); setFormProvider(PROVIDERS[0]); setFormModelId("");
-    setFormContext(128000); setFormTemp(0.7); setEditingId(null);
+    setFormName("");
+    setFormProvider(ALL_PROVIDERS[0]?.id ?? "openrouter");
+    setFormModel("");
+    setFormBaseUrl("");
+    setEditingId(null);
   };
 
   const openAddForm = () => { resetForm(); setShowForm(true); };
-  const openEditForm = (m: ModelConfig) => {
-    setFormName(m.name); setFormProvider(m.provider); setFormModelId(m.modelId);
-    setFormContext(m.contextWindow); setFormTemp(m.temperature);
-    setEditingId(m.id); setShowForm(true);
+  const openEditForm = (m: SavedModel) => {
+    setFormName(m.name);
+    setFormProvider(m.provider);
+    setFormModel(m.model);
+    setFormBaseUrl(m.baseUrl);
+    setEditingId(m.id);
+    setShowForm(true);
   };
-
   const closeForm = () => { resetForm(); setShowForm(false); };
 
-  const handleSave = () => {
-    if (!formName.trim() || !formModelId.trim()) return;
+  const canSave = !!formName.trim() && !!formModel.trim();
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    const name = formName.trim();
+    const provider = formProvider;
+    const model = formModel.trim();
+    const baseUrl = formBaseUrl.trim();
+
     if (editingId) {
-      setModels(prev => prev.map(m => m.id === editingId ? { ...m, name: formName.trim(), provider: formProvider, modelId: formModelId.trim(), contextWindow: formContext, temperature: formTemp } : m));
+      const ok = await window.hermes.updateModel(editingId, {
+        name, provider, model, baseUrl,
+      });
+      if (ok) {
+        setModels((prev) =>
+          prev.map((m) =>
+            m.id === editingId ? { ...m, name, provider, model, baseUrl } : m,
+          ),
+        );
+      }
     } else {
-      const newModel: ModelConfig = {
-        id: `m${Date.now()}`,
-        name: formName.trim(),
-        provider: formProvider,
-        modelId: formModelId.trim(),
-        contextWindow: formContext,
-        temperature: formTemp,
-        priceIn: 0,
-        priceOut: 0,
-        capabilities: ["Streaming", "Tools"],
-      };
-      setModels(prev => [...prev, newModel]);
+      const entry = await window.hermes.addModel(name, provider, model, baseUrl);
+      setModels((prev) =>
+        prev.some((m) => m.id === entry.id) ? prev : [...prev, entry],
+      );
     }
     setShowForm(false);
+    resetForm();
   };
 
-  const handleDelete = (id: string) => {
-    setModels(prev => prev.filter(m => m.id !== id));
-    if (defaultId === id) {
-      const next = models.find(m => m.id !== id);
-      setDefaultId(next ? next.id : "");
-    }
+  const handleDelete = async (id: string) => {
+    const ok = await window.hermes.removeModel(id);
+    if (ok) setModels((prev) => prev.filter((m) => m.id !== id));
     setDeleteConfirm(null);
     if (editingId === id) { resetForm(); setShowForm(false); }
   };
 
-  const canSave = !!formName.trim() && !!formModelId.trim();
+  // "Set as default" writes the active model config (model.default /
+  // model.provider / model.base_url) — it does NOT flag models.json.
+  const setDefault = async (m: SavedModel) => {
+    const ok = await window.hermes.setModelConfig(m.model, m.provider, m.baseUrl);
+    if (ok) setActive({ model: m.model, provider: m.provider });
+  };
 
   // ── Derived data ──
   const providerCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    models.forEach(m => { counts[m.provider] = (counts[m.provider] || 0) + 1; });
+    models.forEach((m) => { counts[m.provider] = (counts[m.provider] || 0) + 1; });
     return counts;
   }, [models]);
 
   const usedProviders = useMemo(
-    () => PROVIDERS.filter(p => providerCounts[p]),
+    () => Object.keys(providerCounts).sort((a, b) =>
+      providerLabel(a).localeCompare(providerLabel(b)),
+    ),
     [providerCounts],
   );
 
   const filterTabs = useMemo(() => ["All", ...usedProviders], [usedProviders]);
 
-  const filtered = useMemo(() => models.filter(m => {
+  const filtered = useMemo(() => models.filter((m) => {
+    const q = search.toLowerCase();
     const matchesSearch = !search.trim() ||
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      m.modelId.toLowerCase().includes(search.toLowerCase()) ||
-      m.provider.toLowerCase().includes(search.toLowerCase());
+      m.name.toLowerCase().includes(q) ||
+      m.model.toLowerCase().includes(q) ||
+      providerLabel(m.provider).toLowerCase().includes(q);
     const matchesProvider = activeProvider === "All" || m.provider === activeProvider;
     return matchesSearch && matchesProvider;
   }), [models, search, activeProvider]);
 
-  const recommended = filtered.filter(m => m.recommended);
-  const catalog = filtered.filter(m => !m.recommended);
-
-  const defaultModel = models.find(m => m.id === defaultId);
-  const DefaultIcon = defaultModel ? (PROVIDER_ICONS[defaultModel.provider] || Cpu) : Cpu;
+  const defaultModel = useMemo(
+    () => models.find((m) => isDefault(m)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [models, active],
+  );
 
   // ── Card renderer ──
-  const renderCard = (m: ModelConfig) => {
-    const ProviderIcon = PROVIDER_ICONS[m.provider] || Cpu;
-    const isDefault = m.id === defaultId;
+  const renderCard = (m: SavedModel) => {
+    const def = isDefault(m);
+    const caps = capabilitiesFor(m.provider);
+    const ctx = contextFor(m);
     return (
-      <Card key={m.id} pad interactive active={isDefault} className="group flex flex-col gap-3.5">
+      <Card key={m.id} pad interactive active={def} className="group flex flex-col gap-3.5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <IconChip><ProviderIcon size={17} /></IconChip>
+            <IconChip><Cpu size={17} /></IconChip>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-[14px] font-semibold text-[var(--text)] truncate">{m.name}</span>
-                {isDefault && <Star size={13} className="shrink-0 text-[var(--accent-text)] fill-[var(--accent)]" />}
+                {def && <Star size={13} className="shrink-0 text-[var(--accent-text)] fill-[var(--accent)]" />}
               </div>
-              <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">{m.provider}</div>
+              <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">{providerLabel(m.provider)}</div>
             </div>
           </div>
-          <Badge variant={isDefault ? "accent" : "neutral"}>
-            {isDefault ? <><StatusDot color="var(--accent)" /> Default</> : "Active"}
+          <Badge variant={def ? "accent" : "neutral"}>
+            {def ? <><StatusDot color="var(--accent)" /> Default</> : "Saved"}
           </Badge>
         </div>
 
-        <code className="block text-[12px] font-mono text-[var(--text-2)] truncate">{m.modelId}</code>
+        <code className="block text-[12px] font-mono text-[var(--text-2)] truncate">{m.model}</code>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {m.capabilities.map(c => {
-            const CapIcon = CAPABILITY_META[c].icon;
-            return (
-              <Badge key={c} variant="neutral"><CapIcon size={11} /> {c}</Badge>
-            );
-          })}
-        </div>
+        {caps.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {caps.map((c) => {
+              const CapIcon = CAPABILITY_META[c].icon;
+              return (
+                <Badge key={c} variant="neutral"><CapIcon size={11} /> {c}</Badge>
+              );
+            })}
+          </div>
+        )}
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px]">
-          <span className="text-[var(--text-3)]">Context <span className="font-mono text-[var(--text)] ml-0.5">{fmtCtx(m.contextWindow)}</span></span>
-          <span className="text-[var(--text-3)]">In <span className="font-mono text-[var(--text)] ml-0.5">{fmtPrice(m.priceIn)}</span></span>
-          <span className="text-[var(--text-3)]">Out <span className="font-mono text-[var(--text)] ml-0.5">{fmtPrice(m.priceOut)}</span></span>
-        </div>
+        {m.baseUrl && (
+          <div className="text-[11.5px] text-[var(--text-3)] truncate">{m.baseUrl}</div>
+        )}
 
         <div className="mt-auto pt-3.5 border-t border-[var(--border)] flex items-center justify-between gap-2">
-          <Tag>temp&nbsp;<span className="font-mono">{m.temperature.toFixed(1)}</span></Tag>
+          {ctx !== null ? (
+            <Tag>ctx&nbsp;<span className="font-mono">{fmtCtx(ctx)}</span></Tag>
+          ) : (
+            <span />
+          )}
           <div className="flex items-center gap-0.5 shrink-0">
-            {!isDefault && (
-              <IconButton onClick={() => setDefaultId(m.id)} title="Set as default"><Star size={15} /></IconButton>
+            {!def && (
+              <IconButton onClick={() => setDefault(m)} title="Set as default"><Star size={15} /></IconButton>
             )}
-            {isDefault && (
+            {def && (
               <span className="flex items-center justify-center w-[30px] h-[30px] text-[var(--accent-text)]" title="Current default"><Check size={15} /></span>
             )}
             <IconButton onClick={() => openEditForm(m)} title="Edit"><Pencil size={15} /></IconButton>
@@ -241,6 +260,8 @@ export default function ModelsView() {
       </Card>
     );
   };
+
+  const defaultCtx = defaultModel ? contextFor(defaultModel) : null;
 
   return (
     <Screen
@@ -256,7 +277,7 @@ export default function ModelsView() {
       {defaultModel && (
         <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
           <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
-            <DefaultIcon size={24} />
+            <Cpu size={24} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="ui-eyebrow">Default Model</div>
@@ -264,10 +285,11 @@ export default function ModelsView() {
               {defaultModel.name}
             </h2>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[12.5px]">
-              <span className="text-[var(--text-2)]">{defaultModel.provider}</span>
-              <code className="font-mono text-[var(--text-3)]">{defaultModel.modelId}</code>
-              <span className="text-[var(--text-3)]">Context <span className="font-mono text-[var(--text-2)]">{fmtCtx(defaultModel.contextWindow)}</span></span>
-              <span className="text-[var(--text-3)]">temp <span className="font-mono text-[var(--text-2)]">{defaultModel.temperature.toFixed(1)}</span></span>
+              <span className="text-[var(--text-2)]">{providerLabel(defaultModel.provider)}</span>
+              <code className="font-mono text-[var(--text-3)]">{defaultModel.model}</code>
+              {defaultCtx !== null && (
+                <span className="text-[var(--text-3)]">Context <span className="font-mono text-[var(--text-2)]">{fmtCtx(defaultCtx)}</span></span>
+              )}
             </div>
           </div>
           <Badge variant="accent" className="self-start shrink-0"><StatusDot color="var(--accent)" /> Active</Badge>
@@ -283,9 +305,9 @@ export default function ModelsView() {
           className="flex-1 min-w-[240px] max-w-[400px]"
         />
         <Segment className="flex-wrap">
-          {filterTabs.map(p => (
+          {filterTabs.map((p) => (
             <SegmentItem key={p} active={p === activeProvider} onClick={() => setActiveProvider(p)}>
-              {p}
+              {p === "All" ? "All" : providerLabel(p)}
               {p !== "All" && <span className="ml-0.5 text-[var(--text-3)] font-mono">{providerCounts[p]}</span>}
             </SegmentItem>
           ))}
@@ -295,36 +317,32 @@ export default function ModelsView() {
       {filtered.length === 0 ? (
         <EmptyState
           icon={<Cpu size={24} />}
-          title={models.length === 0 ? "No models configured" : "No models found"}
-          sub={models.length === 0 ? "Add your first model to get started." : `No models match "${search || activeProvider}".`}
-          action={models.length === 0 ? <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openAddForm}>Add Model</Button> : undefined}
+          title={
+            !loaded
+              ? "Loading models…"
+              : models.length === 0
+                ? "No models configured"
+                : "No models found"
+          }
+          sub={
+            !loaded
+              ? undefined
+              : models.length === 0
+                ? "Add your first model to get started."
+                : `No models match "${search || providerLabel(activeProvider)}".`
+          }
+          action={loaded && models.length === 0 ? <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openAddForm}>Add Model</Button> : undefined}
         />
       ) : (
-        <>
-          {recommended.length > 0 && (
-            <section className="mb-7 mint-in mint-in-3">
-              <div className="flex items-center gap-2 mb-3">
-                <SectionLabel>Recommended</SectionLabel>
-                <Badge variant="accent">{recommended.length}</Badge>
-              </div>
-              <div className="ui-grid">
-                {recommended.map(renderCard)}
-              </div>
-            </section>
-          )}
-
-          {catalog.length > 0 && (
-            <section className="mint-in mint-in-4">
-              <div className="flex items-center gap-2 mb-3">
-                <SectionLabel>{activeProvider === "All" ? "Catalog" : activeProvider}</SectionLabel>
-                <Badge variant="neutral">{catalog.length}</Badge>
-              </div>
-              <div className="ui-grid">
-                {catalog.map(renderCard)}
-              </div>
-            </section>
-          )}
-        </>
+        <section className="mint-in mint-in-3">
+          <div className="flex items-center gap-2 mb-3">
+            <SectionLabel>{activeProvider === "All" ? "Catalog" : providerLabel(activeProvider)}</SectionLabel>
+            <Badge variant="neutral">{filtered.length}</Badge>
+          </div>
+          <div className="ui-grid">
+            {filtered.map(renderCard)}
+          </div>
+        </section>
       )}
 
       {/* Add / Edit modal */}
@@ -341,32 +359,22 @@ export default function ModelsView() {
       >
         <div className="flex flex-col gap-4">
           <Field label="Display Name">
-            <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. My DeepSeek" />
+            <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. My DeepSeek" />
           </Field>
 
           <Field label="Provider">
-            <Select value={formProvider} onChange={e => setFormProvider(e.target.value)}>
-              {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
+            <Select value={formProvider} onChange={(e) => setFormProvider(e.target.value)}>
+              {ALL_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
             </Select>
           </Field>
 
           <Field label="Model ID">
-            <Input value={formModelId} onChange={e => setFormModelId(e.target.value)} placeholder="e.g. gpt-4o" className="font-mono" />
+            <Input value={formModel} onChange={(e) => setFormModel(e.target.value)} placeholder="e.g. gpt-4o" className="font-mono" />
           </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Context Window">
-              <Select value={formContext} onChange={e => setFormContext(Number(e.target.value))}>
-                {CONTEXT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label} tokens</option>)}
-              </Select>
-            </Field>
-
-            <Field label="Temperature">
-              <Select value={formTemp} onChange={e => setFormTemp(Number(e.target.value))}>
-                {TEMP_OPTIONS.map(t => <option key={t} value={t}>{t.toFixed(1)}</option>)}
-              </Select>
-            </Field>
-          </div>
+          <Field label="Base URL">
+            <Input value={formBaseUrl} onChange={(e) => setFormBaseUrl(e.target.value)} placeholder="Optional — for custom / local endpoints" className="font-mono" />
+          </Field>
         </div>
       </Modal>
 
@@ -384,7 +392,9 @@ export default function ModelsView() {
         }
       >
         <p className="text-[13px] text-[var(--text-2)]">
-          This action cannot be undone. The model configuration will be permanently removed.
+          This removes the model from your library (~/.hermes/models.json). It will no
+          longer appear in the chat model selector. This does not delete any provider
+          API keys.
         </p>
       </Modal>
     </Screen>

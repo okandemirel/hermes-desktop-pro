@@ -58,6 +58,10 @@ import {
   sshUpdateMemoryEntry,
   sshRemoveMemoryEntry,
   sshWriteUserProfile,
+  sshListModels,
+  sshAddModel,
+  sshRemoveModel,
+  sshUpdateModel,
 } from "./ssh-remote";
 
 import { readSoul, writeSoul, resetSoul } from "./soul";
@@ -71,6 +75,8 @@ import {
   removeMemoryEntry,
   writeUserProfile,
 } from "./memory";
+
+import { listModels, addModel, removeModel, updateModel } from "./models";
 
 import type { Attachment } from "../shared/attachments";
 
@@ -381,6 +387,43 @@ function registerIpcHandlers(): void {
       if (conn.mode === "ssh" && conn.ssh)
         return sshWriteUserProfile(conn.ssh, content, profile);
       return writeUserProfile(content, profile);
+    },
+  );
+
+  // ── Models (~/.hermes/models.json) ────────────────────
+  ipcMain.handle("list-models", () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshListModels(conn.ssh);
+    return listModels();
+  });
+  ipcMain.handle(
+    "add-model",
+    (
+      _event,
+      name: string,
+      provider: string,
+      model: string,
+      baseUrl: string,
+    ) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh) {
+        return sshAddModel(conn.ssh, name, provider, model, baseUrl);
+      }
+      return addModel(name, provider, model, baseUrl);
+    },
+  );
+  ipcMain.handle("remove-model", (_event, id: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshRemoveModel(conn.ssh, id);
+    return removeModel(id);
+  });
+  ipcMain.handle(
+    "update-model",
+    (_event, id: string, fields: Record<string, string>) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshUpdateModel(conn.ssh, id, fields);
+      return updateModel(id, fields);
     },
   );
 

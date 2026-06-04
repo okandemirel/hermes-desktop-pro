@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { Attachment, ToolsetInfo, MemoryInfo } from "../shared/types";
+import type {
+  Attachment,
+  ToolsetInfo,
+  MemoryInfo,
+  SavedModel,
+} from "../shared/types";
 
 const api = {
   // Config
@@ -77,6 +82,24 @@ const api = {
     profile?: string,
   ): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("write-user-profile", content, profile),
+
+  // Models (~/.hermes/models.json)
+  listModels: (): Promise<SavedModel[]> =>
+    ipcRenderer.invoke("list-models"),
+  addModel: (
+    name: string,
+    provider: string,
+    model: string,
+    baseUrl: string,
+  ): Promise<SavedModel> =>
+    ipcRenderer.invoke("add-model", name, provider, model, baseUrl),
+  removeModel: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke("remove-model", id),
+  updateModel: (
+    id: string,
+    fields: Partial<Pick<SavedModel, "name" | "provider" | "model" | "baseUrl">>,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("update-model", id, fields),
 
   // Chat streaming
   sendMessage: (
