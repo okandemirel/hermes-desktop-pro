@@ -1,14 +1,10 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import * as YAML from "yaml";
 import { HERMES_HOME } from "./installer";
 
-function hermesHome(): string {
-  return HERMES_HOME;
-}
-
 function configPath(profile?: string): string {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   if (profile && profile !== "default") {
     return join(home, "profiles", profile, "config.yaml");
   }
@@ -77,7 +73,7 @@ export function getEnvValue(
   key: string,
   profile?: string,
 ): string | undefined {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   const envPath =
     profile && profile !== "default"
       ? join(home, "profiles", profile, ".env")
@@ -105,7 +101,7 @@ export function setEnvValue(
   value: string,
   profile?: string,
 ): void {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   const envPath =
     profile && profile !== "default"
       ? join(home, "profiles", profile, ".env")
@@ -134,12 +130,11 @@ export function setEnvValue(
 }
 
 export function listProfiles(): string[] {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   const profilesDir = join(home, "profiles");
   const profiles = ["default"];
   try {
     if (existsSync(profilesDir)) {
-      const { readdirSync } = require("fs");
       for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
           profiles.push(entry.name);
@@ -151,7 +146,7 @@ export function listProfiles(): string[] {
 }
 
 export function getActiveProfileName(): string {
-  const home = hermesHome();
+  const home = HERMES_HOME;
   const profileFile = join(home, "active_profile");
   try {
     if (existsSync(profileFile)) {
