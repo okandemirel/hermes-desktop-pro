@@ -62,7 +62,17 @@ import {
   sshAddModel,
   sshRemoveModel,
   sshUpdateModel,
+  sshListSessions,
+  sshSearchSessions,
+  sshGetSessionMessages,
 } from "./ssh-remote";
+
+import {
+  listSessions,
+  searchSessions,
+  getSessionMessages,
+  deleteSession,
+} from "./sessions";
 
 import { readSoul, writeSoul, resetSoul } from "./soul";
 
@@ -426,6 +436,35 @@ function registerIpcHandlers(): void {
       return updateModel(id, fields);
     },
   );
+
+  // ── Sessions (state.db readonly + FTS) ────────────────
+  ipcMain.handle("list-sessions", (_event, limit?: number, offset?: number) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshListSessions(conn.ssh, limit, offset);
+    return listSessions(limit, offset);
+  });
+
+  ipcMain.handle("search-sessions", (_event, query: string, limit?: number) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshSearchSessions(conn.ssh, query, limit);
+    return searchSessions(query, limit);
+  });
+
+  ipcMain.handle("get-session-messages", (_event, sessionId: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshGetSessionMessages(conn.ssh, sessionId);
+    return getSessionMessages(sessionId);
+  });
+
+  // Deleting a session writes to the local state.db only (no SSH proxy —
+  // matches reference semantics; remote/ssh modes simply no-op against the
+  // local cache when the row isn't present).
+  ipcMain.handle("delete-session", (_event, sessionId: string) => {
+    return deleteSession(sessionId);
+  });
 
   // ── Chat streaming ────────────────────────────────────
   ipcMain.handle(

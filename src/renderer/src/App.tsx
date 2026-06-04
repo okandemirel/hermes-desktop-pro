@@ -114,10 +114,23 @@ export default function App() {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, modelId } : t));
   }, []);
 
+  // Open a stored session in Chat: open a fresh tab seeded with the session id
+  // (useChatStream resumes from tab.sessionId) and switch to the Chat screen.
+  const handleResumeSession = useCallback((sessionId: string, title?: string) => {
+    const tab: ChatTab = {
+      ...createTab(activeTab.providerId),
+      sessionId,
+      name: title || "Resumed chat",
+    };
+    setTabs(prev => [...prev, tab]);
+    setActiveTabId(tab.id);
+    setActiveScreen("chat");
+  }, [activeTab.providerId]);
+
   const renderScreen = () => {
     switch (activeScreen) {
       case "chat": return <ChatView tab={activeTab} providers={providers} allTabs={tabs} onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId} onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} />;
-      case "sessions": return <SessionsView />;
+      case "sessions": return <SessionsView onResumeSession={handleResumeSession} onNewSession={handleNewTab} />;
       case "profiles": return <ProfilesView />;
       case "providers": return <ProvidersView providers={providers} />;
       case "skills": return <SkillsView />;

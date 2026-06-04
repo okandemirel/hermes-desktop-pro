@@ -136,3 +136,14 @@ export function getActiveProfileNameSync(): string {
     return "default";
   }
 }
+
+/**
+ * Resolve the session database for the currently active profile. The
+ * default profile uses ~/.hermes/state.db; named profiles use
+ * ~/.hermes/profiles/<name>/state.db. The desktop's Sessions feature
+ * used to read the root state.db unconditionally, so named-profile users
+ * saw an empty or wrong session list (issue #311).
+ */
+export function activeStateDbPath(): string {
+  return join(profileHome(getActiveProfileNameSync()), "state.db");
+}
