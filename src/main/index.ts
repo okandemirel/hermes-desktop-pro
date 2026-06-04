@@ -141,6 +141,21 @@ import {
   triggerCronJob,
 } from "./cronjobs";
 
+import {
+  listBoards as kanbanListBoards,
+  currentBoard as kanbanCurrentBoard,
+  listTasks as kanbanListTasks,
+  getTask as kanbanGetTask,
+  createTask as kanbanCreateTask,
+  assignTask as kanbanAssignTask,
+  completeTask as kanbanCompleteTask,
+  blockTask as kanbanBlockTask,
+  unblockTask as kanbanUnblockTask,
+  archiveTask as kanbanArchiveTask,
+  commentTask as kanbanCommentTask,
+  type CreateTaskInput,
+} from "./kanban";
+
 import icon from "../../resources/icon.png?asset";
 
 // Type assertion for the preload API
@@ -842,6 +857,63 @@ function registerIpcHandlers(): void {
     "trigger-cron-job",
     (_event, jobId: string, profile?: string) =>
       triggerCronJob(jobId, profile),
+  );
+
+  // ── Kanban (hermes kanban CLI / SSH tunnel / remote-only) ──
+  // The kanban module owns the local/ssh/remote-only mode branch; these
+  // handlers stay thin pass-throughs.
+  ipcMain.handle("kanban-list-boards", (_event, profile?: string) =>
+    kanbanListBoards(false, profile),
+  );
+  ipcMain.handle("kanban-current-board", (_event, profile?: string) =>
+    kanbanCurrentBoard(profile),
+  );
+  ipcMain.handle(
+    "kanban-list-tasks",
+    (
+      _event,
+      filters?: {
+        status?: string;
+        assignee?: string;
+        tenant?: string;
+        includeArchived?: boolean;
+        profile?: string;
+      },
+    ) => kanbanListTasks(filters ?? {}),
+  );
+  ipcMain.handle("kanban-get-task", (_event, id: string, profile?: string) =>
+    kanbanGetTask(id, profile),
+  );
+  ipcMain.handle(
+    "kanban-create-task",
+    (_event, input: CreateTaskInput, profile?: string) =>
+      kanbanCreateTask(input, profile),
+  );
+  ipcMain.handle(
+    "kanban-assign-task",
+    (_event, id: string, assignee: string | null, profile?: string) =>
+      kanbanAssignTask(id, assignee, profile),
+  );
+  ipcMain.handle(
+    "kanban-complete-task",
+    (_event, id: string, result?: string, profile?: string) =>
+      kanbanCompleteTask(id, result, profile),
+  );
+  ipcMain.handle(
+    "kanban-block-task",
+    (_event, id: string, reason?: string, profile?: string) =>
+      kanbanBlockTask(id, reason, profile),
+  );
+  ipcMain.handle("kanban-unblock-task", (_event, id: string, profile?: string) =>
+    kanbanUnblockTask(id, profile),
+  );
+  ipcMain.handle("kanban-archive-task", (_event, id: string, profile?: string) =>
+    kanbanArchiveTask(id, profile),
+  );
+  ipcMain.handle(
+    "kanban-comment-task",
+    (_event, id: string, body: string, profile?: string) =>
+      kanbanCommentTask(id, body, profile),
   );
 
   // External links — open in the user's default browser.

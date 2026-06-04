@@ -8,6 +8,10 @@ import type {
   InstalledSkill,
   SkillSearchResult,
   CronJob,
+  KanbanTask,
+  KanbanBoard,
+  KanbanTaskDetail,
+  KanbanResult,
 } from "../shared/types";
 
 const api = {
@@ -125,6 +129,74 @@ const api = {
     profile?: string,
   ): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("trigger-cron-job", jobId, profile),
+
+  // Kanban (hermes kanban CLI / SSH tunnel / remote-only)
+  kanbanListBoards: (profile?: string): Promise<KanbanResult<KanbanBoard[]>> =>
+    ipcRenderer.invoke("kanban-list-boards", profile),
+  kanbanCurrentBoard: (profile?: string): Promise<KanbanResult<string>> =>
+    ipcRenderer.invoke("kanban-current-board", profile),
+  kanbanListTasks: (filters?: {
+    status?: string;
+    assignee?: string;
+    tenant?: string;
+    includeArchived?: boolean;
+    profile?: string;
+  }): Promise<KanbanResult<KanbanTask[]>> =>
+    ipcRenderer.invoke("kanban-list-tasks", filters),
+  kanbanGetTask: (
+    id: string,
+    profile?: string,
+  ): Promise<KanbanResult<KanbanTaskDetail>> =>
+    ipcRenderer.invoke("kanban-get-task", id, profile),
+  kanbanCreateTask: (
+    input: {
+      title: string;
+      body?: string;
+      assignee?: string;
+      priority?: number;
+      tenant?: string;
+      workspace?: string;
+      triage?: boolean;
+      skills?: string[];
+      maxRetries?: number;
+    },
+    profile?: string,
+  ): Promise<KanbanResult<{ id: string }>> =>
+    ipcRenderer.invoke("kanban-create-task", input, profile),
+  kanbanAssignTask: (
+    id: string,
+    assignee: string | null,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-assign-task", id, assignee, profile),
+  kanbanCompleteTask: (
+    id: string,
+    result?: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-complete-task", id, result, profile),
+  kanbanBlockTask: (
+    id: string,
+    reason?: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-block-task", id, reason, profile),
+  kanbanUnblockTask: (
+    id: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-unblock-task", id, profile),
+  kanbanArchiveTask: (
+    id: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-archive-task", id, profile),
+  kanbanCommentTask: (
+    id: string,
+    body: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-comment-task", id, body, profile),
 
   // Tools (platform_toolsets.cli)
   getToolsets: (profile?: string): Promise<ToolsetInfo[]> =>
