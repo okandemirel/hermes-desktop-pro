@@ -252,6 +252,24 @@ const api = {
     fields: Partial<Pick<SavedModel, "name" | "provider" | "model" | "baseUrl">>,
   ): Promise<boolean> =>
     ipcRenderer.invoke("update-model", id, fields),
+  discoverProviderModels: (
+    provider: string,
+    baseUrl?: string,
+    apiKey?: string,
+    profile?: string,
+  ): Promise<{
+    models: string[];
+    status: "ok" | "no-key" | "unsupported" | "unknown-host";
+    cached: boolean;
+    freeModels?: string[];
+  }> =>
+    ipcRenderer.invoke(
+      "discover-provider-models",
+      provider,
+      baseUrl,
+      apiKey,
+      profile,
+    ),
 
   // Chat streaming
   sendMessage: (

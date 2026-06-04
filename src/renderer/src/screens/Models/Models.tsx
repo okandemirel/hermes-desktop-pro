@@ -79,6 +79,13 @@ export default function ModelsView() {
   const [formModel, setFormModel] = useState("");
   const [formBaseUrl, setFormBaseUrl] = useState("");
 
+  // Provider model-discovery autocomplete (optional, non-blocking). Offers the
+  // provider's advertised model ids as a datalist; on any failure we silently
+  // fall back to free text.
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverStatus, setDiscoverStatus] = useState<string | null>(null);
+
   // Load the real model library + active model config on mount.
   useEffect(() => {
     let alive = true;
@@ -101,6 +108,43 @@ export default function ModelsView() {
       alive = false;
     };
   }, []);
+
+  // Discover provider models whenever the form is open and the provider /
+  // base URL changes. Debounced so typing a base URL doesn't fire per
+  // keystroke. Best-effort: errors and non-"ok" statuses just leave the
+  // datalist empty (free-text entry still works).
+  useEffect(() => {
+    if (!showForm) {
+      setDiscoveredModels([]);
+      setDiscoverStatus(null);
+      setDiscoverLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDiscoverLoading(true);
+    setDiscoverStatus(null);
+    const handle = setTimeout(() => {
+      window.hermes
+        .discoverProviderModels(formProvider, formBaseUrl.trim() || undefined)
+        .then((res: { models: string[]; status: string }) => {
+          if (cancelled) return;
+          setDiscoveredModels(res.status === "ok" ? res.models : []);
+          setDiscoverStatus(res.status);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setDiscoveredModels([]);
+          setDiscoverStatus(null);
+        })
+        .finally(() => {
+          if (!cancelled) setDiscoverLoading(false);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [showForm, formProvider, formBaseUrl]);
 
   const isDefault = (m: SavedModel) =>
     !!active && active.model === m.model && active.provider === m.provider;
@@ -368,8 +412,30 @@ export default function ModelsView() {
             </Select>
           </Field>
 
-          <Field label="Model ID">
-            <Input value={formModel} onChange={(e) => setFormModel(e.target.value)} placeholder="e.g. gpt-4o" className="font-mono" />
+          <Field
+            label="Model ID"
+            hint={
+              discoverLoading
+                ? "Discovering available models…"
+                : discoveredModels.length > 0
+                  ? `${discoveredModels.length} model${discoveredModels.length === 1 ? "" : "s"} found — pick one or type your own`
+                  : discoverStatus === "no-key"
+                    ? "Set this provider's API key to autocomplete model IDs"
+                    : undefined
+            }
+          >
+            <Input
+              value={formModel}
+              onChange={(e) => setFormModel(e.target.value)}
+              placeholder="e.g. gpt-4o"
+              className="font-mono"
+              list="model-discovery-options"
+            />
+            <datalist id="model-discovery-options">
+              {discoveredModels.map((id) => (
+                <option key={id} value={id} />
+              ))}
+            </datalist>
           </Field>
 
           <Field label="Base URL">

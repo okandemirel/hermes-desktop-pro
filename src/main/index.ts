@@ -84,6 +84,8 @@ import {
 
 import { readLogs } from "./installer";
 
+import { discoverProviderModels } from "./model-discovery";
+
 import {
   listSessions,
   searchSessions,
@@ -564,6 +566,22 @@ function registerIpcHandlers(): void {
       if (conn.mode === "ssh" && conn.ssh)
         return sshUpdateModel(conn.ssh, id, fields);
       return updateModel(id, fields);
+    },
+  );
+
+  // Model discovery — fetch the provider's /models for autocomplete. Always a
+  // network call from the desktop itself, so no SSH proxy (runs locally even
+  // in remote/SSH connection modes).
+  ipcMain.handle(
+    "discover-provider-models",
+    (
+      _event,
+      provider: string,
+      baseUrl: string | undefined,
+      apiKey: string | undefined,
+      profile?: string,
+    ) => {
+      return discoverProviderModels(provider, baseUrl, apiKey, profile);
     },
   );
 

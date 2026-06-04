@@ -335,6 +335,15 @@ function escapeRegex(str: string): string {
 }
 
 /** Read the profile's `.env` into a flat key→value map. */
+/**
+ * Read a profile's `.env` into a flat key→value map (quotes stripped).
+ * Public alias of the internal `readEnvMap` for callers that need the whole
+ * environment at once — e.g. model-discovery resolving a provider's API key.
+ */
+export function readEnv(profile?: string): Record<string, string> {
+  return readEnvMap(profile);
+}
+
 function readEnvMap(profile?: string): Record<string, string> {
   const home = HERMES_HOME;
   const envPath =
