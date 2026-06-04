@@ -1,6 +1,6 @@
 /**
  * SSH-proxied implementations of hermes operations — chat-MVP subset.
- * Exports: sshExec, sshReadRemoteApiKey, buildRemoteHermesCmd,
+ * Exports: sshExec, sshReadEnv, sshReadRemoteApiKey, buildRemoteHermesCmd,
  *          buildGatewayStartCommand, buildGatewayStatusCommand,
  *          sshGatewayStatus, sshStartGateway
  */
@@ -9,7 +9,7 @@ import { spawn } from "child_process";
 import { homedir } from "os";
 import { join } from "path";
 import type { SshConfig } from "./ssh-tunnel";
-import { buildSshControlOptions } from "./ssh-options";
+import { buildSshControlOptions, assertSafeSshConfig } from "./ssh-options";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 // ── SSH exec core ────────────────────────────────────────────────────────────
@@ -38,6 +38,7 @@ export function sshExec(
   stdin?: string,
   timeoutMs = 30000,
 ): Promise<string> {
+  assertSafeSshConfig(config);
   return new Promise((resolve, reject) => {
     const child = spawn("ssh", [...buildExecArgs(config), command], {
       stdio: ["pipe", "pipe", "pipe"],

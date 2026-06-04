@@ -3,7 +3,7 @@ import { homedir } from "os";
 import { join } from "path";
 import net from "net";
 import http from "http";
-import { buildSshControlOptions } from "./ssh-options";
+import { buildSshControlOptions, assertSafeSshConfig } from "./ssh-options";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 export interface SshConfig {
@@ -108,7 +108,7 @@ function buildSshArgs(config: SshConfig, localPort: number): string[] {
     "-L",
     `${localPort}:127.0.0.1:${config.remotePort}`,
     "-p",
-    String(config.port),
+    String(config.port || 22),
     "-i",
     keyPath,
     "-o",
@@ -127,6 +127,7 @@ function buildSshArgs(config: SshConfig, localPort: number): string[] {
 }
 
 export async function startSshTunnel(config: SshConfig): Promise<void> {
+  assertSafeSshConfig(config);
   stopSshTunnel();
 
   const localPort = await findFreePort(config.localPort || 18642);
@@ -141,9 +142,9 @@ export async function startSshTunnel(config: SshConfig): Promise<void> {
 
   tunnelProcess.on("exit", () => {
     tunnelProcess = null;
-    // With ControlMaster=auto, the spawned SSH process exits immediately
-    // after handing off to the master. The tunnel may still be alive via
-    // the mux master, so check health before declaring it dead.
+    // The ssh process may exit in the brief window between process startup and
+    // tunnelRunning being set (e.g. on a fast connection or early auth error).
+    // Check health before declaring the tunnel dead to avoid a false negative.
     checkTunnelHealth(localPort, 2000).then((healthy) => {
       if (!healthy) {
         tunnelRunning = false;
@@ -187,6 +188,11 @@ export async function ensureSshTunnel(config: SshConfig): Promise<void> {
 
 // Test SSH reachability + hermes health endpoint through a temporary tunnel
 export function testSshConnection(config: SshConfig): Promise<boolean> {
+  try {
+    assertSafeSshConfig(config);
+  } catch {
+    return Promise.resolve(false);
+  }
   return findFreePort(config.localPort || 19642)
     .then(
       (localPort) =>
