@@ -78,6 +78,7 @@ import {
   sshUninstallSkill,
   sshGetPlatformEnabled,
   sshSetPlatformEnabled,
+  sshGatewayStatus,
 } from "./ssh-remote";
 
 import {
@@ -726,10 +727,14 @@ function registerIpcHandlers(): void {
   );
 
   // ── Gateway ───────────────────────────────────────────
-  ipcMain.handle("gateway-status", () => ({
-    running: isGatewayRunning(),
-    ready: isApiReady(),
-  }));
+  ipcMain.handle("gateway-status", async () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) {
+      const running = await sshGatewayStatus(conn.ssh);
+      return { running, ready: running };
+    }
+    return { running: isGatewayRunning(), ready: isApiReady() };
+  });
   ipcMain.handle("gateway-start", () => startGateway());
   ipcMain.handle("gateway-stop", () => {
     stopGateway();
