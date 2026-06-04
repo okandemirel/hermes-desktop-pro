@@ -1,10 +1,10 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
-import { homedir } from "os";
 import * as YAML from "yaml";
+import { HERMES_HOME } from "./installer";
 
 function hermesHome(): string {
-  return process.env.HERMES_HOME || join(homedir(), ".hermes");
+  return HERMES_HOME;
 }
 
 function configPath(profile?: string): string {
@@ -48,7 +48,7 @@ export function saveConfigYaml(
 }
 
 export function getHermesHome(): string {
-  return hermesHome();
+  return HERMES_HOME;
 }
 
 export function getModelConfig(

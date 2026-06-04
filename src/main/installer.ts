@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, delimiter } from "path";
 import { homedir } from "os";
+import { app } from "electron";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -33,8 +34,37 @@ function defaultHermesHome(): string {
   return localApp ?? homeDot;
 }
 
+// A Hermes home the user explicitly pointed the app at via the "use an
+// existing installation" flow. Persisted in the desktop's own userData dir —
+// outside any Hermes home — so it can be read before HERMES_HOME is resolved.
+function hermesHomeOverrideFile(): string {
+  // `app` is undefined outside an Electron runtime (e.g. unit tests) —
+  // optional-chain it so module load degrades to "no override" instead of
+  // throwing.
+  const userData = app?.getPath?.("userData");
+  return userData ? join(userData, "hermes-home.json") : "";
+}
+
+function readHermesHomeOverride(): string {
+  try {
+    const file = hermesHomeOverrideFile();
+    if (!file || !existsSync(file)) return "";
+    const parsed = JSON.parse(readFileSync(file, "utf-8")) as {
+      hermesHome?: unknown;
+    };
+    const p =
+      typeof parsed.hermesHome === "string" ? parsed.hermesHome.trim() : "";
+    // Ignore a stale override whose directory no longer exists.
+    return p && existsSync(p) ? p : "";
+  } catch {
+    return "";
+  }
+}
+
 export const HERMES_HOME =
-  process.env.HERMES_HOME?.trim() || defaultHermesHome();
+  process.env.HERMES_HOME?.trim() ||
+  readHermesHomeOverride() ||
+  defaultHermesHome();
 
 export const HERMES_REPO = join(HERMES_HOME, "hermes-agent");
 
