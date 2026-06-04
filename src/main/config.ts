@@ -279,6 +279,28 @@ export function setConnectionConfig(input: {
  *
  * Returns "" when none of the six locations are configured.
  */
+/**
+ * Read a single dotted-path config value from the profile's config.yaml.
+ * Returns the trimmed string value or null if not found / not a string.
+ */
+export function getConfigValue(key: string, profile?: string): string | null {
+  const config = loadConfigYaml(profile);
+  const value = yamlGet(config, key);
+  return value != null ? value : null;
+}
+
+/**
+ * Write a single dotted-path config value to the profile's config.yaml.
+ * Delegates to saveConfigYaml which handles nested path creation.
+ */
+export function setConfigValue(
+  key: string,
+  value: string,
+  profile?: string,
+): void {
+  saveConfigYaml(key, value, profile);
+}
+
 export function getApiServerKey(profile?: string): string {
   const isNamed = Boolean(profile && profile !== "default");
   const profileConfig = loadConfigYaml(profile);
