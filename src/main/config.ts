@@ -182,6 +182,20 @@ export interface PublicConnectionConfig {
   ssh: SshConnectionConfig;
 }
 
+/** Walk a dotted path through a parsed YAML object; return trimmed string or undefined. */
+function yamlGet(
+  obj: Record<string, unknown>,
+  dottedKey: string,
+): string | undefined {
+  const parts = dottedKey.split(".");
+  let cur: unknown = obj;
+  for (const part of parts) {
+    if (typeof cur !== "object" || cur === null) return undefined;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return typeof cur === "string" && cur.trim() ? cur.trim() : undefined;
+}
+
 function desktopConfigFile(): string {
   return join(getHermesHome(), "desktop.json");
 }
@@ -243,8 +257,10 @@ export function setConnectionConfig(input: {
   const d = readDesktopConfig();
   d.connectionMode = input.mode;
   if (input.remoteUrl !== undefined) d.remoteUrl = input.remoteUrl;
+  // empty/undefined apiKey is treated as "unchanged" — never clobber a saved key with a blank
   if (input.apiKey !== undefined && input.apiKey !== "")
     d.remoteApiKey = input.apiKey;
+  // ssh config only persisted in ssh mode (intentional)
   if (input.mode === "ssh" && input.ssh) d.sshConfig = input.ssh;
   writeDesktopConfig(d);
 }
@@ -264,20 +280,6 @@ export function setConnectionConfig(input: {
  * Returns "" when none of the six locations are configured.
  */
 export function getApiServerKey(profile?: string): string {
-  // Walk a dotted path through a parsed YAML object, return trimmed string or undefined.
-  function yamlGet(
-    obj: Record<string, any>,
-    dottedKey: string,
-  ): string | undefined {
-    const parts = dottedKey.split(".");
-    let cur: any = obj;
-    for (const part of parts) {
-      if (cur == null || typeof cur !== "object") return undefined;
-      cur = cur[part];
-    }
-    return typeof cur === "string" && cur.trim() ? cur.trim() : undefined;
-  }
-
   const isNamed = Boolean(profile && profile !== "default");
   const profileConfig = loadConfigYaml(profile);
   const defaultConfig = isNamed ? loadConfigYaml() : null;
