@@ -341,6 +341,16 @@ const api = {
   gatewayStatus: () => ipcRenderer.invoke("gateway-status"),
   gatewayStart: () => ipcRenderer.invoke("gateway-start"),
   gatewayStop: () => ipcRenderer.invoke("gateway-stop"),
+  getPlatformEnabled: (
+    profile?: string,
+  ): Promise<Record<string, boolean>> =>
+    ipcRenderer.invoke("get-platform-enabled", profile),
+  setPlatformEnabled: (
+    platform: string,
+    enabled: boolean,
+    profile?: string,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("set-platform-enabled", platform, enabled, profile),
 
   // SSH tunnel
   sshTunnelActive: () => ipcRenderer.invoke("ssh-tunnel-active"),

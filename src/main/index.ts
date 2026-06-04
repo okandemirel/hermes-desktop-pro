@@ -20,6 +20,8 @@ import {
   setModelConfig,
   getEnvValue,
   setEnvValue,
+  getPlatformEnabled,
+  setPlatformEnabled,
   getActiveProfileName,
   getConnectionConfig,
   getPublicConnectionConfig,
@@ -32,6 +34,7 @@ import {
   setSshRemoteApiKey,
   startGateway,
   stopGateway,
+  restartGateway,
   isGatewayRunning,
   isApiReady,
   testRemoteConnection,
@@ -73,6 +76,8 @@ import {
   sshGetSkillContent,
   sshInstallSkill,
   sshUninstallSkill,
+  sshGetPlatformEnabled,
+  sshSetPlatformEnabled,
 } from "./ssh-remote";
 
 import {
@@ -730,6 +735,30 @@ function registerIpcHandlers(): void {
     stopGateway();
     return true;
   });
+
+  // Platform toggles (config.yaml platforms section)
+  ipcMain.handle("get-platform-enabled", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshGetPlatformEnabled(conn.ssh, profile);
+    return getPlatformEnabled(profile);
+  });
+  ipcMain.handle(
+    "set-platform-enabled",
+    async (_event, platform: string, enabled: boolean, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh) {
+        await sshSetPlatformEnabled(conn.ssh, platform, enabled, profile);
+        return true;
+      }
+      setPlatformEnabled(platform, enabled, profile);
+      // Restart gateway so it picks up the new platform config
+      if (isGatewayRunning(profile)) {
+        restartGateway(profile);
+      }
+      return true;
+    },
+  );
 
   // ── SSH tunnel ────────────────────────────────────────
   ipcMain.handle("ssh-tunnel-active", () => isSshTunnelActive());

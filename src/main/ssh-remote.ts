@@ -1349,3 +1349,98 @@ export async function sshDeleteProfile(
     return false;
   }
 }
+
+// ── Platform toggles (config.yaml platforms section) ──────────────────────────
+
+const SSH_SUPPORTED_PLATFORMS = [
+  "telegram",
+  "discord",
+  "slack",
+  "whatsapp",
+  "signal",
+  "matrix",
+  "mattermost",
+  "email",
+  "sms",
+  "bluebubbles",
+  "dingtalk",
+  "feishu",
+  "wecom",
+  "weixin",
+  "webhooks",
+  "home_assistant",
+];
+
+// Map from app platform keys to gateway_state.json keys (where they differ)
+const PLATFORM_STATE_KEY: Record<string, string> = {
+  home_assistant: "homeassistant",
+};
+
+export async function sshGetPlatformEnabled(
+  config: SshConfig,
+  profile?: string,
+): Promise<Record<string, boolean>> {
+  void profile;
+  try {
+    const raw = await sshReadFile(config, "$HOME/.hermes/gateway_state.json");
+    if (raw.trim()) {
+      const state = JSON.parse(raw);
+      const platforms = state.platforms || {};
+      const result: Record<string, boolean> = {};
+      for (const platform of SSH_SUPPORTED_PLATFORMS) {
+        const stateKey = PLATFORM_STATE_KEY[platform] || platform;
+        const p = platforms[stateKey];
+        result[platform] = p
+          ? p.state === "connected" || p.state === "running"
+          : false;
+      }
+      return result;
+    }
+  } catch {
+    // fall through
+  }
+  return Object.fromEntries(SSH_SUPPORTED_PLATFORMS.map((p) => [p, false]));
+}
+
+export async function sshSetPlatformEnabled(
+  config: SshConfig,
+  platform: string,
+  enabled: boolean,
+  profile?: string,
+): Promise<void> {
+  if (!SSH_SUPPORTED_PLATFORMS.includes(platform)) return;
+  const configPath = remoteConfigPath(profile);
+  const content = await sshReadFile(config, configPath);
+  if (!content) return;
+
+  let updated = content;
+  const existingRe = new RegExp(
+    `^([ \\t]+${platform}:\\s*\\n[ \\t]+enabled:\\s*)(?:true|false)`,
+    "m",
+  );
+
+  if (existingRe.test(updated)) {
+    updated = updated.replace(existingRe, `$1${enabled}`);
+  } else {
+    const platformsIdx = updated.indexOf("\nplatforms:");
+    if (platformsIdx === -1) {
+      updated += `\nplatforms:\n  ${platform}:\n    enabled: ${enabled}\n`;
+    } else {
+      const after = updated.substring(platformsIdx + 1);
+      const lines = after.split("\n");
+      let insertOffset = platformsIdx + 1 + lines[0].length + 1;
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].trim() === "" || /^\s/.test(lines[i]))
+          insertOffset += lines[i].length + 1;
+        else break;
+      }
+      const entry = `  ${platform}:\n    enabled: ${enabled}\n`;
+      updated =
+        updated.substring(0, insertOffset) +
+        entry +
+        updated.substring(insertOffset);
+    }
+  }
+
+  await sshWriteFile(config, configPath, updated);
+}
