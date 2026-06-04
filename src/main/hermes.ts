@@ -36,11 +36,14 @@ import {
   profileHome,
   profilePaths,
   getActiveProfileNameSync,
+  stripAnsi,
 } from "./utils";
 import { getProfilePort } from "./gateway-ports";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { type Attachment, escapeXmlAttr } from "../shared/attachments";
 import { parseSseBlock, processCustomEvent } from "./sse-parser";
+import { readModels } from "./models";
+import { OPENAI_COMPAT_PROVIDERS, URL_KEY_MAP } from "../shared/url-key-map";
 
 /**
  * Resolve which profile a gateway call targets. An explicit profile always
@@ -731,6 +734,269 @@ function sendMessageViaApi(
 
 let apiServerAvailable: boolean | null = null; // cached after first check
 
+// ────────────────────────────────────────────────────
+//  CLI fallback (local mode, API server unreachable)
+// ────────────────────────────────────────────────────
+
+// Lines from the CLI's TUI chrome we never want to surface in the chat
+// stream: box-drawing borders and the `⚕ Hermes` banner.
+const NOISE_PATTERNS = [/^[╭╰│╮╯─┌┐└┘┤├┬┴┼]/, /⚕\s*Hermes/];
+
+/**
+ * Spawn the bundled Hermes CLI in one-shot chat mode and scrape its stdout
+ * back through the streaming callbacks. This is the local-only fallback for
+ * when the API gateway isn't reachable — remote/SSH always go through the
+ * API path. Multimodal content can't be piped, so text-file attachments are
+ * inlined and images dropped. API keys are read from the profile .env and
+ * injected into the child env; nothing is logged.
+ */
+function sendMessageViaCli(
+  message: string,
+  cb: ChatCallbacks,
+  profile?: string,
+  resumeSessionId?: string,
+  attachments?: Attachment[],
+): ChatHandle {
+  // CLI fallback can't pipe multimodal content; inline text-file attachments
+  // and ignore images. The gateway is the supported attachment path; this is
+  // only hit when the API server isn't reachable.
+  if (attachments && attachments.length > 0) {
+    const textFiles = attachments.filter(
+      (a) => a.kind === "text-file" && typeof a.text === "string",
+    );
+    if (textFiles.length > 0) {
+      const wrapped = textFiles
+        .map(
+          (f) =>
+            `<file name="${escapeXmlAttr(f.name)}" mime="${escapeXmlAttr(f.mime || "text/plain")}">\n${f.text}\n</file>`,
+        )
+        .join("\n\n");
+      message = message.trim() ? `${message}\n\n${wrapped}` : wrapped;
+    }
+  }
+  const mc = getModelConfig(profile);
+  const profileEnv = readProfileEnvFile(profile);
+
+  const args = hermesCliArgs();
+  if (profile && profile !== "default") {
+    args.push("-p", profile);
+  }
+  args.push("chat", "-q", message, "-Q", "--source", "desktop");
+
+  if (resumeSessionId) {
+    args.push("--resume", resumeSessionId);
+  }
+
+  if (mc.model) {
+    args.push("-m", mc.model);
+  }
+
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    PATH: getEnhancedPath(),
+    HOME: homedir(),
+    HERMES_HOME: HERMES_HOME,
+    PYTHONUNBUFFERED: "1",
+  };
+
+  // Inject all API keys from the profile .env so the CLI can access them.
+  // The built-in remote OpenAI-compatible providers are listed too — without
+  // them the agent can't see the user-configured key when the user picked the
+  // built-in provider entry rather than a `custom` one.
+  const KNOWN_API_KEYS = [
+    "OPENROUTER_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GROQ_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "TOGETHER_API_KEY",
+    "FIREWORKS_API_KEY",
+    "CEREBRAS_API_KEY",
+    "MISTRAL_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "GLM_API_KEY",
+    "KIMI_API_KEY",
+    "MINIMAX_API_KEY",
+    "MINIMAX_CN_API_KEY",
+    "HF_TOKEN",
+    "EXA_API_KEY",
+    "PARALLEL_API_KEY",
+    "TAVILY_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "FAL_KEY",
+    "HONCHO_API_KEY",
+    "BROWSERBASE_API_KEY",
+    "BROWSERBASE_PROJECT_ID",
+    "VOICE_TOOLS_OPENAI_KEY",
+    "TINKER_API_KEY",
+    "WANDB_API_KEY",
+  ];
+  for (const key of KNOWN_API_KEYS) {
+    if (profileEnv[key] && !env[key]) {
+      env[key] = profileEnv[key];
+    }
+  }
+
+  const isCustomEndpoint = OPENAI_COMPAT_PROVIDERS.has(mc.provider);
+  if (isCustomEndpoint && mc.baseUrl) {
+    // Check if this model has an explicit apiMode from custom_providers
+    let modelApiMode: string | null = null;
+    try {
+      const modelEntry = readModels().find(
+        (m) => m.baseUrl === mc.baseUrl && m.model === mc.model,
+      );
+      if (modelEntry) modelApiMode = modelEntry.apiMode || null;
+    } catch {
+      /* ignore */
+    }
+    const isAnthropicProtocol = modelApiMode === "anthropic_messages";
+    if (isAnthropicProtocol) {
+      env.HERMES_INFERENCE_PROVIDER = "anthropic";
+      env.ANTHROPIC_BASE_URL = mc.baseUrl.replace(/\/+$/, "");
+    } else {
+      env.HERMES_INFERENCE_PROVIDER = "custom";
+      env.OPENAI_BASE_URL = mc.baseUrl.replace(/\/+$/, "");
+    }
+
+    // Resolve the right API key: URL-specific key first, then OPENAI_API_KEY.
+    let resolvedKey = "";
+    for (const { pattern, envKey } of URL_KEY_MAP) {
+      if (pattern.test(mc.baseUrl)) {
+        resolvedKey = profileEnv[envKey] || env[envKey] || "";
+        break;
+      }
+    }
+    if (!resolvedKey) {
+      // Try custom provider auto-generated key from models.json
+      try {
+        const models = readModels();
+        const matching = models.find((m) => m.baseUrl === mc.baseUrl);
+        if (matching) {
+          const envKey2 =
+            "CUSTOM_PROVIDER_" +
+            matching.name.replace(/[^A-Za-z0-9]/g, "_").toUpperCase() +
+            "_KEY";
+          resolvedKey = profileEnv[envKey2] || env[envKey2] || "";
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!resolvedKey) {
+        resolvedKey =
+          profileEnv.CUSTOM_API_KEY ||
+          env.CUSTOM_API_KEY ||
+          profileEnv.OPENAI_API_KEY ||
+          env.OPENAI_API_KEY ||
+          "";
+      }
+    }
+    // Local servers (localhost/127.0.0.1) don't need a real key
+    if (!resolvedKey && /localhost|127\.0\.0\.1/i.test(mc.baseUrl)) {
+      resolvedKey = "no-key-required";
+    }
+    if (isAnthropicProtocol) {
+      env.ANTHROPIC_API_KEY = resolvedKey || "no-key-required";
+    } else {
+      env.OPENAI_API_KEY = resolvedKey || "no-key-required";
+    }
+
+    delete env.OPENROUTER_API_KEY;
+    delete env.ANTHROPIC_TOKEN;
+    delete env.OPENROUTER_BASE_URL;
+  }
+
+  const proc = spawn(HERMES_PYTHON, args, {
+    cwd: HERMES_REPO,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    ...HIDDEN_SUBPROCESS_OPTIONS,
+  });
+
+  let hasOutput = false;
+  let capturedSessionId = "";
+  let outputBuffer = "";
+
+  function captureSessionId(text: string): void {
+    const sidMatch = text.match(/session_id:\s*(\S+)/);
+    if (sidMatch) capturedSessionId = sidMatch[1];
+  }
+
+  function processOutput(raw: Buffer): void {
+    const text = stripAnsi(raw.toString());
+    outputBuffer += text;
+
+    captureSessionId(outputBuffer);
+
+    const cleaned = text.replace(/session_id:\s*\S+\n?/g, "");
+    const lines = cleaned.split("\n");
+    const result: string[] = [];
+    for (const line of lines) {
+      const t = line.trim();
+      if (t && NOISE_PATTERNS.some((p) => p.test(t))) continue;
+      result.push(line);
+    }
+
+    const output = result.join("\n");
+    if (output) {
+      hasOutput = true;
+      cb.onChunk(output);
+    }
+  }
+
+  proc.stdout?.on("data", processOutput);
+
+  let stderrBuffer = "";
+  proc.stderr?.on("data", (data: Buffer) => {
+    const text = stripAnsi(data.toString());
+    captureSessionId(text);
+    if (
+      !text.trim() ||
+      text.includes("UserWarning") ||
+      text.includes("FutureWarning")
+    ) {
+      return;
+    }
+    // Forward errors visibly to the chat
+    if (
+      /❌|⚠️|Error|Traceback|error|failed|denied|unauthorized|invalid/i.test(
+        text,
+      )
+    ) {
+      hasOutput = true;
+      cb.onChunk(text);
+    } else {
+      // Buffer other stderr for reporting on non-zero exit
+      stderrBuffer += text;
+    }
+  });
+
+  proc.on("close", (code) => {
+    if (code === 0 || hasOutput) {
+      cb.onDone(capturedSessionId || undefined);
+    } else {
+      const detail = stderrBuffer.trim();
+      cb.onError(
+        detail
+          ? `Hermes exited with code ${code}: ${detail}`
+          : `Hermes exited with code ${code}. Check your model configuration and API key.`,
+      );
+    }
+  });
+
+  proc.on("error", (err) => {
+    cb.onError(err.message);
+  });
+
+  return {
+    abort: () => {
+      proc.kill("SIGTERM");
+      setTimeout(() => {
+        if (!proc.killed) proc.kill("SIGKILL");
+      }, 3000);
+    },
+  };
+}
+
 export async function sendMessage(
   message: string,
   cb: ChatCallbacks,
@@ -782,14 +1048,11 @@ export async function sendMessage(
     );
   }
 
-  // CLI fallback (local mode, API server unreachable) is deferred for this
-  // slice — see Phase F task notes. The supported attachment + streaming path
-  // is the gateway/API one; surface a clear error so the renderer can prompt
-  // the user to start the local gateway rather than silently hanging.
-  cb.onError(
-    "Local Hermes gateway is not reachable. Start the gateway (or switch to remote/SSH mode) and try again.",
-  );
-  return { abort: () => {} };
+  // Local mode, API server unreachable: fall back to spawning the bundled
+  // CLI directly. Remote/SSH never reach here (handled above). The CLI itself
+  // surfaces an honest error via cb.onError if Python/the agent isn't
+  // available — no fake stream.
+  return sendMessageViaCli(message, cb, profile, resumeSessionId, attachments);
 }
 
 // Lazy init — called on first sendMessage or gateway start
