@@ -11,6 +11,9 @@ import { join } from "path";
 import type { SshConfig } from "./ssh-tunnel";
 import { buildSshControlOptions, assertSafeSshConfig } from "./ssh-options";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
+import { t } from "../shared/i18n";
+import { getAppLocale } from "./locale";
+import type { ToolsetInfo } from "@shared/types";
 
 // ── SSH exec core ────────────────────────────────────────────────────────────
 
@@ -335,4 +338,220 @@ export async function sshResetSoul(
 ): Promise<string> {
   await sshWriteSoul(config, DEFAULT_SOUL, profile);
   return DEFAULT_SOUL;
+}
+
+// ── Tools ────────────────────────────────────────────────────────────────────
+
+const TOOLSET_DEFS = [
+  {
+    key: "web",
+    labelKey: "tools.web.label",
+    descriptionKey: "tools.web.description",
+  },
+  {
+    key: "browser",
+    labelKey: "tools.browser.label",
+    descriptionKey: "tools.browser.description",
+  },
+  {
+    key: "terminal",
+    labelKey: "tools.terminal.label",
+    descriptionKey: "tools.terminal.description",
+  },
+  {
+    key: "file",
+    labelKey: "tools.file.label",
+    descriptionKey: "tools.file.description",
+  },
+  {
+    key: "code_execution",
+    labelKey: "tools.code_execution.label",
+    descriptionKey: "tools.code_execution.description",
+  },
+  {
+    key: "vision",
+    labelKey: "tools.vision.label",
+    descriptionKey: "tools.vision.description",
+  },
+  {
+    key: "image_gen",
+    labelKey: "tools.image_gen.label",
+    descriptionKey: "tools.image_gen.description",
+  },
+  {
+    key: "tts",
+    labelKey: "tools.tts.label",
+    descriptionKey: "tools.tts.description",
+  },
+  {
+    key: "skills",
+    labelKey: "tools.skills.label",
+    descriptionKey: "tools.skills.description",
+  },
+  {
+    key: "memory",
+    labelKey: "tools.memory.label",
+    descriptionKey: "tools.memory.description",
+  },
+  {
+    key: "session_search",
+    labelKey: "tools.session_search.label",
+    descriptionKey: "tools.session_search.description",
+  },
+  {
+    key: "clarify",
+    labelKey: "tools.clarify.label",
+    descriptionKey: "tools.clarify.description",
+  },
+  {
+    key: "delegation",
+    labelKey: "tools.delegation.label",
+    descriptionKey: "tools.delegation.description",
+  },
+  {
+    key: "cronjob",
+    labelKey: "tools.cronjob.label",
+    descriptionKey: "tools.cronjob.description",
+  },
+  {
+    key: "moa",
+    labelKey: "tools.moa.label",
+    descriptionKey: "tools.moa.description",
+  },
+  {
+    key: "todo",
+    labelKey: "tools.todo.label",
+    descriptionKey: "tools.todo.description",
+  },
+];
+
+function parseEnabledToolsets(content: string): Set<string> {
+  const enabled = new Set<string>();
+  let inPlatformToolsets = false;
+  let inCli = false;
+  for (const line of content.split("\n")) {
+    const trimmed = line.trimEnd();
+    if (/^\s*platform_toolsets\s*:/.test(trimmed)) {
+      inPlatformToolsets = true;
+      inCli = false;
+      continue;
+    }
+    if (inPlatformToolsets && /^\s+cli\s*:/.test(trimmed)) {
+      inCli = true;
+      continue;
+    }
+    if (inPlatformToolsets && /^\S/.test(trimmed) && !/^\s*$/.test(trimmed)) {
+      inPlatformToolsets = false;
+      inCli = false;
+      continue;
+    }
+    if (inCli && /^\s{4}\S/.test(trimmed) && !/^\s{4,}-/.test(trimmed)) {
+      inCli = false;
+      continue;
+    }
+    if (inCli) {
+      const m = trimmed.match(/^\s+-\s+["']?(\w+)["']?/);
+      if (m) enabled.add(m[1]);
+    }
+  }
+  return enabled;
+}
+
+function localizeToolDefs(
+  enabled: boolean | ((key: string) => boolean),
+): ToolsetInfo[] {
+  const locale = getAppLocale();
+  return TOOLSET_DEFS.map((d) => ({
+    key: d.key,
+    label: t(d.labelKey, locale),
+    description: t(d.descriptionKey, locale),
+    enabled: typeof enabled === "function" ? enabled(d.key) : enabled,
+  }));
+}
+
+function remoteConfigPath(profile?: string): string {
+  if (profile && profile !== "default")
+    return `$HOME/.hermes/profiles/${profile}/config.yaml`;
+  return `$HOME/.hermes/config.yaml`;
+}
+
+export async function sshGetToolsets(
+  config: SshConfig,
+  profile?: string,
+): Promise<ToolsetInfo[]> {
+  const content = await sshReadFile(config, remoteConfigPath(profile));
+  if (!content) return localizeToolDefs(true);
+  const enabled = parseEnabledToolsets(content);
+  if (enabled.size === 0 && !content.includes("platform_toolsets"))
+    return localizeToolDefs(true);
+  return localizeToolDefs((key) => enabled.has(key));
+}
+
+export async function sshSetToolsetEnabled(
+  config: SshConfig,
+  key: string,
+  enabled: boolean,
+  profile?: string,
+): Promise<boolean> {
+  try {
+    const configPath = remoteConfigPath(profile);
+    const content = await sshReadFile(config, configPath);
+    if (!content) return false;
+
+    const current = parseEnabledToolsets(content);
+    if (enabled) current.add(key);
+    else current.delete(key);
+
+    const toolsetLines = Array.from(current)
+      .sort()
+      .map((tk) => `      - ${tk}`)
+      .join("\n");
+    const newSection = `  cli:\n${toolsetLines}`;
+
+    let newContent: string;
+    if (content.includes("platform_toolsets")) {
+      const lines = content.split("\n");
+      const result: string[] = [];
+      let inPT = false,
+        inCli = false,
+        inserted = false;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trimEnd();
+        if (/^\s*platform_toolsets\s*:/.test(trimmed)) {
+          inPT = true;
+          result.push(line);
+          continue;
+        }
+        if (inPT && /^\s+cli\s*:/.test(trimmed)) {
+          inCli = true;
+          result.push(newSection);
+          inserted = true;
+          continue;
+        }
+        if (inCli) {
+          if (/^\s+-\s/.test(trimmed)) continue;
+          inCli = false;
+          result.push(line);
+          continue;
+        }
+        if (inPT && /^\S/.test(trimmed) && trimmed !== "") {
+          inPT = false;
+          if (!inserted) {
+            result.push(newSection);
+          }
+        }
+        result.push(line);
+      }
+      newContent = result.join("\n");
+    } else {
+      newContent =
+        content.trimEnd() + "\n\nplatform_toolsets:\n" + newSection + "\n";
+    }
+
+    await sshWriteFile(config, configPath, newContent);
+    return true;
+  } catch {
+    return false;
+  }
 }

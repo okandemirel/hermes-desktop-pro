@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Wrench,
   Zap,
@@ -10,6 +10,7 @@ import {
   Power,
   PackageOpen,
 } from "lucide-react";
+import type { ToolsetInfo } from "@shared/types";
 import {
   Screen,
   Card,
@@ -25,169 +26,131 @@ import {
   SectionLabel,
 } from "../../ui";
 
-interface Toolset {
-  id: string;
-  name: string;
-  description: string;
-  category: "Core" | "Media" | "Communication" | "Development";
-  toolCount: number;
-  enabled: boolean;
+type Category = "Core" | "Media" | "Reasoning" | "Automation";
+
+// Client-side display grouping only — the data itself is the fixed set of
+// toolset keys returned by the backend. Categories never leave the renderer
+// and are not persisted anywhere.
+const CATEGORY_FOR_KEY: Record<string, Category> = {
+  web: "Core",
+  browser: "Core",
+  terminal: "Core",
+  file: "Core",
+  code_execution: "Core",
+  vision: "Media",
+  image_gen: "Media",
+  tts: "Media",
+  skills: "Reasoning",
+  memory: "Reasoning",
+  session_search: "Reasoning",
+  clarify: "Reasoning",
+  delegation: "Automation",
+  cronjob: "Automation",
+  moa: "Automation",
+  todo: "Automation",
+};
+
+function categoryFor(key: string): Category {
+  return CATEGORY_FOR_KEY[key] ?? "Core";
 }
 
-const MOCK_TOOLSETS: Toolset[] = [
-  {
-    id: "filesystem",
-    name: "Filesystem",
-    description: "Read, write, and manage files on the local system",
-    category: "Core",
-    toolCount: 5,
-    enabled: true,
-  },
-  {
-    id: "terminal",
-    name: "Terminal",
-    description: "Execute shell commands in a sandboxed environment",
-    category: "Core",
-    toolCount: 3,
-    enabled: true,
-  },
-  {
-    id: "search",
-    name: "Code Search",
-    description: "Search file contents with regex and glob patterns",
-    category: "Core",
-    toolCount: 2,
-    enabled: true,
-  },
-  {
-    id: "web",
-    name: "Web Fetch",
-    description: "Fetch and parse web pages, APIs, and RSS feeds",
-    category: "Core",
-    toolCount: 4,
-    enabled: true,
-  },
-  {
-    id: "database",
-    name: "Database",
-    description: "Query and manage SQLite and Postgres databases",
-    category: "Core",
-    toolCount: 6,
-    enabled: true,
-  },
-  {
-    id: "image-gen",
-    name: "Image Generation",
-    description: "Generate and edit images via DALL·E, Stable Diffusion, and Midjourney",
-    category: "Media",
-    toolCount: 3,
-    enabled: false,
-  },
-  {
-    id: "image-analyze",
-    name: "Vision Analysis",
-    description: "Analyze images, screenshots, and diagrams with vision models",
-    category: "Media",
-    toolCount: 2,
-    enabled: true,
-  },
-  {
-    id: "audio",
-    name: "Audio Processing",
-    description: "Transcribe, synthesize, and analyze audio files",
-    category: "Media",
-    toolCount: 4,
-    enabled: false,
-  },
-  {
-    id: "telegram",
-    name: "Telegram Gateway",
-    description: "Send and receive messages via Telegram bot API",
-    category: "Communication",
-    toolCount: 8,
-    enabled: true,
-  },
-  {
-    id: "discord",
-    name: "Discord Gateway",
-    description: "Integrate with Discord servers and DMs",
-    category: "Communication",
-    toolCount: 6,
-    enabled: false,
-  },
-  {
-    id: "email",
-    name: "Email",
-    description: "Send and read emails via SMTP/IMAP",
-    category: "Communication",
-    toolCount: 3,
-    enabled: false,
-  },
-  {
-    id: "code-interpreter",
-    name: "Code Interpreter",
-    description: "Execute Python, JavaScript, and TypeScript in isolated sandboxes",
-    category: "Development",
-    toolCount: 3,
-    enabled: true,
-  },
-  {
-    id: "git",
-    name: "Git Operations",
-    description: "Clone, commit, branch, and manage git repositories",
-    category: "Development",
-    toolCount: 7,
-    enabled: true,
-  },
-  {
-    id: "package-manager",
-    name: "Package Managers",
-    description: "Install and manage packages via npm, pip, cargo, and apt",
-    category: "Development",
-    toolCount: 5,
-    enabled: false,
-  },
-];
-
-const CATEGORIES = ["All", "Core", "Media", "Communication", "Development"];
-const GROUP_ORDER = ["Core", "Media", "Communication", "Development"] as const;
+const CATEGORIES = ["All", "Core", "Media", "Reasoning", "Automation"];
+const GROUP_ORDER = ["Core", "Media", "Reasoning", "Automation"] as const;
 
 const CATEGORY_ICONS: Record<string, React.FC<{ size?: number }>> = {
   Core: Wrench,
   Media: ImageIcon,
-  Communication: MessageSquare,
-  Development: Code,
+  Reasoning: MessageSquare,
+  Automation: Code,
   All: Layers,
 };
 
-const ENABLED_BASELINE: Record<string, boolean> = Object.fromEntries(
-  MOCK_TOOLSETS.map((t) => [t.id, t.enabled]),
-);
-
 export default function ToolsView() {
-  const [toolsets, setToolsets] = useState<Toolset[]>(MOCK_TOOLSETS);
+  const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
+  const [baseline, setBaseline] = useState<Record<string, boolean>>({});
+  const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+
+  // Load the real toolsets from the backend on mount. The enabled flags come
+  // straight from platform_toolsets.cli in config.yaml (all enabled when no
+  // config section exists). An empty result keeps the honest empty state.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const data: ToolsetInfo[] = await window.hermes.getToolsets();
+        if (!active) return;
+        setToolsets(data);
+        setBaseline(Object.fromEntries(data.map((t) => [t.key, t.enabled])));
+      } catch {
+        // honest empty state — no mock fallback
+      } finally {
+        if (active) setLoaded(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filtered = toolsets.filter((t) => {
     const matchesSearch =
       !search.trim() ||
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
+      t.label.toLowerCase().includes(search.toLowerCase()) ||
       t.description.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = activeCategory === "All" || t.category === activeCategory;
+    const matchesCategory =
+      activeCategory === "All" || categoryFor(t.key) === activeCategory;
     return matchesSearch && matchesCategory;
   });
 
-  const toggleToolset = (id: string) => {
-    setToolsets((prev) => prev.map((t) => (t.id === id ? { ...t, enabled: !t.enabled } : t)));
+  // Optimistic toggle: flip the UI immediately, persist to config.yaml. On a
+  // failed write, revert so the screen never claims a state the backend does
+  // not hold.
+  const toggleToolset = async (key: string) => {
+    const target = toolsets.find((t) => t.key === key);
+    if (!target) return;
+    const next = !target.enabled;
+    setToolsets((prev) =>
+      prev.map((t) => (t.key === key ? { ...t, enabled: next } : t)),
+    );
+    try {
+      const ok = await window.hermes.setToolsetEnabled(key, next);
+      if (!ok) throw new Error("write failed");
+    } catch {
+      setToolsets((prev) =>
+        prev.map((t) => (t.key === key ? { ...t, enabled: !next } : t)),
+      );
+    }
   };
 
-  const enableAll = () => setToolsets((prev) => prev.map((t) => ({ ...t, enabled: true })));
-  const disableAll = () => setToolsets((prev) => prev.map((t) => ({ ...t, enabled: false })));
+  const setAll = async (enabled: boolean) => {
+    const targets = toolsets.filter((t) => t.enabled !== enabled);
+    if (targets.length === 0) return;
+    setToolsets((prev) => prev.map((t) => ({ ...t, enabled })));
+    await Promise.all(
+      targets.map(async (t) => {
+        try {
+          const ok = await window.hermes.setToolsetEnabled(t.key, enabled);
+          if (!ok) throw new Error("write failed");
+        } catch {
+          setToolsets((prev) =>
+            prev.map((x) =>
+              x.key === t.key ? { ...x, enabled: !enabled } : x,
+            ),
+          );
+        }
+      }),
+    );
+  };
+
+  const enableAll = () => setAll(true);
+  const disableAll = () => setAll(false);
 
   const enabledCount = toolsets.filter((t) => t.enabled).length;
-  const totalToolCount = toolsets.filter((t) => t.enabled).reduce((sum, t) => sum + t.toolCount, 0);
-  const restartRequired = toolsets.some((t) => t.enabled !== ENABLED_BASELINE[t.id]);
+  const restartRequired = toolsets.some(
+    (t) => baseline[t.key] !== undefined && t.enabled !== baseline[t.key],
+  );
 
   return (
     <Screen
@@ -237,7 +200,7 @@ export default function ToolsView() {
       {/* Quiet editorial summary — one line, not a stat strip */}
       <div className="flex flex-wrap items-center justify-between gap-3 mt-3.5 mb-5">
         <SectionLabel className="font-mono normal-case tracking-normal text-[11.5px]">
-          {enabledCount} / {toolsets.length} toolsets · {totalToolCount} tools active
+          {enabledCount} / {toolsets.length} toolsets enabled
         </SectionLabel>
         {restartRequired && (
           <Badge variant="warning">
@@ -247,7 +210,17 @@ export default function ToolsView() {
       </div>
 
       {/* Toolset grid */}
-      {filtered.length === 0 ? (
+      {toolsets.length === 0 ? (
+        <EmptyState
+          icon={<PackageOpen size={24} />}
+          title={loaded ? "No toolsets found" : "Loading toolsets…"}
+          sub={
+            loaded
+              ? "Could not read toolsets from config.yaml. Start the gateway or check your connection."
+              : undefined
+          }
+        />
+      ) : filtered.length === 0 ? (
         <EmptyState
           icon={<PackageOpen size={24} />}
           title="No toolsets found"
@@ -260,7 +233,7 @@ export default function ToolsView() {
       ) : activeCategory === "All" ? (
         <div className="flex flex-col gap-7">
           {GROUP_ORDER.map((group) => {
-            const inGroup = filtered.filter((t) => t.category === group);
+            const inGroup = filtered.filter((t) => categoryFor(t.key) === group);
             if (inGroup.length === 0) return null;
             return (
               <section key={group} className="flex flex-col gap-3">
@@ -268,9 +241,9 @@ export default function ToolsView() {
                 <div className="ui-grid stagger">
                   {inGroup.map((toolset) => (
                     <ToolsetCard
-                      key={toolset.id}
+                      key={toolset.key}
                       toolset={toolset}
-                      onToggle={() => toggleToolset(toolset.id)}
+                      onToggle={() => toggleToolset(toolset.key)}
                     />
                   ))}
                 </div>
@@ -282,9 +255,9 @@ export default function ToolsView() {
         <div className="ui-grid stagger">
           {filtered.map((toolset) => (
             <ToolsetCard
-              key={toolset.id}
+              key={toolset.key}
               toolset={toolset}
-              onToggle={() => toggleToolset(toolset.id)}
+              onToggle={() => toggleToolset(toolset.key)}
             />
           ))}
         </div>
@@ -293,8 +266,9 @@ export default function ToolsView() {
   );
 }
 
-function ToolsetCard({ toolset, onToggle }: { toolset: Toolset; onToggle: () => void }) {
-  const CatIcon = CATEGORY_ICONS[toolset.category] || Wrench;
+function ToolsetCard({ toolset, onToggle }: { toolset: ToolsetInfo; onToggle: () => void }) {
+  const category = categoryFor(toolset.key);
+  const CatIcon = CATEGORY_ICONS[category] || Wrench;
   const { enabled } = toolset;
   return (
     <Card
@@ -315,10 +289,10 @@ function ToolsetCard({ toolset, onToggle }: { toolset: Toolset; onToggle: () => 
           </IconChip>
           <div className="min-w-0">
             <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">
-              {toolset.name}
+              {toolset.label}
             </h3>
             <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
-              {toolset.category} · <span className="font-mono">{toolset.toolCount}</span> tools
+              {category}
             </div>
           </div>
         </div>

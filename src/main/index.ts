@@ -51,9 +51,13 @@ import {
   sshReadSoul,
   sshWriteSoul,
   sshResetSoul,
+  sshGetToolsets,
+  sshSetToolsetEnabled,
 } from "./ssh-remote";
 
 import { readSoul, writeSoul, resetSoul } from "./soul";
+
+import { getToolsets, setToolsetEnabled } from "./tools";
 
 import type { Attachment } from "../shared/attachments";
 
@@ -300,6 +304,24 @@ function registerIpcHandlers(): void {
     if (conn.mode === "ssh" && conn.ssh) return sshResetSoul(conn.ssh, profile);
     return resetSoul(profile);
   });
+
+  // ── Tools (platform_toolsets.cli) ─────────────────────
+  ipcMain.handle("get-toolsets", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshGetToolsets(conn.ssh, profile);
+    return getToolsets(profile);
+  });
+
+  ipcMain.handle(
+    "set-toolset-enabled",
+    (_event, key: string, enabled: boolean, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshSetToolsetEnabled(conn.ssh, key, enabled, profile);
+      return setToolsetEnabled(key, enabled, profile);
+    },
+  );
 
   // ── Chat streaming ────────────────────────────────────
   ipcMain.handle(

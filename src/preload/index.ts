@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { Attachment } from "../shared/types";
+import type { Attachment, ToolsetInfo } from "../shared/types";
 
 const api = {
   // Config
@@ -45,6 +45,16 @@ const api = {
     ipcRenderer.invoke("write-soul", content, profile),
   resetSoul: (profile?: string): Promise<string> =>
     ipcRenderer.invoke("reset-soul", profile),
+
+  // Tools (platform_toolsets.cli)
+  getToolsets: (profile?: string): Promise<ToolsetInfo[]> =>
+    ipcRenderer.invoke("get-toolsets", profile),
+  setToolsetEnabled: (
+    key: string,
+    enabled: boolean,
+    profile?: string,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("set-toolset-enabled", key, enabled, profile),
 
   // Chat streaming
   sendMessage: (
