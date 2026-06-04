@@ -23,9 +23,10 @@ export function HermesGlyph({ size = 28, className = "" }: GlyphProps) {
     >
       <defs>
         <linearGradient id="hermesGold" x1="4" y1="3" x2="28" y2="29" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stopColor="#F6DD96" />
-          <stop offset="0.5" stopColor="#E7B84E" />
-          <stop offset="1" stopColor="#C9962F" />
+          <stop offset="0" stopColor="#FCEFC2" />
+          <stop offset="0.32" stopColor="#F1CC6E" />
+          <stop offset="0.6" stopColor="#E7B84E" />
+          <stop offset="1" stopColor="#C18B2C" />
         </linearGradient>
       </defs>
       {/* messenger's staff */}
@@ -79,11 +80,11 @@ export function BrandMark({ size = 28, chip = false, glow = true, className = ""
   );
 }
 
-/** The "HERMES" serif wordmark, struck in gold. */
+/** The "HERMES" serif wordmark, struck in gold with a slow minted shimmer. */
 export function HermesWordmark({ size = 19, className = "" }: { size?: number; className?: string }) {
   return (
     <span
-      className={`gold-text ${className}`}
+      className={`gold-text-sheen ${className}`}
       style={{
         fontFamily: "var(--serif)",
         fontSize: size,
@@ -98,21 +99,15 @@ export function HermesWordmark({ size = 19, className = "" }: { size?: number; c
   );
 }
 
-/** Large glowing medallion for chat / empty-state heroes. */
+/** Large struck-gold assay seal for chat / empty-state heroes — the Hallmark mark.
+ *  A minted circular stamp: breathing aura + a slow specular ring sweeping the rim. */
 export function BrandMedallion({ size = 92, className = "" }: GlyphProps) {
   return (
     <span
-      className={`relative flex items-center justify-center shrink-0 aurora-glow ${className}`}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size * 0.32,
-        background: "linear-gradient(160deg, rgba(231,184,78,0.16), rgba(201,150,47,0.08))",
-        border: "1px solid rgba(231,184,78,0.20)",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14), 0 12px 40px rgba(231,184,78,0.28)",
-      }}
+      className={`ui-stamp ${className}`}
+      style={{ width: size, height: size, borderRadius: "50%" }}
     >
-      <HermesGlyph size={size * 0.56} className="brand-glow-lg" />
+      <HermesGlyph size={size * 0.54} className="brand-glow-lg" />
     </span>
   );
 }

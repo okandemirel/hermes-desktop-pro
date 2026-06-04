@@ -18,9 +18,10 @@
   /* Main content pane — layered light sources give the dark glass real depth
      (reads premium over ANY wallpaper, not a flat grey void) */
   --pane:
-    radial-gradient(60% 46% at 50% 34%, rgba(231, 184, 78, 0.055), transparent 62%),  /* warm hero spotlight */
-    radial-gradient(86% 64% at 92% -12%, rgba(231, 184, 78, 0.08), transparent 56%),  /* gold light, top-right */
-    radial-gradient(80% 78% at -12% 116%, rgba(74, 96, 168, 0.11), transparent 56%),  /* cool light, bottom-left */
+    radial-gradient(120% 90% at 50% 120%, rgba(0, 0, 0, 0.42), transparent 52%),       /* bottom cinematic vignette */
+    radial-gradient(58% 44% at 50% 30%, rgba(231, 184, 78, 0.085), transparent 60%),    /* warm hero spotlight (stronger) */
+    radial-gradient(86% 64% at 92% -12%, rgba(231, 184, 78, 0.085), transparent 56%),   /* gold light, top-right */
+    radial-gradient(80% 78% at -12% 116%, rgba(74, 96, 168, 0.11), transparent 56%),    /* cool light, bottom-left */
     linear-gradient(180deg, rgba(23, 24, 31, 0.30) 0%, rgba(10, 10, 14, 0.42) 100%);
 
   /* Borders / hairlines — bright enough to define glass edges */
@@ -40,9 +41,11 @@
   --accent-weak:   rgba(231, 184, 78, 0.13);
   --accent-line:   rgba(231, 184, 78, 0.32);
 
-  /* Gold — brand metal (wordmark · glyph · primary CTA) */
-  --gold-grad:   linear-gradient(135deg, #F6DD96 0%, #E7B84E 46%, #C9962F 100%);
+  /* Gold — brand metal, struck like an assay hallmark (wordmark · glyph · primary CTA) */
+  --gold-grad:   linear-gradient(135deg, #FBEFC0 0%, #F4D277 22%, #E7B84E 48%, #D6A23C 71%, #B9842A 100%);
   --gold-ink:    #2A2008;   /* near-black warm ink for text/glyphs ON gold */
+  --gold-sheen:  linear-gradient(112deg, transparent 30%, rgba(255,255,255,0.62) 49%, rgba(255,255,255,0.18) 55%, transparent 70%);
+  --gold-bevel:  inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -1px 0 rgba(120,78,18,0.4);  /* struck-metal top catch + bottom warm shadow */
 
   /* Status */
   --success: #36C26B;  --success-weak: rgba(54, 194, 107, 0.16);
@@ -124,6 +127,17 @@ ul, ol { list-style: none; }
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; color: transparent;
 }
+/* struck-gold wordmark with a slow minted shimmer drifting across the metal */
+.gold-text-sheen {
+  background:
+    var(--gold-sheen),
+    var(--gold-grad);
+  background-size: 220% 100%, 100% 100%;
+  background-position: 130% 0, 0 0;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  animation: hallmarkShimmer 6.5s ease-in-out infinite;
+}
 .brand-glow    { filter: drop-shadow(0 0 9px rgba(231, 184, 78, 0.34)); }
 .brand-glow-lg { filter: drop-shadow(0 0 22px rgba(231, 184, 78, 0.42)); }
 .aurora-glow::after {
@@ -178,9 +192,13 @@ ul, ol { list-style: none; }
 .ui-screen-inner { padding: 26px 34px 52px; }
 .ui-screen-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .ui-screen-titles { min-width: 0; }
-.ui-screen-title { font-family: var(--serif); font-size: 30px; font-weight: 400; line-height: 1.05; letter-spacing: -0.01em; color: var(--text); }
-.ui-screen-sub { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+.ui-screen-title { font-family: var(--serif); font-size: 33px; font-weight: 400; line-height: 1.04; letter-spacing: -0.012em; color: var(--text); }
+.ui-screen-sub { font-size: 13px; color: var(--text-2); margin-top: 5px; }
 .serif { font-family: var(--serif); font-weight: 400; }
+
+/* editorial eyebrow / kicker — the assay-stamp caption (mono · tracked · gold tick) */
+.ui-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent-text); margin-bottom: 9px; }
+.ui-eyebrow::before { content: ""; width: 16px; height: 1.5px; border-radius: 2px; background: var(--gold-grad); box-shadow: 0 0 6px rgba(231,184,78,0.5); }
 
 .ui-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 .ui-grid-sm { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 12px; }
@@ -203,8 +221,11 @@ ul, ol { list-style: none; }
   border: 1px solid transparent; transition: all var(--t);
 }
 .ui-btn-sm { height: 28px; padding: 0 11px; font-size: 12.5px; border-radius: var(--r-sm); gap: 6px; }
-.ui-btn-primary { background: var(--gold-grad); color: var(--gold-ink); font-weight: 620; box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 6px 18px rgba(231,184,78,0.22); }
-.ui-btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #FBE6A6 0%, #EFC560 46%, #D5A33A 100%); }
+.ui-btn-primary { position: relative; overflow: hidden; background: var(--gold-grad); color: var(--gold-ink); font-weight: 620; box-shadow: var(--gold-bevel), 0 6px 18px rgba(231,184,78,0.24); }
+.ui-btn-primary:hover:not(:disabled) { background: linear-gradient(135deg, #FFF6D6 0%, #F7DD8E 22%, #EFC560 48%, #DCA945 71%, #C28E2E 100%); }
+/* a single specular streak sweeps the struck metal on hover */
+.ui-btn-primary::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: var(--gold-sheen); background-size: 250% 100%; background-position: 180% 0; mix-blend-mode: screen; opacity: 0; transition: opacity var(--t); }
+.ui-btn-primary:hover:not(:disabled)::after { opacity: 1; animation: hallmarkSweep 0.9s cubic-bezier(0.4,0,0.2,1); }
 .ui-btn-secondary { background: var(--surface-3); color: var(--text); border-color: var(--border-2); }
 .ui-btn-secondary:hover:not(:disabled) { background: var(--active); }
 .ui-btn-ghost { background: transparent; color: var(--text-2); }
@@ -286,7 +307,9 @@ ul, ol { list-style: none; }
 
 /* ─── Empty state ─────────────────────────────────────────────── */
 .ui-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 64px 24px; }
-.ui-empty-icon { display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: var(--r-lg); background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3); margin-bottom: 16px; }
+.ui-empty-icon { display: flex; align-items: center; justify-content: center; width: 54px; height: 54px; border-radius: 16px; margin-bottom: 16px;
+  background: linear-gradient(160deg, rgba(231,184,78,0.16), rgba(201,150,47,0.06) 72%); border: 1px solid var(--accent-line); color: var(--accent-text);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 10px 30px rgba(231,184,78,0.16); }
 
 /* ─── Chat ────────────────────────────────────────────────────── */
 .ui-chat-row { display: flex; gap: 12px; align-items: flex-start; }
@@ -330,6 +353,65 @@ ul, ol { list-style: none; }
 .markdown-content table { border-collapse: collapse; width: 100%; margin: 0.7em 0; font-size: 0.85em; }
 .markdown-content th, .markdown-content td { padding: 7px 11px; border-bottom: 1px solid var(--border); text-align: left; }
 .markdown-content th { color: var(--text-2); font-weight: 600; }
+
+/* ─── Hallmark v1.1 — struck-gold signature layer ─────────────────
+   The "hallmark" = the assay stamp struck into precious metal. These
+   utilities give the gold identity real mint: specular sheen, beveled
+   metal, an assay-stamp medallion, and an orchestrated "strike" reveal.
+   Calm by default — motion is reserved for hero + brand moments only. */
+
+@keyframes hallmarkSweep   { from { background-position: 180% 0; } to { background-position: -120% 0; } }
+@keyframes hallmarkShimmer { 0%, 100% { background-position: 130% 0, 0 0; } 50% { background-position: -30% 0, 0 0; } }
+@keyframes mintRise        { 0% { opacity: 0; transform: translateY(15px) scale(0.985); filter: blur(7px); } 100% { opacity: 1; transform: none; filter: blur(0); } }
+@keyframes ringSpin        { to { transform: rotate(360deg); } }
+@keyframes auraBreathe     { 0%, 100% { opacity: 0.55; transform: scale(1); } 50% { opacity: 0.9; transform: scale(1.06); } }
+
+/* orchestrated "strike" entrance for hero elements */
+.mint-in { animation: mintRise 0.72s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.mint-in-1 { animation-delay: 0.04s; } .mint-in-2 { animation-delay: 0.12s; }
+.mint-in-3 { animation-delay: 0.20s; } .mint-in-4 { animation-delay: 0.30s; }
+
+/* assay-stamp medallion — struck-gold lozenge that authenticates the hero */
+.ui-stamp {
+  position: relative; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: linear-gradient(160deg, rgba(231,184,78,0.20), rgba(201,150,47,0.07) 70%);
+  border: 1px solid var(--accent-line);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), inset 0 0 22px rgba(231,184,78,0.10), 0 14px 44px rgba(231,184,78,0.26);
+}
+/* the breathing assay aura behind the stamp */
+.ui-stamp::before {
+  content: ""; position: absolute; inset: -34%; z-index: -1; border-radius: 50%;
+  background: radial-gradient(circle, rgba(231,184,78,0.30), transparent 66%);
+  filter: blur(16px); animation: auraBreathe 5.5s ease-in-out infinite;
+}
+/* a slow specular ring sweeping the stamp's rim */
+.ui-stamp::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255,255,255,0.55) 28deg, transparent 70deg, transparent 360deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 1.5px));
+  opacity: 0.7; animation: ringSpin 7s linear infinite;
+}
+
+/* generic specular sheen overlay for non-text gold surfaces (one-shot on hover) */
+.hallmark-sheen { position: relative; overflow: hidden; }
+.hallmark-sheen::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background: var(--gold-sheen); background-size: 250% 100%; background-position: 180% 0;
+  mix-blend-mode: screen; opacity: 0;
+}
+.hallmark-sheen:hover::before { opacity: 1; animation: hallmarkSweep 0.9s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* refined card — a faint gold edge-catch on hover (struck, not loud) */
+.ui-card-hover:hover { box-shadow: var(--shadow), var(--edge), inset 0 0 0 1px rgba(231,184,78,0.08); }
+
+/* gold filament divider — a hairline struck across editorial section breaks */
+.ui-divider-gold { height: 1px; border: 0; opacity: 0.75;
+  background: linear-gradient(90deg, transparent, var(--accent-line) 16%, rgba(231,184,78,0.55) 50%, var(--accent-line) 84%, transparent); }
+
+/* page transition — each screen mints in on nav switch */
+@keyframes paneIn { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+.pane-swap { height: 100%; animation: paneIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }

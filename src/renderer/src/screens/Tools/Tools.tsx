@@ -19,9 +19,10 @@ import {
   Segment,
   SegmentItem,
   SearchInput,
-  StatusDot,
   EmptyState,
   IconChip,
+  Divider,
+  SectionLabel,
 } from "../../ui";
 
 interface Toolset {
@@ -149,6 +150,7 @@ const MOCK_TOOLSETS: Toolset[] = [
 ];
 
 const CATEGORIES = ["All", "Core", "Media", "Communication", "Development"];
+const GROUP_ORDER = ["Core", "Media", "Communication", "Development"] as const;
 
 const CATEGORY_ICONS: Record<string, React.FC<{ size?: number }>> = {
   Core: Wrench,
@@ -157,6 +159,10 @@ const CATEGORY_ICONS: Record<string, React.FC<{ size?: number }>> = {
   Development: Code,
   All: Layers,
 };
+
+const ENABLED_BASELINE: Record<string, boolean> = Object.fromEntries(
+  MOCK_TOOLSETS.map((t) => [t.id, t.enabled]),
+);
 
 export default function ToolsView() {
   const [toolsets, setToolsets] = useState<Toolset[]>(MOCK_TOOLSETS);
@@ -181,10 +187,12 @@ export default function ToolsView() {
 
   const enabledCount = toolsets.filter((t) => t.enabled).length;
   const totalToolCount = toolsets.filter((t) => t.enabled).reduce((sum, t) => sum + t.toolCount, 0);
+  const restartRequired = toolsets.some((t) => t.enabled !== ENABLED_BASELINE[t.id]);
 
   return (
     <Screen
       icon={<Wrench size={19} />}
+      kicker="Capabilities"
       title="Tools & Plugins"
       sub="Enable or disable the toolsets your agent can use during conversations."
       actions={
@@ -198,22 +206,8 @@ export default function ToolsView() {
         </>
       }
     >
-      {/* Summary + restart notice */}
-      <div className="flex flex-wrap items-center gap-2.5 mb-5">
-        <Badge variant="success">
-          <StatusDot color="var(--success)" pulse />
-          {enabledCount} of {toolsets.length} toolsets enabled
-        </Badge>
-        <Badge variant="accent">
-          <span className="font-mono">{totalToolCount}</span> tools active
-        </Badge>
-        <Badge variant="warning">
-          <Info size={12} /> Restart required to apply changes
-        </Badge>
-      </div>
-
       {/* Search + category filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-5">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         <SearchInput
           value={search}
           onChange={setSearch}
@@ -237,38 +231,23 @@ export default function ToolsView() {
         </Segment>
       </div>
 
-      {/* Toolset grid */}
-      {filtered.length > 0 ? (
-        <div className="ui-grid stagger">
-          {filtered.map((toolset) => {
-            const CatIcon = CATEGORY_ICONS[toolset.category] || Wrench;
-            return (
-              <Card key={toolset.id} pad interactive className="flex flex-col gap-3.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <IconChip>
-                      <CatIcon size={18} />
-                    </IconChip>
-                    <div className="min-w-0">
-                      <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">
-                        {toolset.name}
-                      </h3>
-                      <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
-                        {toolset.category} · <span className="font-mono">{toolset.toolCount}</span> tools
-                      </div>
-                    </div>
-                  </div>
-                  <Toggle on={toolset.enabled} onChange={() => toggleToolset(toolset.id)} />
-                </div>
+      {/* Gold-filament section break — one confident line between controls and content */}
+      <Divider className="ui-divider-gold !my-0" />
 
-                <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
-                  {toolset.description}
-                </p>
-              </Card>
-            );
-          })}
-        </div>
-      ) : (
+      {/* Quiet editorial summary — one line, not a stat strip */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mt-3.5 mb-5">
+        <SectionLabel className="font-mono normal-case tracking-normal text-[11.5px]">
+          {enabledCount} / {toolsets.length} toolsets · {totalToolCount} tools active
+        </SectionLabel>
+        {restartRequired && (
+          <Badge variant="warning">
+            <Info size={12} /> Restart required to apply changes
+          </Badge>
+        )}
+      </div>
+
+      {/* Toolset grid */}
+      {filtered.length === 0 ? (
         <EmptyState
           icon={<PackageOpen size={24} />}
           title="No toolsets found"
@@ -278,7 +257,77 @@ export default function ToolsView() {
               : "No toolsets in this category."
           }
         />
+      ) : activeCategory === "All" ? (
+        <div className="flex flex-col gap-7">
+          {GROUP_ORDER.map((group) => {
+            const inGroup = filtered.filter((t) => t.category === group);
+            if (inGroup.length === 0) return null;
+            return (
+              <section key={group} className="flex flex-col gap-3">
+                <SectionLabel>{group}</SectionLabel>
+                <div className="ui-grid stagger">
+                  {inGroup.map((toolset) => (
+                    <ToolsetCard
+                      key={toolset.id}
+                      toolset={toolset}
+                      onToggle={() => toggleToolset(toolset.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="ui-grid stagger">
+          {filtered.map((toolset) => (
+            <ToolsetCard
+              key={toolset.id}
+              toolset={toolset}
+              onToggle={() => toggleToolset(toolset.id)}
+            />
+          ))}
+        </div>
       )}
     </Screen>
+  );
+}
+
+function ToolsetCard({ toolset, onToggle }: { toolset: Toolset; onToggle: () => void }) {
+  const CatIcon = CATEGORY_ICONS[toolset.category] || Wrench;
+  const { enabled } = toolset;
+  return (
+    <Card
+      pad
+      interactive
+      className={`flex flex-col gap-3.5 transition-opacity ${enabled ? "" : "opacity-55"}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <IconChip
+            className={
+              enabled
+                ? "shadow-[0_0_0_1px_var(--accent-line)]"
+                : "!bg-[var(--surface-2)] !text-[var(--text-3)] !border-[var(--border)]"
+            }
+          >
+            <CatIcon size={18} />
+          </IconChip>
+          <div className="min-w-0">
+            <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">
+              {toolset.name}
+            </h3>
+            <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
+              {toolset.category} · <span className="font-mono">{toolset.toolCount}</span> tools
+            </div>
+          </div>
+        </div>
+        <Toggle on={enabled} onChange={onToggle} />
+      </div>
+
+      <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
+        {toolset.description}
+      </p>
+    </Card>
   );
 }

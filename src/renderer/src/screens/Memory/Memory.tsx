@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { Brain, Plus, Trash2, Check, Pencil } from "lucide-react";
 import {
-  Screen, Card, Button, IconButton, Input, Select, Field, Tag,
-  SearchInput, EmptyState, Modal,
+  Screen, Card, Button, IconButton, Input, Select, Field, Badge,
+  SearchInput, EmptyState, Modal, SectionLabel,
 } from "../../ui";
 
 // ─── Types ──────────────────────────────────────────────────
@@ -69,6 +69,14 @@ export default function MemoryView() {
     return matchesSearch && matchesFilter;
   }), [memories, search, filter]);
 
+  // Group by category to give the grid editorial rhythm (only non-empty groups, in canonical order).
+  const groups = useMemo(
+    () => CATEGORIES
+      .map(cat => ({ cat, items: filtered.filter(m => m.category === cat) }))
+      .filter(g => g.items.length > 0),
+    [filtered],
+  );
+
   const closeAdd = () => { setShowAdd(false); setNewKey(""); setNewValue(""); setNewCategory(CATEGORIES[0]); };
 
   const handleAddMemory = () => {
@@ -100,6 +108,7 @@ export default function MemoryView() {
   return (
     <Screen
       icon={<Brain size={19} />}
+      kicker="Agent Recall"
       title="Memory"
       sub="Persistent context for your agent — what Hermes remembers about you across sessions."
       actions={
@@ -108,17 +117,25 @@ export default function MemoryView() {
         </Button>
       }
     >
-      {/* Slim capacity line */}
-      <Card pad className="mb-6">
-        <div className="flex items-center justify-between gap-3 mb-2.5">
-          <span className="text-[13px] text-[var(--text-2)]">
-            <span className="font-semibold text-[var(--text)]">{memories.length}</span> of {MAX_ENTRIES} memories
-            <span className="text-[var(--text-3)]"> · {categoryCount} categories</span>
-          </span>
-          <span className="text-[12px] font-mono text-[var(--text-3)]">{usedPct}%</span>
+      <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />
+
+      {/* ── Signature: recall capacity, struck as the editorial hero ── */}
+      <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
+        <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
+          <Brain size={24} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="ui-eyebrow">Recall Capacity</div>
+          <h2 className="serif text-[var(--text)] leading-none" style={{ fontSize: "clamp(24px, 2.6vw, 31px)", letterSpacing: "-0.012em" }}>
+            {memories.length}<span className="text-[var(--text-3)]"> / {MAX_ENTRIES}</span> remembered
+          </h2>
+          <div className="mt-3 h-1.5 rounded-full overflow-hidden bg-[var(--surface-3)]">
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(usedPct, 2)}%`, background: "var(--gold-grad)" }} />
+          </div>
         </div>
-        <div className="h-1.5 rounded-full overflow-hidden bg-[var(--surface-3)]">
-          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(usedPct, 2)}%`, background: "var(--accent)" }} />
+        <div className="self-start shrink-0 text-right">
+          <div className="serif text-[22px] leading-none text-[var(--accent-text)]">{usedPct}%</div>
+          <div className="text-[11px] text-[var(--text-3)] mt-1.5">{categoryCount} categories</div>
         </div>
       </Card>
 
@@ -148,34 +165,46 @@ export default function MemoryView() {
           action={<Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowAdd(true)}>Add Memory</Button>}
         />
       ) : (
-        <div className="ui-grid stagger">
-          {filtered.map(entry => (
-            <Card key={entry.id} pad interactive className="group flex flex-col">
-              <div className="flex items-start justify-between gap-3 mb-2.5">
-                <code className="text-[13px] font-mono font-semibold truncate text-[var(--accent-text)]">{entry.key}</code>
-                <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <IconButton onClick={() => startEdit(entry)} title="Edit"><Pencil size={14} /></IconButton>
-                  <IconButton danger onClick={() => setDeleteConfirm(entry.id)} title="Delete"><Trash2 size={14} /></IconButton>
-                </div>
+        <div className="stagger">
+          {groups.map(({ cat, items }) => (
+            <section key={cat} className="mb-9 last:mb-0">
+              {/* Editorial section head — category carries the label, so cards drop their chip */}
+              <div className="flex items-center gap-3 mb-3.5">
+                <SectionLabel>{cat}</SectionLabel>
+                <Badge variant="accent">{items.length}</Badge>
+                <hr className="ui-divider-gold flex-1" />
               </div>
 
-              {editingId === entry.id ? (
-                <Input
-                  autoFocus
-                  value={editValue}
-                  onChange={e => setEditValue(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") saveEdit(entry.id); if (e.key === "Escape") { setEditingId(null); setEditValue(""); } }}
-                  onBlur={() => saveEdit(entry.id)}
-                />
-              ) : (
-                <p className="text-[13px] leading-relaxed text-[var(--text-2)] line-clamp-2">{entry.value}</p>
-              )}
+              <div className="ui-grid">
+                {items.map(entry => (
+                  <Card key={entry.id} pad interactive className="group flex flex-col">
+                    <div className="flex items-start justify-between gap-3 mb-2.5">
+                      <code className="text-[13px] font-mono font-semibold truncate text-[var(--accent-text)]">{entry.key}</code>
+                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <IconButton onClick={() => startEdit(entry)} title="Edit"><Pencil size={14} /></IconButton>
+                        <IconButton danger onClick={() => setDeleteConfirm(entry.id)} title="Delete"><Trash2 size={14} /></IconButton>
+                      </div>
+                    </div>
 
-              <div className="flex items-center gap-2 mt-auto pt-3.5">
-                <Tag>{entry.category}</Tag>
-                <span className="text-[11.5px] font-mono text-[var(--text-3)]">{formatDate(entry.createdAt)}</span>
+                    {editingId === entry.id ? (
+                      <Input
+                        autoFocus
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") saveEdit(entry.id); if (e.key === "Escape") { setEditingId(null); setEditValue(""); } }}
+                        onBlur={() => saveEdit(entry.id)}
+                      />
+                    ) : (
+                      <p className="text-[13px] leading-relaxed text-[var(--text-2)] line-clamp-2">{entry.value}</p>
+                    )}
+
+                    <div className="flex items-center mt-auto pt-3.5">
+                      <span className="text-[11.5px] font-mono text-[var(--text-3)]">{formatDate(entry.createdAt)}</span>
+                    </div>
+                  </Card>
+                ))}
               </div>
-            </Card>
+            </section>
           ))}
         </div>
       )}

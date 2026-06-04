@@ -1,10 +1,11 @@
 import { useState } from "react";
 import {
-  User, Plus, Copy, Trash2, Settings, Check, X, Brain, Clock, MessageSquare,
+  User, Plus, Copy, Trash2, Pencil, Check, X, Brain, Clock, MessageSquare,
+  Database, Sparkles,
 } from "lucide-react";
 import {
   Screen, Card, Button, IconButton, IconChip, Badge, Input, Field, Select,
-  Modal, EmptyState, StatusDot, cx,
+  Modal, EmptyState, StatusDot, SectionLabel,
 } from "../ui";
 
 interface Profile {
@@ -71,19 +72,16 @@ export default function ProfilesView() {
   };
 
   const active = profiles.find(p => p.isActive);
+  const others = profiles.filter(p => !p.isActive);
 
   return (
     <Screen
+      kicker="Workspace Profiles"
       icon={<User size={19} />}
       title="Profiles"
-      sub="Each profile is an isolated Hermes workspace — its own config, models, skills and memory."
+      sub={`${profiles.length} isolated Hermes workspace${profiles.length !== 1 ? "s" : ""} — each its own config, models, skills and memory.`}
       actions={<Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={() => setShowCreate(true)}>New Profile</Button>}
     >
-      <p className="text-[12.5px] text-[var(--text-3)] mb-6">
-        {profiles.length} profile{profiles.length !== 1 ? "s" : ""}
-        {active && <> · <span className="text-[var(--text-2)]">{active.name}</span> active</>}
-      </p>
-
       {profiles.length === 0 ? (
         <EmptyState
           icon={<User size={22} />}
@@ -92,54 +90,104 @@ export default function ProfilesView() {
           action={<Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowCreate(true)}>New Profile</Button>}
         />
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 stagger">
-          {profiles.map(p => (
-            <Card key={p.id} pad interactive active={p.isActive} className="group flex flex-col gap-3">
-              <div className="flex items-start gap-3">
-                <IconChip className={cx(!p.isActive && "!bg-[var(--surface-3)] !text-[var(--text-3)] !border-[var(--border)]")}>
-                  <User size={18} />
-                </IconChip>
+        <>
+          {/* ── Signature hero: the current workspace, struck in gold ── */}
+          {active && (
+            <Card pad className="mint-in mint-in-1 relative overflow-hidden">
+              <div className="flex items-start gap-5">
+                <span className="ui-stamp shrink-0" style={{ width: 66, height: 66, borderRadius: "50%" }}>
+                  <User size={26} className="text-[var(--accent-text)]" />
+                </span>
                 <div className="min-w-0 flex-1">
-                  {editingId === p.id ? (
-                    <div className="flex items-center gap-1.5">
+                  <div className="ui-eyebrow">Current workspace</div>
+                  {editingId === active.id ? (
+                    <div className="flex items-center gap-1.5 max-w-sm">
                       <Input
                         value={editName}
                         onChange={e => setEditName(e.target.value)}
-                        className="!h-8 text-[13px]"
+                        className="!h-9"
                         autoFocus
-                        onKeyDown={e => { if (e.key === "Enter") handleRename(p.id); if (e.key === "Escape") setEditingId(null); }}
+                        onKeyDown={e => { if (e.key === "Enter") handleRename(active.id); if (e.key === "Escape") setEditingId(null); }}
                       />
-                      <IconButton onClick={() => handleRename(p.id)} title="Save"><Check size={15} /></IconButton>
+                      <IconButton onClick={() => handleRename(active.id)} title="Save"><Check size={15} /></IconButton>
                       <IconButton onClick={() => setEditingId(null)} title="Cancel"><X size={15} /></IconButton>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{p.name}</h3>
-                      {p.isActive
-                        ? <Badge variant="success"><StatusDot color="var(--success)" pulse /> Active</Badge>
-                        : <Badge variant="neutral"><StatusDot color="var(--text-3)" /> Idle</Badge>}
+                    <div className="flex items-center gap-3">
+                      <h2 className="serif text-[27px] leading-none text-[var(--text)] truncate">{active.name}</h2>
+                      <Badge variant="success"><StatusDot color="var(--success)" pulse /> Active</Badge>
                     </div>
                   )}
-                  <p className="text-[13px] text-[var(--text-2)] line-clamp-1 mt-1.5">{p.description}</p>
-                  <div className="flex items-center gap-4 text-[11.5px] text-[var(--text-3)] mt-2">
-                    <span className="flex items-center gap-1.5 font-mono"><Brain size={12} /> {p.model}</span>
-                    <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {p.lastUsed}</span>
-                  </div>
+                  <p className="text-[13.5px] text-[var(--text-2)] mt-2.5 max-w-xl">{active.description}</p>
                 </div>
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  {!p.isActive && (
-                    <Button variant="secondary" size="sm" leftIcon={<MessageSquare size={13} />} onClick={() => handleActivate(p.id)}>Activate</Button>
-                  )}
-                  <IconButton onClick={() => handleClone(p.id)} title="Clone"><Copy size={15} /></IconButton>
-                  <IconButton onClick={() => { setEditingId(p.id); setEditName(p.name); }} title="Rename"><Settings size={15} /></IconButton>
-                  {p.id !== "default" && (
-                    <IconButton danger onClick={() => handleDelete(p.id)} title="Delete"><Trash2 size={15} /></IconButton>
-                  )}
+                <div className="flex items-center gap-1 shrink-0">
+                  <IconButton onClick={() => { setEditingId(active.id); setEditName(active.name); }} title="Rename"><Pencil size={15} /></IconButton>
+                  <IconButton onClick={() => handleClone(active.id)} title="Clone"><Copy size={15} /></IconButton>
                 </div>
               </div>
+
+              <hr className="ui-divider-gold my-5" />
+
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-6 text-[12px] text-[var(--text-3)]">
+                  <span className="flex items-center gap-1.5 font-mono"><Brain size={13} /> {active.model}</span>
+                  <span className="flex items-center gap-1.5 font-mono capitalize"><Sparkles size={13} /> {active.provider}</span>
+                  <span className="flex items-center gap-1.5 font-mono"><Database size={13} /> memory on</span>
+                  <span className="flex items-center gap-1.5 font-mono"><Clock size={13} /> {active.lastUsed}</span>
+                </div>
+                <Button variant="primary" leftIcon={<MessageSquare size={15} />}>Open chat</Button>
+              </div>
             </Card>
-          ))}
-        </div>
+          )}
+
+          {/* ── The quieter ledger of the remaining profiles ── */}
+          {others.length > 0 && (
+            <>
+              <SectionLabel className="mt-9 mb-3.5 block">Other profiles · {others.length}</SectionLabel>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 stagger">
+                {others.map(p => (
+                  <Card key={p.id} pad interactive className="group flex items-start gap-3">
+                    <IconChip className="!bg-[var(--surface-3)] !text-[var(--text-3)] !border-[var(--border)]">
+                      <User size={18} />
+                    </IconChip>
+                    <div className="min-w-0 flex-1">
+                      {editingId === p.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            value={editName}
+                            onChange={e => setEditName(e.target.value)}
+                            className="!h-8 text-[13px]"
+                            autoFocus
+                            onKeyDown={e => { if (e.key === "Enter") handleRename(p.id); if (e.key === "Escape") setEditingId(null); }}
+                          />
+                          <IconButton onClick={() => handleRename(p.id)} title="Save"><Check size={15} /></IconButton>
+                          <IconButton onClick={() => setEditingId(null)} title="Cancel"><X size={15} /></IconButton>
+                        </div>
+                      ) : (
+                        <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{p.name}</h3>
+                      )}
+                      <p className="text-[13px] text-[var(--text-2)] line-clamp-1 mt-1.5">{p.description}</p>
+                      <div className="flex items-center gap-4 text-[11.5px] text-[var(--text-3)] mt-2">
+                        <span className="flex items-center gap-1.5 font-mono"><Brain size={12} /> {p.model}</span>
+                        <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {p.lastUsed}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <Button variant="ghost" size="sm" onClick={() => handleActivate(p.id)}>Activate</Button>
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <IconButton onClick={() => handleClone(p.id)} title="Clone"><Copy size={15} /></IconButton>
+                        <IconButton onClick={() => { setEditingId(p.id); setEditName(p.name); }} title="Rename"><Pencil size={15} /></IconButton>
+                        {p.id !== "default" && (
+                          <IconButton danger onClick={() => handleDelete(p.id)} title="Delete"><Trash2 size={15} /></IconButton>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {/* Create profile modal */}

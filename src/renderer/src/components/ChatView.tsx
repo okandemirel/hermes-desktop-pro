@@ -28,9 +28,6 @@ const SLASH_COMMANDS = [
 
 const SUGGESTIONS = [
   { icon: Globe, label: "Search the web", desc: "Pull live, cited information", cmd: "/web " },
-  { icon: Code, label: "Write & run code", desc: "Generate and execute scripts", cmd: "/code " },
-  { icon: Image, label: "Generate an image", desc: "Create visuals from a prompt", cmd: "/image " },
-  { icon: Wrench, label: "Manage tools", desc: "Configure agent capabilities", cmd: "/tools " },
   { icon: Brain, label: "Browse skills", desc: "Explore installed agent skills", cmd: "/skills " },
   { icon: Activity, label: "Token usage", desc: "Track spend, context & limits", cmd: "/usage " },
 ];
@@ -40,12 +37,6 @@ const TOOLS_ROW = [
   { icon: Code, label: "Code", cmd: "/code " },
   { icon: Image, label: "Image", cmd: "/image " },
   { icon: Wrench, label: "Tools", cmd: "/tools " },
-];
-
-const RECENTS = [
-  { icon: Code, title: "Refactor auth module", meta: "OpenCode Zen · 2h ago" },
-  { icon: Globe, title: "Research vibrancy APIs", meta: "Claude Sonnet · yesterday" },
-  { icon: Activity, title: "Draft release notes", meta: "GPT-4o · 2 days ago" },
 ];
 
 function greeting(): string {
@@ -180,48 +171,31 @@ export default function ChatView({ tab, providers, allTabs, onNewTab, onSelectTa
       </header>
 
       {messages.length === 0 ? (
-        /* Empty state — a fuller workspace hero: greeting · composer · quick actions · recents */
+        /* Empty state — one signature hero: medallion · greeting · composer · a single quiet row */
         <div className="flex-1 overflow-y-auto">
           <div className="min-h-full flex flex-col items-center px-6 pt-[6vh] pb-16 gap-10">
-            <div className="w-full max-w-[760px] flex flex-col items-center fade-in">
-              <BrandMedallion size={76} className="mb-6" />
-              <h1 className="serif text-center text-[var(--text)]" style={{ fontSize: "clamp(34px, 4.2vw, 47px)", lineHeight: 1.04 }}>{greeting()}</h1>
-              <p className="text-[14px] text-[var(--text-2)] mt-3 text-center max-w-md">
+            <div className="w-full max-w-[760px] flex flex-col items-center">
+              <BrandMedallion size={88} className="mb-6 mint-in" />
+              <div className="ui-eyebrow mint-in mint-in-1 mb-3.5">Messenger of Intelligence</div>
+              <h1 className="serif text-center text-[var(--text)] mint-in mint-in-1" style={{ fontSize: "clamp(36px, 4.4vw, 50px)", lineHeight: 1.02, letterSpacing: "-0.015em" }}>{greeting()}</h1>
+              <p className="text-[14px] text-[var(--text-2)] mt-3.5 text-center max-w-md mint-in mint-in-2">
                 Ask Hermes to write code, search the web, run tools, and orchestrate work. Press <kbd className="ui-kbd">/</kbd> for commands.
               </p>
-              <div className="w-full mt-7">{composerEl}</div>
+              <div className="w-full mt-8 mint-in mint-in-3">{composerEl}</div>
             </div>
 
-            <div className="w-full max-w-[980px] flex flex-col gap-8">
-              <section>
-                <div className="ui-rail-label mb-3">Quick actions</div>
-                <div className="grid grid-cols-3 gap-2.5 stagger">
-                  {SUGGESTIONS.map(s => (
-                    <button key={s.label} onClick={() => { setInput(s.cmd); inputRef.current?.focus(); }} className="ui-suggest no-drag">
-                      <span className="ui-suggest-icon"><s.icon size={16} /></span>
-                      <span className="ui-suggest-text">
-                        <span className="ui-suggest-title truncate">{s.label}</span>
-                        <span className="ui-suggest-desc truncate">{s.desc}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <div className="ui-rail-label mb-3">Recent sessions</div>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {RECENTS.map(r => (
-                    <button key={r.title} onClick={() => onSelectTab?.(tab.id)} className="ui-suggest no-drag">
-                      <span className="ui-suggest-icon"><r.icon size={16} /></span>
-                      <span className="ui-suggest-text">
-                        <span className="ui-suggest-title truncate">{r.title}</span>
-                        <span className="ui-suggest-desc truncate">{r.meta}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
+            <div className="w-full max-w-[760px] mint-in mint-in-4">
+              <div className="grid grid-cols-3 gap-2.5 stagger">
+                {SUGGESTIONS.map(s => (
+                  <button key={s.label} onClick={() => { setInput(s.cmd); inputRef.current?.focus(); }} className="ui-suggest no-drag">
+                    <span className="ui-suggest-icon"><s.icon size={16} /></span>
+                    <span className="ui-suggest-text">
+                      <span className="ui-suggest-title truncate">{s.label}</span>
+                      <span className="ui-suggest-desc truncate">{s.desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>

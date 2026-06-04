@@ -126,6 +126,7 @@ export default function SoulEditor() {
   return (
     <Screen
       icon={<BookOpen size={19} />}
+      kicker="Persona & Principles"
       title="Agent Soul"
       sub={
         <>

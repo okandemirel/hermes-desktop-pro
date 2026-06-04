@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { MessageSquare, Clock, ArrowRight, Trash2 } from "lucide-react";
-import { Screen, SearchInput, SectionLabel, Card, Badge, IconChip, IconButton, EmptyState } from "../ui";
+import { MessageSquare, Clock, ArrowRight, Trash2, Plus } from "lucide-react";
+import { Screen, SearchInput, SectionLabel, Card, Badge, Button, IconButton, EmptyState } from "../ui";
 
 interface Session {
   id: string;
@@ -31,7 +31,12 @@ export default function SessionsView() {
     s.preview.toLowerCase().includes(search.toLowerCase())
   );
 
-  const grouped = filtered.reduce((acc, s) => {
+  // The one signature moment: feature the most recent session as a pinned hero,
+  // then group the remainder calmly below. When searching, no hero — results stay flat.
+  const hero = !search ? filtered[0] : undefined;
+  const rest = hero ? filtered.slice(1) : filtered;
+
+  const grouped = rest.reduce((acc, s) => {
     const label = s.date === new Date().toISOString().slice(0, 10) ? "Today"
       : s.date === new Date(Date.now() - 86400000).toISOString().slice(0, 10) ? "Yesterday"
       : new Date(s.date).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
@@ -43,13 +48,15 @@ export default function SessionsView() {
 
   return (
     <Screen
+      kicker="Conversation History"
       icon={<MessageSquare size={19} />}
       title="Sessions"
       sub="Browse and search your conversation history — full-text search across every message."
       actions={
         <div className="flex items-center gap-2">
-          <Badge variant="accent">{filtered.length} session{filtered.length !== 1 ? "s" : ""}</Badge>
+          <Badge variant="neutral">{filtered.length} session{filtered.length !== 1 ? "s" : ""}</Badge>
           <Badge variant="neutral">{totalMessages.toLocaleString()} messages</Badge>
+          <Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={() => {}}>New session</Button>
         </div>
       }
     >
@@ -57,21 +64,48 @@ export default function SessionsView() {
         <SearchInput value={search} onChange={setSearch} placeholder="Search sessions with FTS5…" />
       </div>
 
+      {hero && (
+        <div className="mb-8 mint-in mint-in-1">
+          <Card
+            interactive
+            pad
+            onClick={() => {}}
+            className="group relative overflow-hidden flex items-start gap-5 border-l-2 border-l-[var(--accent)] pl-5"
+          >
+            <div className="flex-1 min-w-0">
+              <div className="ui-eyebrow">Continue where you left off</div>
+              <h2 className="serif text-[22px] leading-tight text-[var(--text)] truncate mb-2">{hero.title}</h2>
+              <p className="text-[13px] text-[var(--text-2)] line-clamp-1 mb-3.5">{hero.preview}</p>
+              <div className="flex items-center gap-4 text-[11.5px] text-[var(--text-3)]">
+                <Badge variant="neutral">{hero.profile}</Badge>
+                <Badge variant="accent" className="font-mono">{hero.model}</Badge>
+                <span className="flex items-center gap-1.5"><MessageSquare size={12} /> {hero.messageCount} messages</span>
+                <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {hero.date}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0 self-center">
+              <Button variant="primary" size="sm" leftIcon={<ArrowRight size={15} />} onClick={e => { e.stopPropagation(); }}>Resume</Button>
+              <IconButton danger title="Delete session" onClick={e => e.stopPropagation()}><Trash2 size={15} /></IconButton>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {Object.entries(grouped).map(([label, items]) => (
         <div key={label} className="mb-7">
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-1.5">
             <SectionLabel>{label}</SectionLabel>
             <Badge variant="neutral">{items.length}</Badge>
           </div>
+          <hr className="ui-divider-gold mb-3" />
           <div className="flex flex-col gap-2.5 stagger">
             {items.map(s => (
               <Card key={s.id} interactive pad onClick={() => {}} className="group flex items-start gap-4">
-                <IconChip><MessageSquare size={18} /></IconChip>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1.5">
                     <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{s.title}</h3>
                     <Badge variant="neutral">{s.profile}</Badge>
-                    <Badge variant="accent" className="font-mono">{s.model}</Badge>
+                    <Badge variant="neutral" className="font-mono">{s.model}</Badge>
                   </div>
                   <p className="text-[13px] text-[var(--text-2)] line-clamp-1 mb-2.5">{s.preview}</p>
                   <div className="flex items-center gap-4 text-[11.5px] text-[var(--text-3)]">

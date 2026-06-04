@@ -12,19 +12,20 @@ export const cx = (...a: (string | false | null | undefined)[]) => a.filter(Bool
 
 /* ── Screen shell (canonical layout → consistent positions everywhere) ── */
 export function Screen({
-  title, sub, icon, actions, children, className, maxWidth,
+  title, sub, kicker, icon, actions, children, className, maxWidth,
 }: {
-  title?: ReactNode; sub?: ReactNode; icon?: ReactNode; actions?: ReactNode;
+  title?: ReactNode; sub?: ReactNode; kicker?: ReactNode; icon?: ReactNode; actions?: ReactNode;
   children: ReactNode; className?: string; maxWidth?: number;
 }) {
   return (
     <div className="ui-screen">
       <div className={cx("ui-screen-inner", className)} style={maxWidth ? { maxWidth, marginInline: "auto" } : undefined}>
-        {(title || actions) && (
-          <header className="ui-screen-head">
+        {(title || actions || kicker) && (
+          <header className="ui-screen-head mint-in">
             <div className="flex items-center gap-3 min-w-0">
               {icon && <IconChip>{icon}</IconChip>}
               <div className="ui-screen-titles">
+                {kicker && <div className="ui-eyebrow">{kicker}</div>}
                 {title && <h1 className="ui-screen-title truncate">{title}</h1>}
                 {sub && <p className="ui-screen-sub">{sub}</p>}
               </div>
@@ -48,6 +49,10 @@ export function IconChip({ children, className }: { children: ReactNode; classNa
 
 export function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cx("ui-section-label", className)}>{children}</div>;
+}
+/** Editorial eyebrow / kicker — the assay-stamp caption (mono · tracked · gold tick). */
+export function Eyebrow({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cx("ui-eyebrow", className)}>{children}</div>;
 }
 export const Divider = ({ className }: { className?: string }) => <hr className={cx("ui-divider", className)} />;
 

@@ -6,7 +6,7 @@ import {
 import {
   Screen, Card, Button, IconButton, IconChip, Badge, Tag,
   Field, Input, Select, Modal, EmptyState, SearchInput,
-  Segment, SegmentItem, SectionLabel, StatusDot, Stat,
+  Segment, SegmentItem, SectionLabel, StatusDot,
 } from "../../ui";
 
 // ─── Types ──────────────────────────────────────────────────
@@ -184,17 +184,7 @@ export default function ModelsView() {
   const catalog = filtered.filter(m => !m.recommended);
 
   const defaultModel = models.find(m => m.id === defaultId);
-  const avgCtx = models.length
-    ? Math.round(models.reduce((s, m) => s + m.contextWindow, 0) / models.length)
-    : 0;
-
-  // ── KPI tiles (21st.dev KpiCard: trend delta + sparkline) ──
-  const stats: { label: string; value: string; delta?: number; caption: string; spark?: number[] }[] = [
-    { label: "Total Models", value: String(models.length), delta: 18, caption: "vs last month", spark: [6, 7, 7, 8, 9, 10, 10, 11, 11, 12] },
-    { label: "Providers", value: String(usedProviders.length), delta: 12, caption: "vs last month", spark: [5, 5, 6, 6, 6, 7, 7, 7, 8, 8] },
-    { label: "Default Model", value: defaultModel ? defaultModel.name : "—", caption: "current selection" },
-    { label: "Avg Context", value: avgCtx ? fmtCtx(avgCtx) : "—", delta: -4, caption: "vs last month", spark: [220, 215, 210, 205, 200, 198, 195, 192, 190, 188] },
-  ];
+  const DefaultIcon = defaultModel ? (PROVIDER_ICONS[defaultModel.provider] || Cpu) : Cpu;
 
   // ── Card renderer ──
   const renderCard = (m: ModelConfig) => {
@@ -229,19 +219,10 @@ export default function ModelsView() {
           })}
         </div>
 
-        <div className="grid grid-cols-3 gap-2 pt-0.5">
-          <div className="rounded-[8px] bg-[var(--surface-3)] border border-[var(--border)] px-2.5 py-1.5">
-            <div className="text-[10px] uppercase tracking-wide text-[var(--text-3)] font-semibold">Context</div>
-            <div className="text-[13px] font-mono text-[var(--text)] mt-0.5">{fmtCtx(m.contextWindow)}</div>
-          </div>
-          <div className="rounded-[8px] bg-[var(--surface-3)] border border-[var(--border)] px-2.5 py-1.5">
-            <div className="text-[10px] uppercase tracking-wide text-[var(--text-3)] font-semibold">In / 1M</div>
-            <div className="text-[13px] font-mono text-[var(--text)] mt-0.5">{fmtPrice(m.priceIn)}</div>
-          </div>
-          <div className="rounded-[8px] bg-[var(--surface-3)] border border-[var(--border)] px-2.5 py-1.5">
-            <div className="text-[10px] uppercase tracking-wide text-[var(--text-3)] font-semibold">Out / 1M</div>
-            <div className="text-[13px] font-mono text-[var(--text)] mt-0.5">{fmtPrice(m.priceOut)}</div>
-          </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px]">
+          <span className="text-[var(--text-3)]">Context <span className="font-mono text-[var(--text)] ml-0.5">{fmtCtx(m.contextWindow)}</span></span>
+          <span className="text-[var(--text-3)]">In <span className="font-mono text-[var(--text)] ml-0.5">{fmtPrice(m.priceIn)}</span></span>
+          <span className="text-[var(--text-3)]">Out <span className="font-mono text-[var(--text)] ml-0.5">{fmtPrice(m.priceOut)}</span></span>
         </div>
 
         <div className="mt-auto pt-3.5 border-t border-[var(--border)] flex items-center justify-between gap-2">
@@ -264,19 +245,37 @@ export default function ModelsView() {
   return (
     <Screen
       icon={<Cpu size={19} />}
+      kicker="Model Catalog"
       title="Models"
       sub="Manage your model library — these appear in the chat model selector."
       actions={<Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={openAddForm}>Add Model</Button>}
     >
-      {/* ── KPI summary row ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 stagger">
-        {stats.map(s => (
-          <Stat key={s.label} label={s.label} value={s.value} delta={s.delta} caption={s.caption} spark={s.spark} />
-        ))}
-      </div>
+      <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />
+
+      {/* ── Signature: the current default model, struck as the focal hero ── */}
+      {defaultModel && (
+        <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
+          <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
+            <DefaultIcon size={24} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="ui-eyebrow">Default Model</div>
+            <h2 className="serif text-[var(--text)] leading-none" style={{ fontSize: "clamp(24px, 2.6vw, 31px)", letterSpacing: "-0.012em" }}>
+              {defaultModel.name}
+            </h2>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[12.5px]">
+              <span className="text-[var(--text-2)]">{defaultModel.provider}</span>
+              <code className="font-mono text-[var(--text-3)]">{defaultModel.modelId}</code>
+              <span className="text-[var(--text-3)]">Context <span className="font-mono text-[var(--text-2)]">{fmtCtx(defaultModel.contextWindow)}</span></span>
+              <span className="text-[var(--text-3)]">temp <span className="font-mono text-[var(--text-2)]">{defaultModel.temperature.toFixed(1)}</span></span>
+            </div>
+          </div>
+          <Badge variant="accent" className="self-start shrink-0"><StatusDot color="var(--accent)" /> Active</Badge>
+        </Card>
+      )}
 
       {/* ── Search + provider filter ── */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6 mint-in mint-in-2">
         <SearchInput
           value={search}
           onChange={setSearch}
@@ -303,24 +302,24 @@ export default function ModelsView() {
       ) : (
         <>
           {recommended.length > 0 && (
-            <section className="mb-7">
+            <section className="mb-7 mint-in mint-in-3">
               <div className="flex items-center gap-2 mb-3">
                 <SectionLabel>Recommended</SectionLabel>
                 <Badge variant="accent">{recommended.length}</Badge>
               </div>
-              <div className="ui-grid stagger">
+              <div className="ui-grid">
                 {recommended.map(renderCard)}
               </div>
             </section>
           )}
 
           {catalog.length > 0 && (
-            <section>
+            <section className="mint-in mint-in-4">
               <div className="flex items-center gap-2 mb-3">
                 <SectionLabel>{activeProvider === "All" ? "Catalog" : activeProvider}</SectionLabel>
                 <Badge variant="neutral">{catalog.length}</Badge>
               </div>
-              <div className="ui-grid stagger">
+              <div className="ui-grid">
                 {catalog.map(renderCard)}
               </div>
             </section>

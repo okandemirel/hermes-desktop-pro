@@ -15,9 +15,8 @@ import {
   Card,
   Button,
   IconButton,
-  Badge,
-  Tag,
   StatusDot,
+  SectionLabel,
   Field,
   Input,
   Textarea,
@@ -201,9 +200,15 @@ export default function SchedulesView() {
   const activeCount = jobs.filter((j) => j.status === "active").length;
   const canSubmit = !!formName.trim() && !!formPrompt.trim();
 
+  // Signature hero: the soonest next-to-run active job (first active in order),
+  // promoted to a struck-gold focal moment. The rest fall into the calm list.
+  const heroJob = jobs.find((j) => j.status === "active") ?? null;
+  const restJobs = jobs.filter((j) => j.id !== heroJob?.id);
+
   return (
     <Screen
       icon={<Clock size={19} />}
+      kicker={jobs.length > 0 ? `Automation · ${activeCount} running` : "Automation"}
       title="Schedules"
       sub="Automate agent tasks with cron jobs — they run on the Hermes engine and deliver where you choose."
       actions={
@@ -212,25 +217,10 @@ export default function SchedulesView() {
         </Button>
       }
     >
-      {/* Summary stats rail */}
-      {jobs.length > 0 && (
-        <div className="flex items-center flex-wrap gap-2 mb-5">
-          <Badge variant="accent">
-            <Calendar size={12} />
-            <span className="font-mono">{jobs.length}</span> job{jobs.length !== 1 ? "s" : ""}
-          </Badge>
-          <Badge variant="success">
-            <StatusDot color="var(--success)" />
-            <span className="font-mono">{activeCount}</span> active
-          </Badge>
-          <Badge variant="neutral">
-            <Pause size={11} />
-            <span className="font-mono">{jobs.length - activeCount}</span> paused
-          </Badge>
-        </div>
-      )}
+      {/* Gold filament — the Hallmark section rhythm */}
+      {jobs.length > 0 && <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />}
 
-      {/* Jobs list — stacked full-width rows */}
+      {/* Jobs list — one struck hero + a calm list */}
       {jobs.length === 0 ? (
         <EmptyState
           icon={<Clock size={24} />}
@@ -243,67 +233,120 @@ export default function SchedulesView() {
           }
         />
       ) : (
-        <div className="flex flex-col gap-3 stagger">
-          {jobs.map((job) => {
-            const isActive = job.status === "active";
-            return (
-              <Card key={job.id} pad interactive className="flex flex-col gap-3">
-                <div className="flex items-start gap-3">
-                  {/* Status dot */}
-                  <span className="flex items-center justify-center shrink-0 w-9 h-9 rounded-[10px] bg-[var(--surface-3)] border border-[var(--border)]">
-                    <StatusDot color={isActive ? "var(--success)" : "var(--text-3)"} pulse={isActive} />
-                  </span>
+        <>
+          {/* ── Signature: the soonest active job, struck as the focal hero ── */}
+          {heroJob && (
+            <Card pad className="mb-7 mint-in mint-in-1">
+              <div className="flex items-start gap-5">
+                <span className="ui-stamp shrink-0 w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
+                  <Timer size={24} />
+                </span>
 
-                  <div className="flex-1 min-w-0">
-                    {/* Top row: name + status + cron */}
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{job.name}</h3>
-                      <Badge variant={isActive ? "success" : "neutral"}>
-                        {isActive ? "Active" : "Paused"}
-                      </Badge>
-                      <Tag className="font-mono text-[var(--accent-text)]">{job.schedule}</Tag>
-                      <span className="text-[12px] text-[var(--text-3)]">{job.scheduleHuman}</span>
-                    </div>
+                <div className="min-w-0 flex-1">
+                  <div className="ui-eyebrow">Next to run</div>
+                  <h2
+                    className="serif text-[var(--text)] leading-none truncate"
+                    style={{ fontSize: "clamp(22px, 2.4vw, 29px)", letterSpacing: "-0.012em" }}
+                  >
+                    {heroJob.name}
+                  </h2>
 
-                    {/* Prompt preview */}
-                    <p className="text-[13px] leading-relaxed text-[var(--text-2)] mt-2 line-clamp-2">
-                      {job.prompt}
-                    </p>
-                  </div>
+                  <p className="text-[13.5px] leading-relaxed text-[var(--text-2)] mt-3 line-clamp-2 max-w-[58ch]">
+                    {heroJob.prompt}
+                  </p>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <IconButton onClick={() => toggleStatus(job.id)} title={isActive ? "Pause" : "Resume"}>
-                      {isActive ? <Pause size={15} /> : <Play size={15} />}
-                    </IconButton>
-                    <IconButton onClick={() => startEdit(job)} title="Edit">
-                      <Pencil size={15} />
-                    </IconButton>
-                    <IconButton danger onClick={() => setDeleteConfirmId(job.id)} title="Delete">
-                      <Trash2 size={15} />
-                    </IconButton>
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-4 text-[12.5px]">
+                    <span className="text-[var(--text-3)]">
+                      Runs{" "}
+                      <span className="serif text-[var(--accent-text)] text-[15px] align-baseline">
+                        {heroJob.nextRun}
+                      </span>
+                    </span>
+                    <code className="font-mono text-[var(--text-3)]">{heroJob.schedule}</code>
+                    <span className="text-[var(--text-3)]">
+                      <Bell size={12} className="inline mr-1 -mt-0.5" />
+                      {heroJob.deliveryTarget}
+                    </span>
                   </div>
                 </div>
 
-                {/* Meta row */}
-                <div className="flex items-center gap-2 flex-wrap pt-3 border-t border-[var(--border)]">
-                  <Tag>
-                    <Timer size={12} className="mr-1 text-[var(--text-3)]" />
-                    Next:&nbsp;<span className="text-[var(--text-2)]">{job.nextRun}</span>
-                  </Tag>
-                  <Tag>
-                    <Calendar size={12} className="mr-1 text-[var(--text-3)]" />
-                    Last:&nbsp;<span className="text-[var(--text-2)]">{job.lastRun}</span>
-                  </Tag>
-                  <Tag>
-                    <Bell size={12} className="mr-1 text-[var(--text-3)]" />
-                    <span className="text-[var(--text-2)]">{job.deliveryTarget}</span>
-                  </Tag>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <IconButton onClick={() => toggleStatus(heroJob.id)} title="Pause">
+                    <Pause size={15} />
+                  </IconButton>
+                  <IconButton onClick={() => startEdit(heroJob)} title="Edit">
+                    <Pencil size={15} />
+                  </IconButton>
+                  <IconButton danger onClick={() => setDeleteConfirmId(heroJob.id)} title="Delete">
+                    <Trash2 size={15} />
+                  </IconButton>
                 </div>
-              </Card>
-            );
-          })}
-        </div>
+              </div>
+            </Card>
+          )}
+
+          {/* ── The calm list — quieter, near-monochrome rows ── */}
+          {restJobs.length > 0 && (
+            <>
+              {heroJob && <SectionLabel className="mb-3 mint-in mint-in-2">Other schedules</SectionLabel>}
+              <div className="flex flex-col gap-2 stagger">
+                {restJobs.map((job) => {
+                  const isActive = job.status === "active";
+                  return (
+                    <Card
+                      key={job.id}
+                      pad
+                      interactive
+                      className="group flex items-center gap-3.5"
+                    >
+                      <StatusDot
+                        color={isActive ? "var(--success)" : "var(--text-3)"}
+                        pulse={isActive}
+                      />
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-2.5 min-w-0">
+                          <h3 className="text-[13.5px] font-medium text-[var(--text)] truncate">
+                            {job.name}
+                          </h3>
+                          <code className="font-mono text-[11.5px] text-[var(--text-3)] shrink-0">
+                            {job.schedule}
+                          </code>
+                          {!isActive && (
+                            <span className="text-[11px] text-[var(--text-3)] uppercase tracking-wide shrink-0">
+                              Paused
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-x-4 gap-y-0.5 mt-1 text-[12px] text-[var(--text-3)] min-w-0">
+                          <span className="truncate">
+                            Next <span className="text-[var(--text-2)]">{job.nextRun}</span>
+                          </span>
+                          <span className="shrink-0">{job.deliveryTarget}</span>
+                          <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            Last <span className="text-[var(--text-2)]">{job.lastRun}</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
+                        <IconButton onClick={() => toggleStatus(job.id)} title={isActive ? "Pause" : "Resume"}>
+                          {isActive ? <Pause size={15} /> : <Play size={15} />}
+                        </IconButton>
+                        <IconButton onClick={() => startEdit(job)} title="Edit">
+                          <Pencil size={15} />
+                        </IconButton>
+                        <IconButton danger onClick={() => setDeleteConfirmId(job.id)} title="Delete">
+                          <Trash2 size={15} />
+                        </IconButton>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {/* Add / Edit modal */}

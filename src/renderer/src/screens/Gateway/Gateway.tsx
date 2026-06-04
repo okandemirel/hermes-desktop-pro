@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { BrandMedallion } from "../../components/BrandMark";
 import {
-  Screen, Card, Button, IconChip, Badge, StatusDot, Field, Input, Modal, EmptyState, SectionLabel,
+  Screen, Card, Button, IconChip, Badge, StatusDot, Field, Input, Modal, EmptyState,
 } from "../../ui";
 
 // ─── Platform definitions ────────────────────────────────────────────────
@@ -122,6 +122,7 @@ export default function GatewayView() {
 
   return (
     <Screen
+      kicker="Local Server"
       icon={<Activity size={19} />}
       title={`Gateway ${isRunning ? "Running" : "Stopped"}`}
       sub={
@@ -131,7 +132,7 @@ export default function GatewayView() {
             {isRunning ? "Live" : "Idle"}
           </span>
           <span>·</span>
-          <span>{connectedCount} connected</span>
+          <span className={connectedCount > 0 ? "gold-text font-semibold" : undefined}>{connectedCount} connected</span>
           <span>·</span>
           <span>{offlineCount} offline</span>
           {errorCount > 0 && <><span>·</span><span className="text-[var(--error)]">{errorCount} errors</span></>}
@@ -148,46 +149,63 @@ export default function GatewayView() {
         )
       }
     >
-      {connectedCount === 0 && gatewayStatus === "stopped" && (
-        <Card pad className="flex flex-col items-center text-center mb-6 fade-in" >
-          <BrandMedallion size={72} className="mb-4" />
-          <h2 className="text-[18px] font-semibold text-[var(--text)]">Connect your channels</h2>
-          <p className="text-[13px] text-[var(--text-2)] mt-1.5 max-w-md">
-            Configure a platform below, then start the gateway to bring Hermes into Telegram, Discord, Slack and more.
-          </p>
-        </Card>
-      )}
+      <div className="mx-auto" style={{ maxWidth: 960 }}>
+        {connectedCount === 0 && gatewayStatus === "stopped" && (
+          <Card pad className="flex flex-col items-center text-center mb-7 fade-in">
+            <BrandMedallion size={72} className="mb-4" />
+            <h2 className="text-[18px] font-semibold text-[var(--text)]">Connect your channels</h2>
+            <p className="text-[13px] text-[var(--text-2)] mt-1.5 max-w-md">
+              Configure a platform below, then start the gateway to bring Hermes into Telegram, Discord, Slack and more.
+            </p>
+          </Card>
+        )}
 
-      <SectionLabel className="mb-3.5">Channels · {platforms.length} platforms</SectionLabel>
+        <hr className="ui-divider-gold mb-6" />
 
-      <div className="ui-grid-sm stagger">
-        {platforms.map(platform => {
-          const Icon = platform.icon;
-          return (
-            <Card key={platform.id} pad interactive onClick={() => toggleExpand(platform.id)} className="flex items-center gap-3">
-              <IconChip>
-                <Icon size={17} />
-              </IconChip>
-              <div className="flex-1 min-w-0">
-                <div className="text-[14px] font-semibold text-[var(--text)] truncate">{platform.name}</div>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <StatusDot color={STATUS_COLOR[platform.status]} pulse={platform.status === "connected"} />
-                  <span className="text-[11.5px] text-[var(--text-3)]">{STATUS_LABEL[platform.status]}</span>
+        <div className="ui-grid stagger">
+          {platforms.map(platform => {
+            const Icon = platform.icon;
+            const showStatus = platform.status === "connected" || platform.status === "error";
+            return (
+              <Card
+                key={platform.id}
+                pad
+                interactive
+                active={platform.configured}
+                onClick={() => toggleExpand(platform.id)}
+                className="flex items-center gap-3"
+              >
+                <IconChip>
+                  <Icon size={17} />
+                </IconChip>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] font-semibold text-[var(--text)] truncate">{platform.name}</div>
+                  {showStatus && (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <StatusDot color={STATUS_COLOR[platform.status]} pulse={platform.status === "connected"} />
+                      <span
+                        className="text-[11.5px] font-medium"
+                        style={{ color: STATUS_COLOR[platform.status] }}
+                      >
+                        {STATUS_LABEL[platform.status]}
+                      </span>
+                    </div>
+                  )}
                 </div>
-              </div>
-              {platform.configured && <Badge variant="accent">Configured</Badge>}
-            </Card>
-          );
-        })}
-      </div>
+                {platform.configured && <Badge variant="accent">Configured</Badge>}
+              </Card>
+            );
+          })}
+        </div>
 
-      {platforms.length === 0 && (
-        <EmptyState
-          icon={<Activity size={22} />}
-          title="No channels"
-          sub="No platforms are available to configure."
-        />
-      )}
+        {platforms.length === 0 && (
+          <EmptyState
+            icon={<Activity size={22} />}
+            title="No channels"
+            sub="No platforms are available to configure."
+          />
+        )}
+      </div>
 
       <Modal
         open={!!expandedPlatform}

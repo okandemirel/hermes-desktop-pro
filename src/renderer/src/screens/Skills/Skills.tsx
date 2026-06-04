@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
-import { Brain, Search, Trash2, Download, Sparkles, Check, Package } from "lucide-react";
-import { Screen, Card, Button, Badge, Tag, SectionLabel, Input, EmptyState, IconChip, cx } from "../../ui";
+import { Brain, Trash2, Download, Sparkles, Check, Package } from "lucide-react";
+import { Screen, Card, Button, IconButton, Badge, Tag, Field, Input, SearchInput, EmptyState, IconChip, Modal, cx } from "../../ui";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -35,6 +35,7 @@ export default function SkillsView() {
   const [skills, setSkills] = useState<Skill[]>(MOCK_SKILLS);
   const [installId, setInstallId] = useState("");
   const [installing, setInstalling] = useState(false);
+  const [installOpen, setInstallOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -47,7 +48,11 @@ export default function SkillsView() {
     );
   }, [query, skills]);
 
-  const bundled = filtered.filter(s => s.isBundled);
+  // The house skill — promoted as the screen's single signature anchor.
+  const houseSkill = skills.find(s => s.id === "hermes-agent");
+  const houseVisible = filtered.some(s => s.id === "hermes-agent");
+
+  const bundled = filtered.filter(s => s.isBundled && s.id !== "hermes-agent");
   const custom = filtered.filter(s => !s.isBundled);
   const installedCount = skills.filter(s => s.installed).length;
 
@@ -73,67 +78,67 @@ export default function SkillsView() {
       setSkills(prev => [...prev, newSkill]);
       setInstallId("");
       setInstalling(false);
+      setInstallOpen(false);
     }, 800);
   };
 
   return (
     <Screen
       icon={<Brain size={19} />}
+      kicker="Agent Skills"
       title="Skills"
       sub={`Extend your agent with reusable skills and workflows — ${installedCount} of ${skills.length} installed.`}
       actions={<Badge variant="success"><Check size={11} /> {installedCount} active</Badge>}
     >
-      {/* Install + search toolbar */}
-      <Card pad className="flex flex-col gap-3">
-        <SectionLabel className="flex items-center gap-1.5">
-          <Download size={12} /> Install New Skill
-        </SectionLabel>
-        <div className="flex flex-col sm:flex-row gap-2.5">
-          <Input
-            value={installId}
-            onChange={e => setInstallId(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") handleInstall(); }}
-            placeholder="Enter a skill name or URL to install…"
-            className="flex-1"
-          />
-          <Button
-            variant="primary"
-            onClick={handleInstall}
-            disabled={!installId.trim() || installing}
-            leftIcon={<Download size={15} />}
-          >
-            {installing ? "Installing…" : "Install"}
-          </Button>
-        </div>
-        <div className="ui-search">
-          <Search size={16} className="shrink-0" />
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search skills by name, tag, or description…"
-          />
-        </div>
-      </Card>
+      <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />
+
+      {/* ── Signature: the house skill, struck as the focal hero ── */}
+      {houseSkill && houseVisible && (
+        <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
+          <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
+            <Sparkles size={24} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="ui-eyebrow">Core Skill</div>
+            <h2 className="serif text-[var(--text)] leading-none" style={{ fontSize: "clamp(24px, 2.6vw, 31px)", letterSpacing: "-0.012em" }}>
+              {houseSkill.name}
+            </h2>
+            <p className="text-[12.5px] text-[var(--text-2)] mt-2.5 max-w-xl">{houseSkill.description}</p>
+          </div>
+          <Badge variant="accent" className="self-start shrink-0"><Check size={11} /> Bundled</Badge>
+        </Card>
+      )}
+
+      {/* ── Search + install, on one calm line ── */}
+      <div className="flex flex-wrap items-center gap-3 mb-7 mint-in mint-in-2">
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Search skills by name, tag, or description…"
+          className="flex-1 min-w-[240px] max-w-[440px]"
+        />
+        <Button variant="primary" onClick={() => setInstallOpen(true)} leftIcon={<Download size={15} />}>
+          Install Skill
+        </Button>
+      </div>
 
       {/* Content */}
       {filtered.length === 0 ? (
-        <div className="mt-6">
-          <EmptyState
-            icon={<Brain size={24} />}
-            title="No skills found"
-            sub={query ? "Try a different search term." : "Install your first skill above."}
-          />
-        </div>
+        <EmptyState
+          icon={<Brain size={24} />}
+          title="No skills found"
+          sub={query ? "Try a different search term." : "Install your first skill above."}
+        />
       ) : (
-        <div className="flex flex-col gap-8 mt-6 fade-in">
+        <div className="flex flex-col gap-8">
           {bundled.length > 0 && (
             <Section
               title="Bundled Skills"
               subtitle="Core skills included with Hermes Agent"
-              icon={<Sparkles size={15} />}
               count={bundled.length}
               skills={bundled}
               onToggle={toggleInstall}
+              className="mint-in mint-in-3"
             />
           )}
 
@@ -141,14 +146,39 @@ export default function SkillsView() {
             <Section
               title="Custom Skills"
               subtitle="Community and custom installed skills"
-              icon={<Package size={15} />}
               count={custom.length}
               skills={custom}
               onToggle={toggleInstall}
+              className="mint-in mint-in-4"
             />
           )}
         </div>
       )}
+
+      {/* ── Install modal ── */}
+      <Modal
+        open={installOpen}
+        onClose={() => { if (!installing) setInstallOpen(false); }}
+        title="Install New Skill"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setInstallOpen(false)} disabled={installing}>Cancel</Button>
+            <Button variant="primary" onClick={handleInstall} disabled={!installId.trim() || installing} leftIcon={<Download size={15} />}>
+              {installing ? "Installing…" : "Install"}
+            </Button>
+          </>
+        }
+      >
+        <Field label="Skill name or URL" hint="Paste a registry name or a Git URL to install.">
+          <Input
+            autoFocus
+            value={installId}
+            onChange={e => setInstallId(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleInstall(); }}
+            placeholder="e.g. web-scraper or https://…"
+          />
+        </Field>
+      </Modal>
     </Screen>
   );
 }
@@ -158,36 +188,32 @@ export default function SkillsView() {
 function Section({
   title,
   subtitle,
-  icon,
   count,
   skills,
   onToggle,
+  className,
 }: {
   title: string;
   subtitle: string;
-  icon: React.ReactNode;
   count: number;
   skills: Skill[];
   onToggle: (id: string) => void;
+  className?: string;
 }) {
   return (
-    <div>
-      <div className="flex items-center gap-3 mb-4">
-        <IconChip>{icon}</IconChip>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="text-[14px] font-semibold text-[var(--text)]">{title}</h2>
-            <Badge variant="accent">{count}</Badge>
-          </div>
-          <p className="text-[12.5px] text-[var(--text-2)]">{subtitle}</p>
-        </div>
+    <section className={className}>
+      <div className="flex items-baseline gap-3">
+        <h2 className="serif text-[20px] leading-none text-[var(--text)]">{title}</h2>
+        <Badge variant="accent">{count}</Badge>
+        <p className="text-[12.5px] text-[var(--text-3)] truncate">{subtitle}</p>
       </div>
+      <hr className="ui-divider-gold mt-3 mb-5" />
       <div className="ui-grid stagger">
         {skills.map(skill => (
           <SkillCard key={skill.id} skill={skill} onToggle={onToggle} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -202,14 +228,19 @@ function SkillCard({ skill, onToggle }: { skill: Skill; onToggle: (id: string) =
           {skill.isBundled ? <Sparkles size={18} /> : <Package size={18} />}
         </IconChip>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{skill.name}</h3>
-            <span className="text-[11px] font-mono shrink-0 text-[var(--text-3)]">v{skill.version}</span>
-          </div>
-          <p className="text-[11.5px] text-[var(--text-3)]">{skill.author}</p>
+          <h3 className="serif text-[16px] leading-tight text-[var(--text)] truncate">{skill.name}</h3>
+          <p className="text-[11.5px] text-[var(--text-3)]">
+            {skill.author} <span className="font-mono text-[var(--text-3)]">· v{skill.version}</span>
+          </p>
         </div>
-        {skill.installed && (
-          <Badge variant="success"><Check size={11} /> Installed</Badge>
+        {skill.installed ? (
+          <IconButton danger onClick={() => onToggle(skill.id)} title="Remove skill" aria-label="Remove skill">
+            <Trash2 size={15} />
+          </IconButton>
+        ) : (
+          <Button variant="primary" size="sm" onClick={() => onToggle(skill.id)} leftIcon={<Download size={13} />}>
+            Install
+          </Button>
         )}
       </div>
 
@@ -217,23 +248,10 @@ function SkillCard({ skill, onToggle }: { skill: Skill; onToggle: (id: string) =
       <p className="text-[12.5px] leading-relaxed text-[var(--text-2)]">{skill.description}</p>
 
       {/* Tags */}
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="flex items-center gap-1.5 flex-wrap mt-auto">
         {skill.tags.map(tag => (
           <Tag key={tag}>{tag}</Tag>
         ))}
-      </div>
-
-      {/* Action */}
-      <div className="mt-auto pt-3.5 border-t border-[var(--border)]">
-        <Button
-          variant={skill.installed ? "danger" : "primary"}
-          size="sm"
-          className="w-full"
-          onClick={() => onToggle(skill.id)}
-          leftIcon={skill.installed ? <Trash2 size={14} /> : <Download size={14} />}
-        >
-          {skill.installed ? "Remove" : "Install"}
-        </Button>
       </div>
     </Card>
   );

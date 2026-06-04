@@ -19,7 +19,6 @@ interface KanbanTask {
   tags: string[];
   comments: number;
   dueDate: string;
-  labelColor: string;
 }
 
 const COLUMNS: { id: Status; label: string; color: string }[] = [
@@ -30,23 +29,23 @@ const COLUMNS: { id: Status; label: string; color: string }[] = [
 ];
 
 const MOCK_TASKS: KanbanTask[] = [
-  { id: "1", title: "Set up CI/CD pipeline", status: "todo", assignee: "Okan", priority: "high", tags: ["devops", "release"], comments: 3, dueDate: "Jun 9", labelColor: "var(--error)" },
-  { id: "2", title: "Fix memory leak in worker", status: "todo", assignee: "Mira", priority: "urgent", tags: ["bug", "backend"], comments: 2, dueDate: "Jun 6", labelColor: "var(--error)" },
-  { id: "3", title: "Provider rate-limit backoff", status: "todo", assignee: "Theo", priority: "medium", tags: ["backend"], comments: 1, dueDate: "Jun 12", labelColor: "var(--warning)" },
-  { id: "4", title: "Onboarding tour", status: "todo", assignee: "Lena", priority: "low", tags: ["frontend", "ux"], comments: 0, dueDate: "Jun 20", labelColor: "var(--text-3)" },
+  { id: "1", title: "Set up CI/CD pipeline", status: "todo", assignee: "Okan", priority: "high", tags: ["devops", "release"], comments: 3, dueDate: "Jun 9" },
+  { id: "2", title: "Fix memory leak in worker", status: "todo", assignee: "Mira", priority: "urgent", tags: ["bug", "backend"], comments: 2, dueDate: "Jun 6" },
+  { id: "3", title: "Provider rate-limit backoff", status: "todo", assignee: "Theo", priority: "medium", tags: ["backend"], comments: 1, dueDate: "Jun 12" },
+  { id: "4", title: "Onboarding tour", status: "todo", assignee: "Lena", priority: "low", tags: ["frontend", "ux"], comments: 0, dueDate: "Jun 20" },
 
-  { id: "5", title: "Implement user authentication", status: "in_progress", assignee: "Alice", priority: "high", tags: ["backend", "security"], comments: 5, dueDate: "Jun 7", labelColor: "var(--error)" },
-  { id: "6", title: "Write API documentation", status: "in_progress", assignee: "Bob", priority: "medium", tags: ["docs"], comments: 1, dueDate: "Jun 11", labelColor: "var(--warning)" },
-  { id: "7", title: "Streaming token renderer", status: "in_progress", assignee: "Theo", priority: "high", tags: ["frontend", "perf"], comments: 7, dueDate: "Jun 8", labelColor: "var(--accent)" },
-  { id: "8", title: "Skills marketplace search", status: "in_progress", assignee: "Mira", priority: "medium", tags: ["search"], comments: 2, dueDate: "Jun 14", labelColor: "var(--warning)" },
+  { id: "5", title: "Implement user authentication", status: "in_progress", assignee: "Alice", priority: "high", tags: ["backend", "security"], comments: 5, dueDate: "Jun 7" },
+  { id: "6", title: "Write API documentation", status: "in_progress", assignee: "Bob", priority: "medium", tags: ["docs"], comments: 1, dueDate: "Jun 11" },
+  { id: "7", title: "Streaming token renderer", status: "in_progress", assignee: "Theo", priority: "high", tags: ["frontend", "perf"], comments: 7, dueDate: "Jun 8" },
+  { id: "8", title: "Skills marketplace search", status: "in_progress", assignee: "Mira", priority: "medium", tags: ["search"], comments: 2, dueDate: "Jun 14" },
 
-  { id: "9", title: "Design system components", status: "review", assignee: "Lena", priority: "medium", tags: ["design"], comments: 8, dueDate: "Jun 6", labelColor: "var(--accent)" },
-  { id: "10", title: "Database migration v2.1", status: "review", assignee: "Alice", priority: "high", tags: ["database"], comments: 6, dueDate: "Jun 5", labelColor: "var(--error)" },
-  { id: "11", title: "Telemetry opt-in flow", status: "review", assignee: "Bob", priority: "low", tags: ["privacy"], comments: 3, dueDate: "Jun 10", labelColor: "var(--text-3)" },
+  { id: "9", title: "Design system components", status: "review", assignee: "Lena", priority: "medium", tags: ["design"], comments: 8, dueDate: "Jun 6" },
+  { id: "10", title: "Database migration v2.1", status: "review", assignee: "Alice", priority: "high", tags: ["database"], comments: 6, dueDate: "Jun 5" },
+  { id: "11", title: "Telemetry opt-in flow", status: "review", assignee: "Bob", priority: "low", tags: ["privacy"], comments: 3, dueDate: "Jun 10" },
 
-  { id: "12", title: "Add dark mode support", status: "done", assignee: "Lena", priority: "low", tags: ["frontend"], comments: 4, dueDate: "Jun 2", labelColor: "var(--text-3)" },
-  { id: "13", title: "OpenCode provider adapter", status: "done", assignee: "Theo", priority: "high", tags: ["providers"], comments: 9, dueDate: "Jun 1", labelColor: "var(--accent)" },
-  { id: "14", title: "Window vibrancy polish", status: "done", assignee: "Okan", priority: "medium", tags: ["native"], comments: 5, dueDate: "May 30", labelColor: "var(--success)" },
+  { id: "12", title: "Add dark mode support", status: "done", assignee: "Lena", priority: "low", tags: ["frontend"], comments: 4, dueDate: "Jun 2" },
+  { id: "13", title: "OpenCode provider adapter", status: "done", assignee: "Theo", priority: "high", tags: ["providers"], comments: 9, dueDate: "Jun 1" },
+  { id: "14", title: "Window vibrancy polish", status: "done", assignee: "Okan", priority: "medium", tags: ["native"], comments: 5, dueDate: "May 30" },
 ];
 
 const PRIORITY_COLOR: Record<Priority, string> = {
@@ -54,6 +53,14 @@ const PRIORITY_COLOR: Record<Priority, string> = {
   high: "var(--error)",
   medium: "var(--warning)",
   low: "var(--text-3)",
+};
+
+// Top-strip weight encodes priority intensity — a quiet hierarchy cue, not a new color.
+const PRIORITY_STRIP: Record<Priority, { height: number; opacity: number }> = {
+  urgent: { height: 4, opacity: 1 },
+  high: { height: 3, opacity: 0.9 },
+  medium: { height: 2.5, opacity: 0.7 },
+  low: { height: 2, opacity: 0.45 },
 };
 
 export default function KanbanView() {
@@ -71,6 +78,7 @@ export default function KanbanView() {
   return (
     <Screen
       icon={<Layout size={19} />}
+      kicker="Task Board"
       title="Kanban Board"
       sub="Durable multi-agent board — tasks the agent can pick up and finish on its own."
       actions={
@@ -80,6 +88,9 @@ export default function KanbanView() {
         </>
       }
     >
+      {/* gold-filament divider — separates the editorial header from the board (cohesion with Settings/Chat) */}
+      <div className="ui-divider-gold mb-4" />
+
       {filteredTasks.length === 0 ? (
         <EmptyState
           icon={<Layout size={22} />}
@@ -92,26 +103,39 @@ export default function KanbanView() {
           <div className="flex gap-4 items-start min-w-[1140px]">
             {COLUMNS.map(col => {
               const colTasks = filteredTasks.filter(t => t.status === col.id);
+              const isActive = col.id === "in_progress";
               return (
                 <div
                   key={col.id}
                   className="flex-1 min-w-[272px] flex flex-col rounded-[14px] bg-[var(--surface-3)] border border-[var(--border)]"
                   style={{ boxShadow: "var(--edge)" }}
                 >
-                  {/* Column header — title · count · add */}
-                  <div className="flex items-center gap-2 px-3.5 h-[46px] shrink-0">
-                    <StatusDot color={col.color} pulse={col.id === "in_progress"} />
+                  {/* Column header — title · count · add. The active "In Progress" column carries the gold thread. */}
+                  <div className="relative flex items-center gap-2 px-3.5 h-[46px] shrink-0">
+                    <StatusDot color={col.color} pulse={isActive} />
                     <SectionLabel>{col.label}</SectionLabel>
-                    <Badge className="tabular-nums">{colTasks.length}</Badge>
+                    <Badge variant={isActive ? "accent" : "neutral"} className="tabular-nums">
+                      {colTasks.length}
+                    </Badge>
                     <IconButton className="ml-auto" title="Add a card to this list"><Plus size={15} /></IconButton>
+                    {isActive && (
+                      <span className="ui-divider-gold absolute left-3.5 right-3.5 bottom-0" />
+                    )}
                   </div>
 
                   {/* Vertical stack of simple cards */}
                   <div className="flex flex-col gap-2.5 px-2.5 pb-2.5 stagger">
                     {colTasks.map(task => (
                       <Card key={task.id} pad interactive className="group relative flex flex-col gap-2 overflow-hidden !p-3">
-                        {/* colored top label strip */}
-                        <span className="absolute left-0 right-0 top-0 h-[3px]" style={{ background: task.labelColor }} />
+                        {/* top strip encodes priority — colour from PRIORITY_COLOR, weight from PRIORITY_STRIP, so it always agrees with the footer dot */}
+                        <span
+                          className="absolute left-0 right-0 top-0"
+                          style={{
+                            height: PRIORITY_STRIP[task.priority].height,
+                            opacity: PRIORITY_STRIP[task.priority].opacity,
+                            background: PRIORITY_COLOR[task.priority],
+                          }}
+                        />
 
                         {/* tags row + card menu */}
                         <div className="flex items-center gap-1.5 pt-0.5">
@@ -145,8 +169,8 @@ export default function KanbanView() {
                       </Card>
                     ))}
 
-                    {/* Trello-style "Add a card" affordance */}
-                    <Button variant="ghost" size="sm" leftIcon={<Plus size={14} />} className="w-full justify-start text-[var(--text-3)]">
+                    {/* "Add a card" affordance — tinted down so empty columns recede rather than compete */}
+                    <Button variant="ghost" size="sm" leftIcon={<Plus size={14} />} className="w-full justify-start text-[var(--text-3)] opacity-50 hover:opacity-100 transition-opacity">
                       Add a card
                     </Button>
                   </div>

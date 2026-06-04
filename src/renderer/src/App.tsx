@@ -135,6 +135,7 @@ export default function App() {
           {!collapsed && <HermesWordmark />}
           {!collapsed && <span className="ml-auto ui-tag ui-tag-gold no-drag">PRO</span>}
         </div>
+        {!collapsed && <hr className="ui-divider-gold mx-4 mt-1 mb-0.5" />}
 
         <div className={cx("no-drag", collapsed ? "px-2 pt-2 pb-1 flex justify-center" : "px-3 pt-2 pb-1")}>
           {collapsed ? (
@@ -175,7 +176,9 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="ui-main flex-1 min-w-0 overflow-hidden">{renderScreen()}</main>
+      <main className="ui-main flex-1 min-w-0 overflow-hidden">
+        <div key={activeScreen} className="pane-swap">{renderScreen()}</div>
+      </main>
     </div>
   );
 }

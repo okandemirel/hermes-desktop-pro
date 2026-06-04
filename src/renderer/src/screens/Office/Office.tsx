@@ -223,7 +223,7 @@ export default function OfficeView(): React.JSX.Element {
   /* ── Checking ── */
   if (state === "checking") {
     return (
-      <Screen icon={<Server size={19} />} title="Hermes Office">
+      <Screen icon={<Server size={19} />} kicker="Live Workspace" title="Hermes Office">
         <div className="flex flex-col items-center justify-center gap-3.5 min-h-[440px] fade-in">
           <LoaderCircle size={26} className="animate-spin text-[var(--accent-text)]" />
           <p className="text-[13px] text-[var(--text-3)]">Checking Office status…</p>
@@ -235,14 +235,15 @@ export default function OfficeView(): React.JSX.Element {
   /* ── Not installed / error → setup panel ── */
   if (state === "not-installed" || state === "error") {
     return (
-      <Screen icon={<Server size={19} />} title="Hermes Office">
-        <div className="flex items-center justify-center min-h-[440px] fade-in">
-          <Card pad className="w-full max-w-[460px] flex flex-col items-center text-center gap-4 slide-up">
-            <span className="flex items-center justify-center w-14 h-14 rounded-[14px] bg-[var(--accent-weak)] text-[var(--accent-text)] border border-[var(--accent-line)]">
-              <Boxes size={26} />
+      <Screen icon={<Server size={19} />} kicker="Live Workspace" title="Hermes Office">
+        <div className="flex items-center justify-center min-h-[360px] fade-in">
+          <Card pad className="relative overflow-hidden w-full max-w-[460px] flex flex-col items-center text-center gap-4 mint-in">
+            <span className="ui-stamp w-[64px] h-[64px] rounded-full text-[var(--accent-text)] mint-in mint-in-1">
+              <Boxes size={28} />
             </span>
             <div>
-              <h2 className="serif text-[20px] text-[var(--text)]">Set up the Hermes Office</h2>
+              <div className="ui-eyebrow justify-center">Office · Setup</div>
+              <h2 className="serif text-[22px] text-[var(--text)]">Set up the Hermes Office</h2>
               <p className="text-[13px] text-[var(--text-2)] mt-2 leading-relaxed">
                 Installs <span className="text-[var(--accent-text)]">Claw3D</span> — the isometric 3D
                 office where your agents work side by side. This downloads and builds the workspace
@@ -255,7 +256,8 @@ export default function OfficeView(): React.JSX.Element {
                 <span className="text-[12.5px] text-[var(--text-2)] break-words">{error}</span>
               </div>
             )}
-            <div className="flex items-center gap-2.5 mt-1">
+            <hr className="ui-divider-gold w-full" />
+            <div className="flex items-center gap-2.5">
               <Button variant="primary" leftIcon={<Boxes size={14} />} onClick={handleInstall}>
                 Install Claw3D
               </Button>
@@ -276,7 +278,7 @@ export default function OfficeView(): React.JSX.Element {
   /* ── Installing → progress panel ── */
   if (state === "installing") {
     return (
-      <Screen icon={<Server size={19} />} title="Hermes Office">
+      <Screen icon={<Server size={19} />} kicker="Live Workspace" title="Hermes Office">
         <div className="flex items-center justify-center min-h-[440px] fade-in">
           <Card pad className="w-full max-w-[560px] flex flex-col gap-4 slide-up">
             <div className="flex items-center gap-2.5">
@@ -321,6 +323,7 @@ export default function OfficeView(): React.JSX.Element {
   return (
     <Screen
       icon={<Server size={19} />}
+      kicker="Live Workspace"
       title="Hermes Office"
       sub="A living spatial workspace where your agents work side by side."
       actions={
@@ -463,11 +466,12 @@ export default function OfficeView(): React.JSX.Element {
           </div>
         ) : !showLogs ? (
           <div className="flex flex-1 flex-col items-center justify-center text-center gap-4 min-h-[560px] p-6">
-            <span className="flex items-center justify-center w-14 h-14 rounded-[14px] bg-[var(--accent-weak)] text-[var(--accent-text)] border border-[var(--accent-line)]">
-              <Boxes size={26} />
+            <span className="ui-stamp w-[64px] h-[64px] rounded-full text-[var(--accent-text)] mint-in mint-in-1">
+              <Boxes size={28} />
             </span>
             <div>
-              <h3 className="serif text-[18px] text-[var(--text)]">Start the office to load the 3D workspace</h3>
+              <div className="ui-eyebrow justify-center">Workspace · Idle</div>
+              <h3 className="serif text-[20px] text-[var(--text)]">Start the office to load the 3D workspace</h3>
               <p className="text-[13px] text-[var(--text-2)] mt-1.5 max-w-sm">
                 {portInUse
                   ? `Port ${port} is in use — change it in settings first.`
