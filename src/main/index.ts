@@ -22,7 +22,33 @@ import {
   setEnvValue,
   listProfiles,
   getActiveProfileName,
+  getConnectionConfig,
+  getPublicConnectionConfig,
+  setConnectionConfig,
 } from "./config";
+
+import {
+  sendMessage,
+  ensureSshTunnelIfNeeded,
+  setSshRemoteApiKey,
+  startGateway,
+  stopGateway,
+  isGatewayRunning,
+  isApiReady,
+  testRemoteConnection,
+  isRemoteMode,
+} from "./hermes";
+
+import {
+  isSshTunnelActive,
+  startSshTunnel,
+  stopSshTunnel,
+  testSshConnection,
+} from "./ssh-tunnel";
+
+import { sshReadRemoteApiKey } from "./ssh-remote";
+
+import type { Attachment } from "../shared/attachments";
 
 import {
   getClaw3dStatus,
@@ -147,6 +173,11 @@ function createWindow(): BrowserWindow {
 
 // ─── IPC Handlers ─────────────────────────────────────
 
+// Abort handle for the chat currently streaming to the renderer, or null when
+// idle. Set after sendMessage() resolves its handle; cleared on done/error or
+// when the renderer goes away mid-stream.
+let currentChatAbort: (() => void) | null = null;
+
 function registerIpcHandlers(): void {
   // Config
   ipcMain.handle("get-hermes-home", () => getHermesHome());
@@ -240,9 +271,184 @@ function registerIpcHandlers(): void {
   // Profiles
   ipcMain.handle("list-profiles", () => listProfiles());
 
-  // Chat streaming events (placeholder)
+  // ── Chat streaming ────────────────────────────────────
+  ipcMain.handle(
+    "send-message",
+    async (
+      event,
+      message: string,
+      options: {
+        profile?: string;
+        resumeSessionId?: string;
+        history?: Array<{ role: string; content: string }>;
+        attachments?: Attachment[];
+        contextFolder?: string;
+      } = {},
+    ): Promise<{ response: string; sessionId?: string }> => {
+      // Streaming sends to `event.sender` throw "Object has been destroyed" if
+      // the renderer WebContents goes away mid-response (window closed,
+      // reloaded, navigated). Guard every send; abort the in-flight chat the
+      // first time a send fails — nobody is listening anymore.
+      const safeSend = (channel: string, payload?: unknown): boolean => {
+        if (event.sender.isDestroyed()) return false;
+        try {
+          event.sender.send(channel, payload);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      // Lazy-start the local gateway on first message (hermes.sendMessage does
+      // not start it itself — it errors if unreachable).
+      if (!isRemoteMode() && !isGatewayRunning(options.profile)) {
+        startGateway(options.profile);
+      }
+
+      // SSH mode: ensure the tunnel is up and cache the remote API key so the
+      // request authenticates. Never log the key.
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh.host) {
+        await ensureSshTunnelIfNeeded();
+        setSshRemoteApiKey(await sshReadRemoteApiKey(conn.ssh));
+      }
+
+      // Abort any previous in-flight chat before starting a new one.
+      if (currentChatAbort) {
+        currentChatAbort();
+        currentChatAbort = null;
+      }
+
+      return await new Promise((resolve) => {
+        let full = "";
+        let sid: string | undefined;
+        sendMessage(
+          message,
+          {
+            onChunk: (t) => {
+              full += t;
+              if (!safeSend("stream-chunk", t) && currentChatAbort) {
+                currentChatAbort();
+              }
+            },
+            onReasoningChunk: (t) => {
+              if (!safeSend("reasoning-chunk", t) && currentChatAbort) {
+                currentChatAbort();
+              }
+            },
+            onToolProgress: (tool) => safeSend("tool-progress", tool),
+            onUsage: (u) => safeSend("stream-usage", u),
+            onError: (e) => {
+              currentChatAbort = null;
+              safeSend("stream-error", e);
+              resolve({ response: full, sessionId: sid });
+            },
+            onDone: (s) => {
+              sid = s;
+              currentChatAbort = null;
+              safeSend("stream-done", s ?? "");
+              resolve({ response: full, sessionId: sid });
+            },
+          },
+          options.profile,
+          options.resumeSessionId,
+          options.history,
+          options.attachments,
+          options.contextFolder,
+        )
+          .then((handle) => {
+            currentChatAbort = handle.abort;
+          })
+          .catch((err) => {
+            currentChatAbort = null;
+            safeSend("stream-error", String(err?.message ?? err));
+            resolve({ response: full, sessionId: sid });
+          });
+      });
+    },
+  );
+
   ipcMain.on("chat-abort", () => {
-    // handled by stream controller in future version
+    currentChatAbort?.();
+    currentChatAbort = null;
+  });
+
+  // ── Connection config ─────────────────────────────────
+  ipcMain.handle("get-connection-config", () => getPublicConnectionConfig());
+  ipcMain.handle(
+    "set-connection-config",
+    (
+      _e,
+      input: {
+        mode: "local" | "remote" | "ssh";
+        remoteUrl?: string;
+        apiKey?: string;
+        ssh?: {
+          host: string;
+          port: number;
+          username: string;
+          keyPath: string;
+          remotePort: number;
+          localPort: number;
+        };
+      },
+    ) => {
+      setConnectionConfig(input);
+      return getPublicConnectionConfig();
+    },
+  );
+
+  ipcMain.handle(
+    "test-connection",
+    async (): Promise<{
+      ok: boolean;
+      mode: "local" | "remote" | "ssh";
+      latencyMs: number;
+      error?: string;
+    }> => {
+      const conn = getConnectionConfig();
+      const started = Date.now();
+      try {
+        let ok = false;
+        if (conn.mode === "ssh") {
+          ok = await testSshConnection(conn.ssh);
+        } else if (conn.mode === "remote") {
+          ok = await testRemoteConnection(conn.remoteUrl, conn.apiKey);
+        } else {
+          ok = isApiReady() || isGatewayRunning();
+        }
+        return { ok, mode: conn.mode, latencyMs: Date.now() - started };
+      } catch (err) {
+        return {
+          ok: false,
+          mode: conn.mode,
+          latencyMs: Date.now() - started,
+          error: String((err as Error)?.message ?? err),
+        };
+      }
+    },
+  );
+
+  // ── Gateway ───────────────────────────────────────────
+  ipcMain.handle("gateway-status", () => ({
+    running: isGatewayRunning(),
+    ready: isApiReady(),
+  }));
+  ipcMain.handle("gateway-start", () => startGateway());
+  ipcMain.handle("gateway-stop", () => {
+    stopGateway();
+    return true;
+  });
+
+  // ── SSH tunnel ────────────────────────────────────────
+  ipcMain.handle("ssh-tunnel-active", () => isSshTunnelActive());
+  ipcMain.handle("start-ssh-tunnel", async () => {
+    await startSshTunnel(getConnectionConfig().ssh);
+    return isSshTunnelActive();
+  });
+  ipcMain.handle("stop-ssh-tunnel", () => {
+    stopSshTunnel();
+    return true;
   });
 
   // Claw3D (local mode only) ───────────────────────────
@@ -331,6 +537,14 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   createWindow();
 
+  // Auto-start the SSH tunnel on launch when SSH mode is configured, so the
+  // first chat doesn't pay the tunnel-startup latency. Best effort: a failure
+  // here is recoverable (the send-message handler re-ensures the tunnel).
+  const c = getConnectionConfig();
+  if (c.mode === "ssh" && c.ssh.host) {
+    startSshTunnel(c.ssh).catch(() => {});
+  }
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -339,7 +553,16 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  stopSshTunnel();
+  stopGateway();
+  stopClaw3dAll();
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  stopSshTunnel();
+  stopGateway();
+  stopClaw3dAll();
 });
