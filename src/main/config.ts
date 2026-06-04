@@ -248,3 +248,57 @@ export function setConnectionConfig(input: {
   if (input.mode === "ssh" && input.ssh) d.sshConfig = input.ssh;
   writeDesktopConfig(d);
 }
+
+// ── API Server Key resolution ─────────────────────────────
+
+/**
+ * Resolve the API server's shared secret from 6 sources in precedence order:
+ *
+ *   1. Profile config.yaml top-level `API_SERVER_KEY` (legacy override)
+ *   2. Default config.yaml top-level `API_SERVER_KEY` (legacy override)
+ *   3. Profile .env `API_SERVER_KEY`
+ *   4. Default .env `API_SERVER_KEY`
+ *   5. Profile config.yaml `api_server.token` (canonical hermes-agent location)
+ *   6. Default config.yaml `api_server.token`
+ *
+ * Returns "" when none of the six locations are configured.
+ */
+export function getApiServerKey(profile?: string): string {
+  // Walk a dotted path through a parsed YAML object, return trimmed string or undefined.
+  function yamlGet(
+    obj: Record<string, any>,
+    dottedKey: string,
+  ): string | undefined {
+    const parts = dottedKey.split(".");
+    let cur: any = obj;
+    for (const part of parts) {
+      if (cur == null || typeof cur !== "object") return undefined;
+      cur = cur[part];
+    }
+    return typeof cur === "string" && cur.trim() ? cur.trim() : undefined;
+  }
+
+  const isNamed = Boolean(profile && profile !== "default");
+  const profileConfig = loadConfigYaml(profile);
+  const defaultConfig = isNamed ? loadConfigYaml() : null;
+
+  const candidates: Array<string | undefined> = [
+    // 1. Profile config.yaml top-level API_SERVER_KEY
+    yamlGet(profileConfig, "API_SERVER_KEY"),
+    // 2. Default config.yaml top-level API_SERVER_KEY
+    isNamed && defaultConfig ? yamlGet(defaultConfig, "API_SERVER_KEY") : undefined,
+    // 3. Profile .env API_SERVER_KEY
+    getEnvValue("API_SERVER_KEY", profile),
+    // 4. Default .env API_SERVER_KEY
+    isNamed ? getEnvValue("API_SERVER_KEY") : undefined,
+    // 5. Profile config.yaml api_server.token
+    yamlGet(profileConfig, "api_server.token"),
+    // 6. Default config.yaml api_server.token
+    isNamed && defaultConfig ? yamlGet(defaultConfig, "api_server.token") : undefined,
+  ];
+
+  for (const v of candidates) {
+    if (v && v.trim()) return v.trim();
+  }
+  return "";
+}
