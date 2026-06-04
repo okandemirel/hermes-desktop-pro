@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { Attachment, ToolsetInfo } from "../shared/types";
+import type { Attachment, ToolsetInfo, MemoryInfo } from "../shared/types";
 
 const api = {
   // Config
@@ -55,6 +55,28 @@ const api = {
     profile?: string,
   ): Promise<boolean> =>
     ipcRenderer.invoke("set-toolset-enabled", key, enabled, profile),
+
+  // Memory (MEMORY.md entries + USER.md)
+  readMemory: (profile?: string): Promise<MemoryInfo> =>
+    ipcRenderer.invoke("read-memory", profile),
+  addMemoryEntry: (
+    content: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("add-memory-entry", content, profile),
+  updateMemoryEntry: (
+    index: number,
+    content: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("update-memory-entry", index, content, profile),
+  removeMemoryEntry: (index: number, profile?: string): Promise<boolean> =>
+    ipcRenderer.invoke("remove-memory-entry", index, profile),
+  writeUserProfile: (
+    content: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("write-user-profile", content, profile),
 
   // Chat streaming
   sendMessage: (

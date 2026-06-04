@@ -13,7 +13,7 @@ import { buildSshControlOptions, assertSafeSshConfig } from "./ssh-options";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { t } from "../shared/i18n";
 import { getAppLocale } from "./locale";
-import type { ToolsetInfo } from "@shared/types";
+import type { ToolsetInfo, MemoryInfo, MemoryEntry } from "@shared/types";
 
 // ── SSH exec core ────────────────────────────────────────────────────────────
 
@@ -102,6 +102,22 @@ function sanitizeSshError(stderr: string): string {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\"'\"'")}'`;
+}
+
+function sshPython(
+  config: SshConfig,
+  script: string,
+  stdin?: string,
+  timeoutMs = 30000,
+): Promise<string> {
+  if (stdin === undefined) {
+    return sshExec(config, "python3 -", script, timeoutMs);
+  }
+  return sshExec(config, `python3 -c ${shellQuote(script)}`, stdin, timeoutMs);
+}
+
+function pythonJsonInput(payload: unknown): string {
+  return JSON.stringify(payload);
 }
 
 function normalizeRemotePath(remotePath: string): string {
@@ -295,6 +311,171 @@ export function buildRemoteHermesCmd(args: string[], extraShell = ""): string {
     .join("; ");
   const script = `${probe}; command -v hermes >/dev/null && exec hermes ${quotedArgs}${extraShell}; echo "ERR: hermes CLI not found on remote PATH or in any known venv location" >&2; exit 1`;
   return `bash -c ${shellQuote(script)}`;
+}
+
+// ── Memory ───────────────────────────────────────────────────────────────────
+
+const ENTRY_DELIMITER = "\n§\n";
+const MEMORY_CHAR_LIMIT = 2200;
+const USER_CHAR_LIMIT = 1375;
+
+function parseMemoryEntries(content: string): MemoryEntry[] {
+  if (!content.trim()) return [];
+  return content
+    .split(ENTRY_DELIMITER)
+    .map((entry, index) => ({ index, content: entry.trim() }))
+    .filter((e) => e.content.length > 0);
+}
+
+function serializeEntries(entries: MemoryEntry[]): string {
+  return entries.map((e) => e.content).join(ENTRY_DELIMITER);
+}
+
+function remoteMemoryPath(profile?: string): string {
+  if (profile && profile !== "default") {
+    return `~/.hermes/profiles/${profile}/memories/MEMORY.md`;
+  }
+  return "~/.hermes/memories/MEMORY.md";
+}
+
+function remoteUserPath(profile?: string): string {
+  if (profile && profile !== "default") {
+    return `~/.hermes/profiles/${profile}/memories/USER.md`;
+  }
+  return "~/.hermes/memories/USER.md";
+}
+
+async function sshGetSessionStats(
+  config: SshConfig,
+  profile?: string,
+): Promise<{ totalSessions: number; totalMessages: number }> {
+  const script = `
+import sqlite3, json, os, sys
+payload = json.load(sys.stdin)
+profile = payload.get("profile")
+db = os.path.expanduser(f"~/.hermes/profiles/{profile}/state.db" if profile and profile != "default" else "~/.hermes/state.db")
+if not os.path.exists(db):
+    print(json.dumps({"totalSessions": 0, "totalMessages": 0}))
+    sys.exit(0)
+conn = sqlite3.connect(db)
+try:
+    s = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    m = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    print(json.dumps({"totalSessions": s, "totalMessages": m}))
+except:
+    print(json.dumps({"totalSessions": 0, "totalMessages": 0}))
+finally:
+    conn.close()
+`;
+  try {
+    const out = await sshPython(config, script, pythonJsonInput({ profile }));
+    return JSON.parse(out.trim());
+  } catch {
+    return { totalSessions: 0, totalMessages: 0 };
+  }
+}
+
+export async function sshReadMemory(
+  config: SshConfig,
+  profile?: string,
+): Promise<MemoryInfo> {
+  const memContent = await sshReadFile(config, remoteMemoryPath(profile));
+  const userContent = await sshReadFile(config, remoteUserPath(profile));
+  const stats = await sshGetSessionStats(config, profile);
+
+  return {
+    memory: {
+      content: memContent,
+      exists: memContent.length > 0,
+      lastModified: null,
+      entries: parseMemoryEntries(memContent),
+      charCount: memContent.length,
+      charLimit: MEMORY_CHAR_LIMIT,
+    },
+    user: {
+      content: userContent,
+      exists: userContent.length > 0,
+      lastModified: null,
+      charCount: userContent.length,
+      charLimit: USER_CHAR_LIMIT,
+    },
+    stats,
+  };
+}
+
+export async function sshAddMemoryEntry(
+  config: SshConfig,
+  content: string,
+  profile?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const current = await sshReadFile(config, remoteMemoryPath(profile));
+  const entries = parseMemoryEntries(current);
+  const newContent = serializeEntries([
+    ...entries,
+    { index: entries.length, content: content.trim() },
+  ]);
+  if (newContent.length > MEMORY_CHAR_LIMIT) {
+    return {
+      success: false,
+      error: `Would exceed memory limit (${newContent.length}/${MEMORY_CHAR_LIMIT} chars)`,
+    };
+  }
+  await sshWriteFile(config, remoteMemoryPath(profile), newContent);
+  return { success: true };
+}
+
+export async function sshUpdateMemoryEntry(
+  config: SshConfig,
+  index: number,
+  content: string,
+  profile?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const current = await sshReadFile(config, remoteMemoryPath(profile));
+  const entries = parseMemoryEntries(current);
+  if (index < 0 || index >= entries.length)
+    return { success: false, error: "Entry not found" };
+  entries[index] = { ...entries[index], content: content.trim() };
+  const newContent = serializeEntries(entries);
+  if (newContent.length > MEMORY_CHAR_LIMIT) {
+    return {
+      success: false,
+      error: `Would exceed memory limit (${newContent.length}/${MEMORY_CHAR_LIMIT} chars)`,
+    };
+  }
+  await sshWriteFile(config, remoteMemoryPath(profile), newContent);
+  return { success: true };
+}
+
+export async function sshRemoveMemoryEntry(
+  config: SshConfig,
+  index: number,
+  profile?: string,
+): Promise<boolean> {
+  const current = await sshReadFile(config, remoteMemoryPath(profile));
+  const entries = parseMemoryEntries(current);
+  if (index < 0 || index >= entries.length) return false;
+  entries.splice(index, 1);
+  await sshWriteFile(
+    config,
+    remoteMemoryPath(profile),
+    serializeEntries(entries),
+  );
+  return true;
+}
+
+export async function sshWriteUserProfile(
+  config: SshConfig,
+  content: string,
+  profile?: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (content.length > USER_CHAR_LIMIT) {
+    return {
+      success: false,
+      error: `Exceeds limit (${content.length}/${USER_CHAR_LIMIT} chars)`,
+    };
+  }
+  await sshWriteFile(config, remoteUserPath(profile), content);
+  return { success: true };
 }
 
 // ── Soul ─────────────────────────────────────────────────────────────────────

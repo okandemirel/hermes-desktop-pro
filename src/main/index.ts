@@ -53,11 +53,24 @@ import {
   sshResetSoul,
   sshGetToolsets,
   sshSetToolsetEnabled,
+  sshReadMemory,
+  sshAddMemoryEntry,
+  sshUpdateMemoryEntry,
+  sshRemoveMemoryEntry,
+  sshWriteUserProfile,
 } from "./ssh-remote";
 
 import { readSoul, writeSoul, resetSoul } from "./soul";
 
 import { getToolsets, setToolsetEnabled } from "./tools";
+
+import {
+  readMemory,
+  addMemoryEntry,
+  updateMemoryEntry,
+  removeMemoryEntry,
+  writeUserProfile,
+} from "./memory";
 
 import type { Attachment } from "../shared/attachments";
 
@@ -320,6 +333,54 @@ function registerIpcHandlers(): void {
       if (conn.mode === "ssh" && conn.ssh)
         return sshSetToolsetEnabled(conn.ssh, key, enabled, profile);
       return setToolsetEnabled(key, enabled, profile);
+    },
+  );
+
+  // ── Memory (MEMORY.md entries + USER.md) ──────────────
+  ipcMain.handle("read-memory", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshReadMemory(conn.ssh, profile);
+    return readMemory(profile);
+  });
+
+  ipcMain.handle(
+    "add-memory-entry",
+    (_event, content: string, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshAddMemoryEntry(conn.ssh, content, profile);
+      return addMemoryEntry(content, profile);
+    },
+  );
+
+  ipcMain.handle(
+    "update-memory-entry",
+    (_event, index: number, content: string, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshUpdateMemoryEntry(conn.ssh, index, content, profile);
+      return updateMemoryEntry(index, content, profile);
+    },
+  );
+
+  ipcMain.handle(
+    "remove-memory-entry",
+    (_event, index: number, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshRemoveMemoryEntry(conn.ssh, index, profile);
+      return removeMemoryEntry(index, profile);
+    },
+  );
+
+  ipcMain.handle(
+    "write-user-profile",
+    (_event, content: string, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshWriteUserProfile(conn.ssh, content, profile);
+      return writeUserProfile(content, profile);
     },
   );
 
