@@ -155,3 +155,96 @@ export function getActiveProfileName(): string {
   } catch {}
   return "default";
 }
+
+// ── Connection Config (local / remote / ssh) ──────────────
+
+export interface SshConnectionConfig {
+  host: string;
+  port: number;
+  username: string;
+  keyPath: string;
+  remotePort: number;
+  localPort: number;
+}
+
+export interface ConnectionConfig {
+  mode: "local" | "remote" | "ssh";
+  remoteUrl: string;
+  apiKey: string;
+  ssh: SshConnectionConfig;
+}
+
+export interface PublicConnectionConfig {
+  mode: "local" | "remote" | "ssh";
+  remoteUrl: string;
+  hasApiKey: boolean;
+  apiKeyLength: number;
+  ssh: SshConnectionConfig;
+}
+
+function desktopConfigFile(): string {
+  return join(getHermesHome(), "desktop.json");
+}
+
+export function readDesktopConfig(): Record<string, unknown> {
+  try {
+    const f = desktopConfigFile();
+    if (!existsSync(f)) return {};
+    return JSON.parse(readFileSync(f, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+export function writeDesktopConfig(data: Record<string, unknown>): void {
+  const home = getHermesHome();
+  if (!existsSync(home)) mkdirSync(home, { recursive: true });
+  writeFileSync(desktopConfigFile(), JSON.stringify(data, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+}
+
+export function getConnectionConfig(): ConnectionConfig {
+  const d = readDesktopConfig();
+  const ssh = (d.sshConfig as Record<string, unknown>) || {};
+  return {
+    mode: (d.connectionMode as ConnectionConfig["mode"]) || "local",
+    remoteUrl: (d.remoteUrl as string) || "",
+    apiKey: (d.remoteApiKey as string) || "",
+    ssh: {
+      host: (ssh.host as string) || "",
+      port: (ssh.port as number) || 22,
+      username: (ssh.username as string) || "",
+      keyPath: (ssh.keyPath as string) || "",
+      remotePort: (ssh.remotePort as number) || 8642,
+      localPort: (ssh.localPort as number) || 18642,
+    },
+  };
+}
+
+export function getPublicConnectionConfig(): PublicConnectionConfig {
+  const c = getConnectionConfig();
+  return {
+    mode: c.mode,
+    remoteUrl: c.remoteUrl,
+    hasApiKey: !!c.apiKey,
+    apiKeyLength: c.apiKey.length,
+    ssh: c.ssh,
+  };
+}
+
+export function setConnectionConfig(input: {
+  mode: ConnectionConfig["mode"];
+  remoteUrl?: string;
+  apiKey?: string;
+  ssh?: SshConnectionConfig;
+}): void {
+  const d = readDesktopConfig();
+  d.connectionMode = input.mode;
+  if (input.remoteUrl !== undefined) d.remoteUrl = input.remoteUrl;
+  if (input.apiKey !== undefined && input.apiKey !== "")
+    d.remoteApiKey = input.apiKey;
+  if (input.mode === "ssh" && input.ssh) d.sshConfig = input.ssh;
+  writeDesktopConfig(d);
+}
