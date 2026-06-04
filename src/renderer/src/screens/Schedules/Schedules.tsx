@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Plus,
   Clock,
@@ -6,10 +6,10 @@ import {
   Trash2,
   Play,
   Pause,
-  Pencil,
   Bell,
   Timer,
 } from "lucide-react";
+import type { CronJob } from "@shared/types";
 import {
   Screen,
   Card,
@@ -39,59 +39,85 @@ interface ScheduleJob {
   prompt: string;
 }
 
-const MOCK_JOBS: ScheduleJob[] = [
-  {
-    id: "cron-001",
-    name: "Morning Briefing",
-    schedule: "0 8 * * *",
-    scheduleHuman: "Every day at 8:00 AM",
-    status: "active",
-    nextRun: "Tomorrow 8:00 AM",
-    lastRun: "Today 8:00 AM",
-    deliveryTarget: "Telegram",
-    prompt: "Summarize my calendar, unread emails, and top news headlines.",
-  },
-  {
-    id: "cron-002",
-    name: "Code Review Reminder",
-    schedule: "0 10 * * 1-5",
-    scheduleHuman: "Weekdays at 10:00 AM",
-    status: "active",
-    nextRun: "Tomorrow 10:00 AM",
-    lastRun: "Today 10:00 AM",
-    deliveryTarget: "Telegram",
-    prompt: "Check open PRs and flag any that need review.",
-  },
-  {
-    id: "cron-003",
-    name: "System Health Check",
-    schedule: "*/30 * * * *",
-    scheduleHuman: "Every 30 minutes",
-    status: "paused",
-    nextRun: "—",
-    lastRun: "2 days ago",
-    deliveryTarget: "CLI",
-    prompt: "Check CPU, memory, disk usage and report if thresholds exceeded.",
-  },
-  {
-    id: "cron-004",
-    name: "Weekly Report",
-    schedule: "0 17 * * 5",
-    scheduleHuman: "Fridays at 5:00 PM",
-    status: "active",
-    nextRun: "Friday 5:00 PM",
-    lastRun: "Last Friday 5:00 PM",
-    deliveryTarget: "Email",
-    prompt: "Generate a weekly summary of all completed tasks and project progress.",
-  },
-];
+const DELIVERY_TARGETS = ["local", "telegram", "discord", "email", "slack"];
 
-const DELIVERY_TARGETS = ["Telegram", "Discord", "Email", "CLI", "Slack"];
+// Humanize an ISO timestamp into a short relative-ish label. Honest "—" when
+// the backend has no timestamp (e.g. paused / never run).
+function humanizeTimestamp(iso: string | null): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+// Best-effort human description of a 5-field cron expression. Falls back to the
+// raw expression when it isn't a shape we recognise — never invents detail.
+function humanizeCron(expr: string): string {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return expr;
+  const [min, hour, dom, mon, dow] = parts;
+
+  const everyN = (field: string): number | null => {
+    const m = field.match(/^\*\/(\d+)$/);
+    return m ? parseInt(m[1], 10) : null;
+  };
+
+  const minEvery = everyN(min);
+  if (minEvery && hour === "*" && dom === "*" && mon === "*" && dow === "*") {
+    return `Every ${minEvery} minute${minEvery !== 1 ? "s" : ""}`;
+  }
+  const hourEvery = everyN(hour);
+  if (
+    min === "0" &&
+    hourEvery &&
+    dom === "*" &&
+    mon === "*" &&
+    dow === "*"
+  ) {
+    return `Every ${hourEvery} hour${hourEvery !== 1 ? "s" : ""}`;
+  }
+  if (
+    /^\d+$/.test(min) &&
+    /^\d+$/.test(hour) &&
+    dom === "*" &&
+    mon === "*" &&
+    dow === "*"
+  ) {
+    const time = new Date();
+    time.setHours(parseInt(hour, 10), parseInt(min, 10), 0, 0);
+    return `Every day at ${time.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    })}`;
+  }
+  return expr;
+}
+
+function toScheduleJob(job: CronJob): ScheduleJob {
+  return {
+    id: job.id,
+    name: job.name,
+    schedule: job.schedule,
+    scheduleHuman: humanizeCron(job.schedule),
+    status: job.state === "active" ? "active" : "paused",
+    nextRun: humanizeTimestamp(job.next_run_at),
+    lastRun: humanizeTimestamp(job.last_run_at),
+    deliveryTarget: job.deliver[0] || "local",
+    prompt: job.prompt,
+  };
+}
 
 export default function SchedulesView() {
-  const [jobs, setJobs] = useState<ScheduleJob[]>(MOCK_JOBS);
+  const [jobs, setJobs] = useState<ScheduleJob[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Form state
@@ -103,6 +129,25 @@ export default function SchedulesView() {
   const [formPrompt, setFormPrompt] = useState("");
   const [formTarget, setFormTarget] = useState(DELIVERY_TARGETS[0]);
 
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await window.hermes.listCronJobs(true);
+      setJobs(list.map(toScheduleJob));
+      setError("");
+    } catch (err) {
+      // Honest empty state on failure — no mock fallback.
+      setJobs([]);
+      setError((err as Error)?.message || "Failed to load schedules.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
   const resetForm = () => {
     setFormName("");
     setFormScheduleType("every");
@@ -111,58 +156,42 @@ export default function SchedulesView() {
     setFormCustomCron("");
     setFormPrompt("");
     setFormTarget(DELIVERY_TARGETS[0]);
-    setEditingId(null);
   };
 
-  const humanizeEvery = () => {
-    if (formScheduleType === "every") {
-      return `Every ${formEveryValue} ${formEveryUnit}${formEveryValue !== 1 ? "s" : ""}`;
-    }
-    return formCustomCron || "Custom cron";
+  // Build a real 5-field cron expression from the "Recurring" controls.
+  const buildCron = (): string => {
+    if (formScheduleType === "custom") return formCustomCron.trim();
+    const n = Math.max(1, formEveryValue);
+    if (formEveryUnit === "min") return `*/${n} * * * *`;
+    if (formEveryUnit === "hour") return `0 */${n} * * *`;
+    return `0 0 */${n} * *`; // day
   };
 
-  const handleAddOrEdit = () => {
-    if (!formName.trim() || !formPrompt.trim()) return;
-
-    const schedule =
-      formScheduleType === "every"
-        ? `*/${formEveryValue} * * * *`
-        : formCustomCron;
-
-    if (editingId) {
-      setJobs((prev) =>
-        prev.map((j) =>
-          j.id === editingId
-            ? {
-                ...j,
-                name: formName,
-                schedule,
-                scheduleHuman: humanizeEvery(),
-                deliveryTarget: formTarget,
-                prompt: formPrompt,
-              }
-            : j
-        )
-      );
-    } else {
-      const newJob: ScheduleJob = {
-        id: `cron-${Date.now()}`,
-        name: formName,
+  const handleAdd = async () => {
+    const schedule = buildCron();
+    if (!formName.trim() || !formPrompt.trim() || !schedule) return;
+    setBusy(true);
+    try {
+      const result = await window.hermes.createCronJob(
         schedule,
-        scheduleHuman: humanizeEvery(),
-        status: "active",
-        nextRun: "Pending...",
-        lastRun: "Never",
-        deliveryTarget: formTarget,
-        prompt: formPrompt,
-      };
-      setJobs((prev) => [...prev, newJob]);
+        formPrompt.trim(),
+        formName.trim(),
+        formTarget,
+      );
+      if (!result.success) {
+        setError(result.error || "Failed to create schedule.");
+        return;
+      }
+      setShowForm(false);
+      resetForm();
+      await load();
+    } finally {
+      setBusy(false);
     }
-    setShowForm(false);
-    resetForm();
   };
 
   const openCreate = () => {
+    setError("");
     resetForm();
     setShowForm(true);
   };
@@ -172,33 +201,57 @@ export default function SchedulesView() {
     resetForm();
   };
 
-  const startEdit = (job: ScheduleJob) => {
-    setFormName(job.name);
-    setFormScheduleType("custom");
-    setFormCustomCron(job.schedule);
-    setFormPrompt(job.prompt);
-    setFormTarget(job.deliveryTarget);
-    setEditingId(job.id);
-    setShowForm(true);
+  const toggleStatus = async (job: ScheduleJob) => {
+    setBusy(true);
+    try {
+      const result =
+        job.status === "active"
+          ? await window.hermes.pauseCronJob(job.id)
+          : await window.hermes.resumeCronJob(job.id);
+      if (!result.success) {
+        setError(result.error || "Failed to update schedule.");
+        return;
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const toggleStatus = (id: string) => {
-    setJobs((prev) =>
-      prev.map((j) =>
-        j.id === id
-          ? { ...j, status: j.status === "active" ? ("paused" as const) : ("active" as const) }
-          : j
-      )
-    );
+  const triggerJob = async (job: ScheduleJob) => {
+    setBusy(true);
+    try {
+      const result = await window.hermes.triggerCronJob(job.id);
+      if (!result.success) {
+        setError(result.error || "Failed to run schedule.");
+        return;
+      }
+      await load();
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const deleteJob = (id: string) => {
-    setJobs((prev) => prev.filter((j) => j.id !== id));
-    setDeleteConfirmId(null);
+  const deleteJob = async (id: string) => {
+    setBusy(true);
+    try {
+      const result = await window.hermes.removeCronJob(id);
+      if (!result.success) {
+        setError(result.error || "Failed to delete schedule.");
+        return;
+      }
+      setDeleteConfirmId(null);
+      await load();
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const activeCount = jobs.filter((j) => j.status === "active").length;
-  const canSubmit = !!formName.trim() && !!formPrompt.trim();
+  const activeCount = useMemo(
+    () => jobs.filter((j) => j.status === "active").length,
+    [jobs],
+  );
+  const canSubmit = !!formName.trim() && !!formPrompt.trim() && !busy;
 
   // Signature hero: the soonest next-to-run active job (first active in order),
   // promoted to a struck-gold focal moment. The rest fall into the calm list.
@@ -220,8 +273,16 @@ export default function SchedulesView() {
       {/* Gold filament — the Hallmark section rhythm */}
       {jobs.length > 0 && <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />}
 
+      {error && (
+        <div className="mb-5 text-[12.5px] text-[var(--danger)] mint-in mint-in-1">
+          {error}
+        </div>
+      )}
+
       {/* Jobs list — one struck hero + a calm list */}
-      {jobs.length === 0 ? (
+      {loading ? (
+        <div className="text-[13px] text-[var(--text-3)] py-8">Loading schedules…</div>
+      ) : jobs.length === 0 ? (
         <EmptyState
           icon={<Clock size={24} />}
           title="No schedules yet"
@@ -271,11 +332,11 @@ export default function SchedulesView() {
                 </div>
 
                 <div className="flex items-center gap-0.5 shrink-0">
-                  <IconButton onClick={() => toggleStatus(heroJob.id)} title="Pause">
-                    <Pause size={15} />
+                  <IconButton onClick={() => triggerJob(heroJob)} title="Run now">
+                    <Play size={15} />
                   </IconButton>
-                  <IconButton onClick={() => startEdit(heroJob)} title="Edit">
-                    <Pencil size={15} />
+                  <IconButton onClick={() => toggleStatus(heroJob)} title="Pause">
+                    <Pause size={15} />
                   </IconButton>
                   <IconButton danger onClick={() => setDeleteConfirmId(heroJob.id)} title="Delete">
                     <Trash2 size={15} />
@@ -330,11 +391,11 @@ export default function SchedulesView() {
                       </div>
 
                       <div className="flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
-                        <IconButton onClick={() => toggleStatus(job.id)} title={isActive ? "Pause" : "Resume"}>
-                          {isActive ? <Pause size={15} /> : <Play size={15} />}
+                        <IconButton onClick={() => triggerJob(job)} title="Run now">
+                          <Play size={15} />
                         </IconButton>
-                        <IconButton onClick={() => startEdit(job)} title="Edit">
-                          <Pencil size={15} />
+                        <IconButton onClick={() => toggleStatus(job)} title={isActive ? "Pause" : "Resume"}>
+                          {isActive ? <Pause size={15} /> : <Play size={15} />}
                         </IconButton>
                         <IconButton danger onClick={() => setDeleteConfirmId(job.id)} title="Delete">
                           <Trash2 size={15} />
@@ -349,19 +410,19 @@ export default function SchedulesView() {
         </>
       )}
 
-      {/* Add / Edit modal */}
+      {/* New schedule modal */}
       <Modal
         open={showForm}
         onClose={closeForm}
-        title={editingId ? "Edit Schedule" : "New Schedule"}
+        title="New Schedule"
         width={520}
         footer={
           <>
             <Button variant="secondary" onClick={closeForm}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleAddOrEdit} disabled={!canSubmit}>
-              {editingId ? "Save Changes" : "Add Schedule"}
+            <Button variant="primary" onClick={handleAdd} disabled={!canSubmit}>
+              Add Schedule
             </Button>
           </>
         }
@@ -457,6 +518,7 @@ export default function SchedulesView() {
               variant="danger"
               leftIcon={<Trash2 size={14} />}
               onClick={() => deleteConfirmId && deleteJob(deleteConfirmId)}
+              disabled={busy}
             >
               Delete
             </Button>

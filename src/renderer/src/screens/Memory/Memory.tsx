@@ -1,116 +1,137 @@
-import { useMemo, useState } from "react";
-import { Brain, Plus, Trash2, Check, Pencil } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Brain, Plus, Trash2, Check, Pencil, X } from "lucide-react";
 import {
-  Screen, Card, Button, IconButton, Input, Select, Field, Badge,
-  SearchInput, EmptyState, Modal, SectionLabel,
+  Screen, Card, Button, IconButton, Textarea, Field,
+  SearchInput, EmptyState, Modal,
 } from "../../ui";
-
-// ─── Types ──────────────────────────────────────────────────
-
-interface MemoryEntry {
-  id: string;
-  key: string;
-  value: string;
-  category: Category;
-  createdAt: number;
-}
-
-type Category = "Identity" | "Preferences" | "Project" | "System";
-
-const MAX_ENTRIES = 500;
-const CATEGORIES: Category[] = ["Identity", "Preferences", "Project", "System"];
-const FILTERS = ["All", ...CATEGORIES] as const;
-
-const DAY = 86_400_000;
-const HOUR = 3_600_000;
-
-// ─── Mock data ──────────────────────────────────────────────
-
-const MOCK_MEMORIES: MemoryEntry[] = [
-  { id: "m1", key: "user_name", value: "Alex Mercer", category: "Identity", createdAt: Date.now() - HOUR * 2 },
-  { id: "m2", key: "user_role", value: "Staff Software Engineer at a fintech startup.", category: "Identity", createdAt: Date.now() - DAY * 1 },
-  { id: "m3", key: "communication_style", value: "Prefers concise, direct answers with code-first examples and no preamble.", category: "Identity", createdAt: Date.now() - DAY * 2 },
-  { id: "m4", key: "preferred_language", value: "TypeScript — strict mode, no implicit any, ESM modules only.", category: "Preferences", createdAt: Date.now() - HOUR * 6 },
-  { id: "m5", key: "code_style", value: "2-space indent, single quotes, trailing commas, functional over OOP.", category: "Preferences", createdAt: Date.now() - DAY * 1 },
-  { id: "m6", key: "timezone", value: "America/New_York (UTC-5) — schedule meetings after 10am.", category: "Preferences", createdAt: Date.now() - DAY * 4 },
-  { id: "m7", key: "response_format", value: "Markdown with fenced code blocks; tables for comparisons.", category: "Preferences", createdAt: Date.now() - DAY * 5 },
-  { id: "m8", key: "project_dir", value: "~/dev/hermes-desktop-pro — Electron + React + Vite monorepo.", category: "Project", createdAt: Date.now() - HOUR * 3 },
-  { id: "m9", key: "stack", value: "Electron, React 19, Tailwind v4, Zustand, SQLite (FTS5).", category: "Project", createdAt: Date.now() - DAY * 2 },
-  { id: "m10", key: "conventions", value: "Conventional commits, trunk-based, PRs squash-merged to main.", category: "Project", createdAt: Date.now() - DAY * 6 },
-  { id: "m11", key: "model_default", value: "claude-sonnet-4 with 200K context; fall back to gpt-4o for vision.", category: "System", createdAt: Date.now() - DAY * 1 },
-  { id: "m12", key: "redaction", value: "Strip API keys, tokens, and emails before sending to providers.", category: "System", createdAt: Date.now() - DAY * 7 },
-];
+import type { MemoryInfo, MemoryEntry } from "@shared/types";
 
 // ─── Component ──────────────────────────────────────────────
+//
+// Wired to the real backend: a single MEMORY.md of indexed, free-text
+// entries (no key/value/category — that was mock invention). The hero
+// reports how much of the character budget the agent's recall occupies.
 
 export default function MemoryView() {
-  const [memories, setMemories] = useState<MemoryEntry[]>(MOCK_MEMORIES);
+  const [info, setInfo] = useState<MemoryInfo | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All");
 
   // Add memory form
   const [showAdd, setShowAdd] = useState(false);
-  const [newKey, setNewKey] = useState("");
-  const [newValue, setNewValue] = useState("");
-  const [newCategory, setNewCategory] = useState<Category>(CATEGORIES[0]);
+  const [newContent, setNewContent] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
 
-  // Edit + delete
-  const [editingId, setEditingId] = useState<string | null>(null);
+  // Edit + delete (keyed by entry index — the backend's identity)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  const usedPct = Math.round((memories.length / MAX_ENTRIES) * 100);
-  const categoryCount = new Set(memories.map(m => m.category)).size;
+  const refresh = async () => {
+    try {
+      const data = await window.hermes.readMemory();
+      setInfo(data);
+      setError(null);
+    } catch {
+      setError("Could not load memory.");
+    } finally {
+      setLoaded(true);
+    }
+  };
 
-  const filtered = useMemo(() => memories.filter(m => {
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const data = await window.hermes.readMemory();
+        if (active) setInfo(data);
+      } catch {
+        if (active) setError("Could not load memory.");
+      } finally {
+        if (active) setLoaded(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const entries = info?.memory.entries ?? [];
+  const charCount = info?.memory.charCount ?? 0;
+  const charLimit = info?.memory.charLimit ?? 0;
+  const usedPct = charLimit > 0 ? Math.round((charCount / charLimit) * 100) : 0;
+
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const matchesSearch = !q || m.key.toLowerCase().includes(q) || m.value.toLowerCase().includes(q);
-    const matchesFilter = filter === "All" || m.category === filter;
-    return matchesSearch && matchesFilter;
-  }), [memories, search, filter]);
+    if (!q) return entries;
+    return entries.filter((e) => e.content.toLowerCase().includes(q));
+  }, [entries, search]);
 
-  // Group by category to give the grid editorial rhythm (only non-empty groups, in canonical order).
-  const groups = useMemo(
-    () => CATEGORIES
-      .map(cat => ({ cat, items: filtered.filter(m => m.category === cat) }))
-      .filter(g => g.items.length > 0),
-    [filtered],
-  );
+  const closeAdd = () => {
+    setShowAdd(false);
+    setNewContent("");
+    setAddError(null);
+  };
 
-  const closeAdd = () => { setShowAdd(false); setNewKey(""); setNewValue(""); setNewCategory(CATEGORIES[0]); };
-
-  const handleAddMemory = () => {
-    if (!newKey.trim() || !newValue.trim()) return;
-    setMemories(prev => [{
-      id: `mem${Date.now()}`,
-      key: newKey.trim(),
-      value: newValue.trim(),
-      category: newCategory,
-      createdAt: Date.now(),
-    }, ...prev]);
+  const handleAddMemory = async () => {
+    const content = newContent.trim();
+    if (!content) return;
+    const res = await window.hermes.addMemoryEntry(content);
+    if (!res.success) {
+      setAddError(res.error ?? "Could not add entry.");
+      return;
+    }
     closeAdd();
+    await refresh();
   };
 
-  const startEdit = (entry: MemoryEntry) => { setEditingId(entry.id); setEditValue(entry.value); };
-  const saveEdit = (id: string) => {
-    setMemories(prev => prev.map(m => m.id === id ? { ...m, value: editValue.trim() || m.value } : m));
-    setEditingId(null); setEditValue("");
+  const startEdit = (entry: MemoryEntry) => {
+    setEditingIndex(entry.index);
+    setEditValue(entry.content);
+    setEditError(null);
   };
-  const handleDelete = (id: string) => {
-    setMemories(prev => prev.filter(m => m.id !== id));
+
+  const cancelEdit = () => {
+    setEditingIndex(null);
+    setEditValue("");
+    setEditError(null);
+  };
+
+  const saveEdit = async (index: number) => {
+    const content = editValue.trim();
+    if (!content) {
+      cancelEdit();
+      return;
+    }
+    const res = await window.hermes.updateMemoryEntry(index, content);
+    if (!res.success) {
+      setEditError(res.error ?? "Could not save entry.");
+      return;
+    }
+    cancelEdit();
+    await refresh();
+  };
+
+  const handleDelete = async (index: number) => {
+    await window.hermes.removeMemoryEntry(index);
     setDeleteConfirm(null);
-    if (editingId === id) { setEditingId(null); setEditValue(""); }
+    if (editingIndex === index) cancelEdit();
+    await refresh();
   };
-
-  const formatDate = (ts: number) =>
-    new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   return (
     <Screen
       icon={<Brain size={19} />}
       kicker="Agent Recall"
       title="Memory"
-      sub="Persistent context for your agent — what Hermes remembers about you across sessions."
+      sub={
+        <>
+          Persistent context for your agent — what Hermes remembers about you
+          across sessions, stored in <code className="ui-kbd">MEMORY.md</code>.
+        </>
+      }
       actions={
         <Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowAdd(true)}>
           Add Memory
@@ -119,23 +140,23 @@ export default function MemoryView() {
     >
       <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />
 
-      {/* ── Signature: recall capacity, struck as the editorial hero ── */}
+      {/* ── Signature: recall budget, struck as the editorial hero ── */}
       <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
         <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
           <Brain size={24} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="ui-eyebrow">Recall Capacity</div>
+          <div className="ui-eyebrow">Recall Budget</div>
           <h2 className="serif text-[var(--text)] leading-none" style={{ fontSize: "clamp(24px, 2.6vw, 31px)", letterSpacing: "-0.012em" }}>
-            {memories.length}<span className="text-[var(--text-3)]"> / {MAX_ENTRIES}</span> remembered
+            {charCount.toLocaleString()}<span className="text-[var(--text-3)]"> / {charLimit.toLocaleString()}</span> chars
           </h2>
           <div className="mt-3 h-1.5 rounded-full overflow-hidden bg-[var(--surface-3)]">
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(usedPct, 2)}%`, background: "var(--gold-grad)" }} />
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min(Math.max(usedPct, 2), 100)}%`, background: "var(--gold-grad)" }} />
           </div>
         </div>
         <div className="self-start shrink-0 text-right">
           <div className="serif text-[22px] leading-none text-[var(--accent-text)]">{usedPct}%</div>
-          <div className="text-[11px] text-[var(--text-3)] mt-1.5">{categoryCount} categories</div>
+          <div className="text-[11px] text-[var(--text-3)] mt-1.5">{entries.length} {entries.length === 1 ? "entry" : "entries"}</div>
         </div>
       </Card>
 
@@ -147,64 +168,70 @@ export default function MemoryView() {
           placeholder="Search memories…"
           className="flex-1 min-w-[240px]"
         />
-        <Select className="w-auto" value={filter} onChange={e => setFilter(e.target.value as (typeof FILTERS)[number])}>
-          {FILTERS.map(f => <option key={f} value={f}>{f}</option>)}
-        </Select>
       </div>
 
       {/* Memory grid */}
-      {filtered.length === 0 ? (
+      {error ? (
         <EmptyState
           icon={<Brain size={24} />}
-          title={search.trim() || filter !== "All" ? "No matching memories" : "No memories yet"}
+          title="Could not load memory"
+          sub="Hermes could not read MEMORY.md. Check your connection and try again."
+        />
+      ) : !loaded ? (
+        <EmptyState icon={<Brain size={24} />} title="Loading memory…" />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<Brain size={24} />}
+          title={search.trim() ? "No matching memories" : "No memories yet"}
           sub={
-            search.trim() || filter !== "All"
-              ? "Try a different search term or category."
+            search.trim()
+              ? "Try a different search term."
               : "Add memory entries to give your agent persistent context."
           }
-          action={<Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowAdd(true)}>Add Memory</Button>}
+          action={
+            !search.trim() ? (
+              <Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowAdd(true)}>Add Memory</Button>
+            ) : undefined
+          }
         />
       ) : (
-        <div className="stagger">
-          {groups.map(({ cat, items }) => (
-            <section key={cat} className="mb-9 last:mb-0">
-              {/* Editorial section head — category carries the label, so cards drop their chip */}
-              <div className="flex items-center gap-3 mb-3.5">
-                <SectionLabel>{cat}</SectionLabel>
-                <Badge variant="accent">{items.length}</Badge>
-                <hr className="ui-divider-gold flex-1" />
+        <div className="ui-grid stagger">
+          {filtered.map((entry) => (
+            <Card key={entry.index} pad interactive className="group flex flex-col">
+              <div className="flex items-start justify-between gap-3 mb-2.5">
+                <span className="text-[11.5px] font-mono text-[var(--text-3)]">#{entry.index + 1}</span>
+                <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {editingIndex === entry.index ? (
+                    <>
+                      <IconButton onClick={() => saveEdit(entry.index)} title="Save"><Check size={14} /></IconButton>
+                      <IconButton onClick={cancelEdit} title="Cancel"><X size={14} /></IconButton>
+                    </>
+                  ) : (
+                    <>
+                      <IconButton onClick={() => startEdit(entry)} title="Edit"><Pencil size={14} /></IconButton>
+                      <IconButton danger onClick={() => setDeleteConfirm(entry.index)} title="Delete"><Trash2 size={14} /></IconButton>
+                    </>
+                  )}
+                </div>
               </div>
 
-              <div className="ui-grid">
-                {items.map(entry => (
-                  <Card key={entry.id} pad interactive className="group flex flex-col">
-                    <div className="flex items-start justify-between gap-3 mb-2.5">
-                      <code className="text-[13px] font-mono font-semibold truncate text-[var(--accent-text)]">{entry.key}</code>
-                      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <IconButton onClick={() => startEdit(entry)} title="Edit"><Pencil size={14} /></IconButton>
-                        <IconButton danger onClick={() => setDeleteConfirm(entry.id)} title="Delete"><Trash2 size={14} /></IconButton>
-                      </div>
-                    </div>
-
-                    {editingId === entry.id ? (
-                      <Input
-                        autoFocus
-                        value={editValue}
-                        onChange={e => setEditValue(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter") saveEdit(entry.id); if (e.key === "Escape") { setEditingId(null); setEditValue(""); } }}
-                        onBlur={() => saveEdit(entry.id)}
-                      />
-                    ) : (
-                      <p className="text-[13px] leading-relaxed text-[var(--text-2)] line-clamp-2">{entry.value}</p>
-                    )}
-
-                    <div className="flex items-center mt-auto pt-3.5">
-                      <span className="text-[11.5px] font-mono text-[var(--text-3)]">{formatDate(entry.createdAt)}</span>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </section>
+              {editingIndex === entry.index ? (
+                <>
+                  <Textarea
+                    autoFocus
+                    rows={4}
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
+                  />
+                  {editError && (
+                    <p className="text-[12px] text-[var(--error)] mt-2">{editError}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-[13px] leading-relaxed text-[var(--text-2)] whitespace-pre-wrap">{entry.content}</p>
+              )}
+            </Card>
           ))}
         </div>
       )}
@@ -217,42 +244,43 @@ export default function MemoryView() {
         footer={
           <>
             <Button variant="secondary" onClick={closeAdd}>Cancel</Button>
-            <Button variant="primary" leftIcon={<Check size={15} />} disabled={!newKey.trim() || !newValue.trim()} onClick={handleAddMemory}>
+            <Button variant="primary" leftIcon={<Check size={15} />} disabled={!newContent.trim()} onClick={handleAddMemory}>
               Save Entry
             </Button>
           </>
         }
       >
         <div className="flex flex-col gap-4">
-          <Field label="Key">
-            <Input className="font-mono" value={newKey} onChange={e => setNewKey(e.target.value)} placeholder="e.g. user_name" />
+          <Field label="What should the agent remember?">
+            <Textarea
+              autoFocus
+              rows={5}
+              value={newContent}
+              onChange={(e) => { setNewContent(e.target.value); setAddError(null); }}
+              placeholder="e.g. Prefers concise, code-first answers with no preamble."
+            />
           </Field>
-          <Field label="Value">
-            <Input value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="What should the agent remember?" />
-          </Field>
-          <Field label="Category">
-            <Select value={newCategory} onChange={e => setNewCategory(e.target.value as Category)}>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </Select>
-          </Field>
+          {addError && (
+            <p className="text-[12px] text-[var(--error)]">{addError}</p>
+          )}
         </div>
       </Modal>
 
       {/* Delete confirmation modal */}
       <Modal
-        open={!!deleteConfirm}
+        open={deleteConfirm !== null}
         onClose={() => setDeleteConfirm(null)}
         title="Delete Memory Entry?"
         width={400}
         footer={
           <>
             <Button variant="secondary" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
-            <Button variant="danger" leftIcon={<Trash2 size={14} />} onClick={() => deleteConfirm && handleDelete(deleteConfirm)}>Delete</Button>
+            <Button variant="danger" leftIcon={<Trash2 size={14} />} onClick={() => deleteConfirm !== null && handleDelete(deleteConfirm)}>Delete</Button>
           </>
         }
       >
         <p className="text-[13px] text-[var(--text-2)] leading-relaxed">
-          This will permanently remove this memory entry. The agent will lose this context.
+          This permanently removes this entry from MEMORY.md. The agent will lose this context.
         </p>
       </Modal>
     </Screen>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BookOpen, Pencil, RotateCcw, Check, X } from "lucide-react";
 import { Screen, Button, Modal, cx } from "../../ui";
 
@@ -98,6 +98,28 @@ export default function SoulEditor() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Load the real SOUL.md from the backend on mount. A non-empty file becomes
+  // the editor content; an empty/missing file keeps the local template above as
+  // the starting point. If the read fails the editor stays usable on the
+  // default — no crash, no mock state.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const s = await window.hermes.readSoul();
+        if (active && s && s.trim()) {
+          setContent(s);
+          setDraft(s);
+        }
+      } catch {
+        // keep the default template; editor remains usable
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const { title, sections } = parseSoul(content);
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
 
@@ -106,7 +128,8 @@ export default function SoulEditor() {
     setIsEditing(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    await window.hermes.writeSoul(draft);
     setContent(draft);
     setIsEditing(false);
     setSaved(true);
@@ -118,8 +141,10 @@ export default function SoulEditor() {
     setIsEditing(false);
   };
 
-  const handleReset = () => {
-    setDraft(DEFAULT_SOUL);
+  const handleReset = async () => {
+    const def = await window.hermes.resetSoul();
+    setContent(def);
+    setDraft(def);
     setShowResetConfirm(false);
   };
 
@@ -229,8 +254,8 @@ export default function SoulEditor() {
         }
       >
         <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
-          This replaces the editor contents with the default SOUL.md. Your saved file is unchanged
-          until you save.
+          This immediately resets SOUL.md to the default and overwrites your saved persona. This
+          cannot be undone.
         </p>
       </Modal>
     </Screen>

@@ -1,6 +1,13 @@
 import { execFileSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
+import { basename, dirname, join } from "path";
 import { getHermesHome } from "./config";
 
 // eslint-disable-next-line no-control-regex
@@ -11,9 +18,15 @@ export function stripAnsi(str: string): string {
 }
 
 const PROFILE_NAME_RE = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+export const PROFILE_NAME_ERROR =
+  "Profile names may contain lowercase letters, numbers, underscores, and hyphens, and cannot start with a hyphen.";
 
-function isValidNamedProfileName(profile: unknown): profile is string {
+export function isValidNamedProfileName(profile: unknown): profile is string {
   return typeof profile === "string" && PROFILE_NAME_RE.test(profile);
+}
+
+export function isValidProfileName(profile: unknown): profile is string {
+  return profile === "default" || isValidNamedProfileName(profile);
 }
 
 export function normalizeProfileName(profile?: unknown): string | undefined {
@@ -22,9 +35,7 @@ export function normalizeProfileName(profile?: unknown): string | undefined {
   }
 
   if (!isValidNamedProfileName(profile)) {
-    throw new Error(
-      "Profile names may contain lowercase letters, numbers, underscores, and hyphens, and cannot start with a hyphen.",
-    );
+    throw new Error(PROFILE_NAME_ERROR);
   }
 
   return profile;
@@ -91,6 +102,34 @@ export function pidIsAliveAs(
   );
 }
 
+export function safeWriteFile(filePath: string, content: string): void {
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  const tempPath = join(
+    dir,
+    `.${basename(filePath)}.${process.pid}.${Date.now()}.${Math.random()
+      .toString(16)
+      .slice(2)}.tmp`,
+  );
+
+  let tempWritten = false;
+  try {
+    writeFileSync(tempPath, content, "utf-8");
+    tempWritten = true;
+    renameSync(tempPath, filePath);
+  } catch (err) {
+    if (tempWritten) {
+      try {
+        unlinkSync(tempPath);
+      } catch {
+        // Best-effort cleanup. Preserve the original write/rename error.
+      }
+    }
+    throw err;
+  }
+}
+
 export function getActiveProfileNameSync(): string {
   try {
     const activeFile = join(getHermesHome(), "active_profile");
@@ -100,4 +139,15 @@ export function getActiveProfileNameSync(): string {
   } catch {
     return "default";
   }
+}
+
+/**
+ * Resolve the session database for the currently active profile. The
+ * default profile uses ~/.hermes/state.db; named profiles use
+ * ~/.hermes/profiles/<name>/state.db. The desktop's Sessions feature
+ * used to read the root state.db unconditionally, so named-profile users
+ * saw an empty or wrong session list (issue #311).
+ */
+export function activeStateDbPath(): string {
+  return join(profileHome(getActiveProfileNameSync()), "state.db");
 }

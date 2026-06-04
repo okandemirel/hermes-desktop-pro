@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 
 import { join, dirname } from "path";
 import * as YAML from "yaml";
 import { HERMES_HOME } from "./installer";
+import { safeWriteFile } from "./utils";
 
 function configPath(profile?: string): string {
   const home = HERMES_HOME;
@@ -325,4 +326,245 @@ export function getApiServerKey(profile?: string): string {
     if (v && v.trim()) return v.trim();
   }
   return "";
+}
+
+// ── Platform toggles (config.yaml platforms section) ──────
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Read the profile's `.env` into a flat key→value map. */
+function readEnvMap(profile?: string): Record<string, string> {
+  const home = HERMES_HOME;
+  const envPath =
+    profile && profile !== "default"
+      ? join(home, "profiles", profile, ".env")
+      : join(home, ".env");
+  const result: Record<string, string> = {};
+  try {
+    if (!existsSync(envPath)) return result;
+    const content = readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+      const eqIndex = trimmed.indexOf("=");
+      const key = trimmed.substring(0, eqIndex).trim();
+      let value = trimmed.substring(eqIndex + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      result[key] = value;
+    }
+  } catch {}
+  return result;
+}
+
+interface PlatformRule {
+  envCheck: (env: Record<string, string>) => boolean;
+  // YAML key for the override-disable lookup. Defaults to the platform key
+  // itself; provide an explicit value when the desktop's display key
+  // diverges from the Python CLI's config.yaml key (e.g. "home_assistant"
+  // in the desktop vs "homeassistant" in the Python gateway).
+  configKey?: string;
+}
+
+const TRUTHY_VALUES = new Set(["true", "1", "yes", "on"]);
+
+const PLATFORM_RULES: Record<string, PlatformRule> = {
+  telegram: { envCheck: (e) => !!e.TELEGRAM_BOT_TOKEN?.trim() },
+  discord: { envCheck: (e) => !!e.DISCORD_BOT_TOKEN?.trim() },
+  slack: { envCheck: (e) => !!e.SLACK_BOT_TOKEN?.trim() },
+  whatsapp: {
+    envCheck: (e) =>
+      TRUTHY_VALUES.has((e.WHATSAPP_ENABLED || "").trim().toLowerCase()),
+  },
+  signal: {
+    envCheck: (e) => !!e.SIGNAL_HTTP_URL?.trim() && !!e.SIGNAL_ACCOUNT?.trim(),
+  },
+  matrix: {
+    envCheck: (e) =>
+      !!e.MATRIX_ACCESS_TOKEN?.trim() || !!e.MATRIX_PASSWORD?.trim(),
+  },
+  mattermost: { envCheck: (e) => !!e.MATTERMOST_TOKEN?.trim() },
+  home_assistant: {
+    envCheck: (e) => !!e.HASS_TOKEN?.trim(),
+    configKey: "homeassistant",
+  },
+};
+
+const SUPPORTED_PLATFORMS = Object.keys(PLATFORM_RULES);
+
+/**
+ * Match a top-level YAML block's `enabled: <bool>` field. Returns true/false
+ * if found, null if absent. The block must start at column 0; `enabled:` is
+ * captured if it sits anywhere inside the contiguous indented sub-block.
+ */
+function readPlatformOverride(
+  content: string,
+  platform: string,
+): boolean | null {
+  const blockStartRe = new RegExp(
+    `^${escapeRegex(platform)}:[ \\t]*\\r?\\n`,
+    "m",
+  );
+  const startMatch = content.match(blockStartRe);
+  if (!startMatch || startMatch.index === undefined) return null;
+
+  const after = content.slice(startMatch.index + startMatch[0].length);
+  const lines = after.split(/\r?\n/);
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    if (!/^\s/.test(line)) break; // hit next top-level key
+    const m = line.match(/^[ \t]+enabled:[ \t]*(true|false)\b/);
+    if (m) return m[1] === "true";
+  }
+  return null;
+}
+
+export function getPlatformEnabled(profile?: string): Record<string, boolean> {
+  const env = readEnvMap(profile);
+  const configFile = configPath(profile);
+  const content = existsSync(configFile)
+    ? readFileSync(configFile, "utf-8")
+    : "";
+
+  const result: Record<string, boolean> = {};
+  for (const platform of SUPPORTED_PLATFORMS) {
+    const rule = PLATFORM_RULES[platform];
+    const envEnabled = rule.envCheck(env);
+    const configKey = rule.configKey || platform;
+    const override = content ? readPlatformOverride(content, configKey) : null;
+    // Env-driven activation; config.yaml `enabled: false` can force-disable.
+    // An explicit `enabled: true` doesn't bypass a missing token (the Python
+    // gateway still requires the credential), so reflect that here too.
+    result[platform] = envEnabled && override !== false;
+  }
+  return result;
+}
+
+/**
+ * Toggle a platform's force-disable override in config.yaml.
+ *
+ * The Python gateway activates a platform when its env vars are set; config
+ * can force-disable with `<platform>.enabled: false` at the top level. So
+ * toggling here writes/removes that single key:
+ *
+ *   - enabled=false → ensure `enabled: false` exists in the top-level
+ *     `<platform>:` block.
+ *   - enabled=true  → remove any existing `enabled: false` line.
+ *
+ * Filling in the platform's token env vars is what actually starts it; this
+ * function only manages the disable override.
+ */
+export function setPlatformEnabled(
+  platform: string,
+  enabled: boolean,
+  profile?: string,
+): void {
+  const rule = PLATFORM_RULES[platform];
+  if (!rule) return;
+  // Use the Python-side YAML key when writing the override, not the desktop's
+  // display key (matters for home_assistant → homeassistant).
+  const configKey = rule.configKey || platform;
+
+  const configFile = configPath(profile);
+  if (!existsSync(configFile)) {
+    // Only need to write a file when we're recording a disable override;
+    // enabling a platform that has no config is the default.
+    if (enabled) return;
+    safeWriteFile(configFile, `${configKey}:\n  enabled: false\n`);
+    return;
+  }
+
+  let content = readFileSync(configFile, "utf-8");
+  const enabledLineRe = new RegExp(
+    `^([ \\t]+enabled:[ \\t]*)(true|false)\\b([ \\t]*)$`,
+    "m",
+  );
+  const blockStartRe = new RegExp(
+    `^(${escapeRegex(configKey)}:[ \\t]*\\r?\\n)`,
+    "m",
+  );
+  const flowStyleRe = new RegExp(
+    `^${escapeRegex(configKey)}:[ \\t]*\\{\\s*\\}[ \\t]*$`,
+    "m",
+  );
+
+  const blockMatch = content.match(blockStartRe);
+  const hasBlock = !!blockMatch;
+  const isFlowEmpty = flowStyleRe.test(content);
+
+  if (isFlowEmpty) {
+    // Convert `<platform>: {}` to a block we can edit.
+    content = content.replace(
+      flowStyleRe,
+      `${configKey}:\n  enabled: ${enabled}`,
+    );
+    safeWriteFile(configFile, content);
+    return;
+  }
+
+  if (hasBlock && blockMatch?.index !== undefined) {
+    const blockStart = blockMatch.index + blockMatch[0].length;
+    const rest = content.slice(blockStart);
+    const restLines = rest.split(/\r?\n/);
+
+    // Find the extent of the platform's sub-block (indented children).
+    let subBlockEndOffset = 0;
+    let existingEnabledLineStart: number | null = null;
+    let existingEnabledLineEnd: number | null = null;
+    for (const line of restLines) {
+      const lineLen = line.length + 1; // include trailing \n
+      if (line.trim() === "") {
+        subBlockEndOffset += lineLen;
+        continue;
+      }
+      if (!/^\s/.test(line)) break;
+      const localStart = blockStart + subBlockEndOffset;
+      const enabledMatch = line.match(enabledLineRe);
+      if (enabledMatch) {
+        existingEnabledLineStart = localStart;
+        existingEnabledLineEnd = localStart + line.length;
+      }
+      subBlockEndOffset += lineLen;
+    }
+
+    if (existingEnabledLineStart !== null && existingEnabledLineEnd !== null) {
+      if (enabled) {
+        // Remove the entire `  enabled: false` line, including its newline.
+        const removeEnd =
+          content[existingEnabledLineEnd] === "\n"
+            ? existingEnabledLineEnd + 1
+            : existingEnabledLineEnd;
+        content =
+          content.slice(0, existingEnabledLineStart) + content.slice(removeEnd);
+      } else {
+        content =
+          content.slice(0, existingEnabledLineStart) +
+          `  enabled: false` +
+          content.slice(existingEnabledLineEnd);
+      }
+    } else if (!enabled) {
+      // Append `enabled: false` as the first child of the block.
+      content =
+        content.slice(0, blockStart) +
+        `  enabled: false\n` +
+        content.slice(blockStart);
+    }
+    // (enabled=true with no existing override: nothing to do.)
+
+    safeWriteFile(configFile, content);
+    return;
+  }
+
+  // No block at all — only need to materialize one when recording a disable.
+  if (!enabled) {
+    const trailingNewline = content.endsWith("\n") ? "" : "\n";
+    content += `${trailingNewline}${configKey}:\n  enabled: false\n`;
+    safeWriteFile(configFile, content);
+  }
 }

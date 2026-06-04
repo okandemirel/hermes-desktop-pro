@@ -1,5 +1,18 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { Attachment } from "../shared/types";
+import type {
+  Attachment,
+  ToolsetInfo,
+  MemoryInfo,
+  SavedModel,
+  ProfileInfo,
+  InstalledSkill,
+  SkillSearchResult,
+  CronJob,
+  KanbanTask,
+  KanbanBoard,
+  KanbanTaskDetail,
+  KanbanResult,
+} from "../shared/types";
 
 const api = {
   // Config
@@ -35,8 +48,205 @@ const api = {
     ipcRenderer.invoke("set-env-value", key, value, profile),
 
   // Profiles
-  listProfiles: (): Promise<string[]> =>
+  listProfiles: (): Promise<ProfileInfo[]> =>
     ipcRenderer.invoke("list-profiles"),
+  createProfile: (
+    name: string,
+    clone: boolean,
+  ): Promise<{ success: boolean; error?: string } | boolean> =>
+    ipcRenderer.invoke("create-profile", name, clone),
+  deleteProfile: (
+    name: string,
+  ): Promise<{ success: boolean; error?: string } | boolean> =>
+    ipcRenderer.invoke("delete-profile", name),
+  setActiveProfile: (name: string): Promise<boolean> =>
+    ipcRenderer.invoke("set-active-profile", name),
+
+  // Soul (persona / SOUL.md)
+  readSoul: (profile?: string): Promise<string> =>
+    ipcRenderer.invoke("read-soul", profile),
+  writeSoul: (content: string, profile?: string): Promise<boolean> =>
+    ipcRenderer.invoke("write-soul", content, profile),
+  resetSoul: (profile?: string): Promise<string> =>
+    ipcRenderer.invoke("reset-soul", profile),
+
+  // Skills (SKILL.md walk + hermes skills CLI)
+  listInstalledSkills: (profile?: string): Promise<InstalledSkill[]> =>
+    ipcRenderer.invoke("list-installed-skills", profile),
+  listBundledSkills: (): Promise<SkillSearchResult[]> =>
+    ipcRenderer.invoke("list-bundled-skills"),
+  getSkillContent: (path: string): Promise<string> =>
+    ipcRenderer.invoke("get-skill-content", path),
+  installSkill: (
+    id: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("install-skill", id, profile),
+  uninstallSkill: (
+    name: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("uninstall-skill", name, profile),
+
+  // Schedules / Cron (cron/jobs.json + hermes cron CLI / gateway API)
+  listCronJobs: (
+    includeDisabled?: boolean,
+    profile?: string,
+  ): Promise<CronJob[]> =>
+    ipcRenderer.invoke("list-cron-jobs", includeDisabled, profile),
+  createCronJob: (
+    schedule: string,
+    prompt?: string,
+    name?: string,
+    deliver?: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke(
+      "create-cron-job",
+      schedule,
+      prompt,
+      name,
+      deliver,
+      profile,
+    ),
+  removeCronJob: (
+    jobId: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("remove-cron-job", jobId, profile),
+  pauseCronJob: (
+    jobId: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("pause-cron-job", jobId, profile),
+  resumeCronJob: (
+    jobId: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("resume-cron-job", jobId, profile),
+  triggerCronJob: (
+    jobId: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("trigger-cron-job", jobId, profile),
+
+  // Kanban (hermes kanban CLI / SSH tunnel / remote-only)
+  kanbanListBoards: (profile?: string): Promise<KanbanResult<KanbanBoard[]>> =>
+    ipcRenderer.invoke("kanban-list-boards", profile),
+  kanbanCurrentBoard: (profile?: string): Promise<KanbanResult<string>> =>
+    ipcRenderer.invoke("kanban-current-board", profile),
+  kanbanListTasks: (filters?: {
+    status?: string;
+    assignee?: string;
+    tenant?: string;
+    includeArchived?: boolean;
+    profile?: string;
+  }): Promise<KanbanResult<KanbanTask[]>> =>
+    ipcRenderer.invoke("kanban-list-tasks", filters),
+  kanbanGetTask: (
+    id: string,
+    profile?: string,
+  ): Promise<KanbanResult<KanbanTaskDetail>> =>
+    ipcRenderer.invoke("kanban-get-task", id, profile),
+  kanbanCreateTask: (
+    input: {
+      title: string;
+      body?: string;
+      assignee?: string;
+      priority?: number;
+      tenant?: string;
+      workspace?: string;
+      triage?: boolean;
+      skills?: string[];
+      maxRetries?: number;
+    },
+    profile?: string,
+  ): Promise<KanbanResult<{ id: string }>> =>
+    ipcRenderer.invoke("kanban-create-task", input, profile),
+  kanbanAssignTask: (
+    id: string,
+    assignee: string | null,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-assign-task", id, assignee, profile),
+  kanbanCompleteTask: (
+    id: string,
+    result?: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-complete-task", id, result, profile),
+  kanbanBlockTask: (
+    id: string,
+    reason?: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-block-task", id, reason, profile),
+  kanbanUnblockTask: (
+    id: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-unblock-task", id, profile),
+  kanbanArchiveTask: (
+    id: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-archive-task", id, profile),
+  kanbanCommentTask: (
+    id: string,
+    body: string,
+    profile?: string,
+  ): Promise<KanbanResult<void>> =>
+    ipcRenderer.invoke("kanban-comment-task", id, body, profile),
+
+  // Tools (platform_toolsets.cli)
+  getToolsets: (profile?: string): Promise<ToolsetInfo[]> =>
+    ipcRenderer.invoke("get-toolsets", profile),
+  setToolsetEnabled: (
+    key: string,
+    enabled: boolean,
+    profile?: string,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("set-toolset-enabled", key, enabled, profile),
+
+  // Memory (MEMORY.md entries + USER.md)
+  readMemory: (profile?: string): Promise<MemoryInfo> =>
+    ipcRenderer.invoke("read-memory", profile),
+  addMemoryEntry: (
+    content: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("add-memory-entry", content, profile),
+  updateMemoryEntry: (
+    index: number,
+    content: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("update-memory-entry", index, content, profile),
+  removeMemoryEntry: (index: number, profile?: string): Promise<boolean> =>
+    ipcRenderer.invoke("remove-memory-entry", index, profile),
+  writeUserProfile: (
+    content: string,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("write-user-profile", content, profile),
+
+  // Models (~/.hermes/models.json)
+  listModels: (): Promise<SavedModel[]> =>
+    ipcRenderer.invoke("list-models"),
+  addModel: (
+    name: string,
+    provider: string,
+    model: string,
+    baseUrl: string,
+  ): Promise<SavedModel> =>
+    ipcRenderer.invoke("add-model", name, provider, model, baseUrl),
+  removeModel: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke("remove-model", id),
+  updateModel: (
+    id: string,
+    fields: Partial<Pick<SavedModel, "name" | "provider" | "model" | "baseUrl">>,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("update-model", id, fields),
 
   // Chat streaming
   sendMessage: (
@@ -203,6 +413,16 @@ const api = {
   gatewayStatus: () => ipcRenderer.invoke("gateway-status"),
   gatewayStart: () => ipcRenderer.invoke("gateway-start"),
   gatewayStop: () => ipcRenderer.invoke("gateway-stop"),
+  getPlatformEnabled: (
+    profile?: string,
+  ): Promise<Record<string, boolean>> =>
+    ipcRenderer.invoke("get-platform-enabled", profile),
+  setPlatformEnabled: (
+    platform: string,
+    enabled: boolean,
+    profile?: string,
+  ): Promise<boolean> =>
+    ipcRenderer.invoke("set-platform-enabled", platform, enabled, profile),
 
   // SSH tunnel
   sshTunnelActive: () => ipcRenderer.invoke("ssh-tunnel-active"),

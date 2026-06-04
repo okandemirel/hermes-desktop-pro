@@ -21,6 +21,7 @@ import OfficeView from "./screens/Office/Office";
 import { BrandMark, HermesWordmark } from "./components/BrandMark";
 import { cx, StatusDot } from "./ui";
 import type { ChatTab, ProviderId, ProviderInfo } from "@shared/types";
+import { getAllProviders } from "@shared/providers";
 
 type NavScreen = "chat" | "sessions" | "profiles" | "providers" | "skills" | "models" | "memory" | "soul" | "tools" | "schedules" | "gateway" | "kanban" | "office" | "settings";
 type NavItem = { id: NavScreen; label: string; icon: typeof MessageSquare };
@@ -48,16 +49,6 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
 ];
 const SETTINGS_ITEM: NavItem = { id: "settings", label: "Settings", icon: Settings };
 
-const MOCK_PROVIDERS: ProviderInfo[] = [
-  { id: "openrouter", label: "OpenRouter", capabilities: { streaming: true, reasoning: true, vision: true, toolUse: true, maxContextTokens: 200000 }, models: [{ id: "deepseek/deepseek-v4", name: "DeepSeek V4" }] },
-  { id: "anthropic", label: "Anthropic", capabilities: { streaming: true, reasoning: true, vision: true, toolUse: true, maxContextTokens: 200000 }, models: [{ id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" }, { id: "claude-opus-4-20250514", name: "Claude Opus 4" }] },
-  { id: "deepseek", label: "DeepSeek", capabilities: { streaming: true, reasoning: true, vision: false, toolUse: true, maxContextTokens: 128000 }, models: [{ id: "deepseek-v4", name: "DeepSeek V4" }] },
-  { id: "opencode-zen", label: "OpenCode Zen", capabilities: { streaming: true, reasoning: true, vision: false, toolUse: true, maxContextTokens: 128000 }, models: [{ id: "opencode/zen", name: "OpenCode Zen" }] },
-  { id: "opencode-go", label: "OpenCode Go", capabilities: { streaming: true, reasoning: true, vision: false, toolUse: true, maxContextTokens: 128000 }, models: [{ id: "opencode/go", name: "OpenCode Go" }] },
-  { id: "openai", label: "OpenAI", capabilities: { streaming: true, reasoning: true, vision: true, toolUse: true, maxContextTokens: 128000 }, models: [{ id: "gpt-4o", name: "GPT-4o" }] },
-  { id: "google", label: "Google Gemini", capabilities: { streaming: true, reasoning: true, vision: true, toolUse: true, maxContextTokens: 1000000 }, models: [{ id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" }] },
-];
-
 let tabCounter = 1;
 function createTab(providerId: ProviderId = "opencode-zen"): ChatTab {
   return { id: `tab-${tabCounter++}`, name: `Chat ${tabCounter - 1}`, providerId, modelId: "" };
@@ -67,7 +58,7 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState<NavScreen>("chat");
   const [tabs, setTabs] = useState<ChatTab[]>([createTab("opencode-zen")]);
   const [activeTabId, setActiveTabId] = useState(tabs[0].id);
-  const [providers] = useState<ProviderInfo[]>(MOCK_PROVIDERS);
+  const [providers] = useState<ProviderInfo[]>(getAllProviders);
   const [collapsed, setCollapsed] = useState(false);
   const [connStatus, setConnStatus] = useState<{ ok: boolean; mode: string }>({ ok: false, mode: "local" });
 
@@ -114,10 +105,23 @@ export default function App() {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, modelId } : t));
   }, []);
 
+  // Open a stored session in Chat: open a fresh tab seeded with the session id
+  // (useChatStream resumes from tab.sessionId) and switch to the Chat screen.
+  const handleResumeSession = useCallback((sessionId: string, title?: string) => {
+    const tab: ChatTab = {
+      ...createTab(activeTab.providerId),
+      sessionId,
+      name: title || "Resumed chat",
+    };
+    setTabs(prev => [...prev, tab]);
+    setActiveTabId(tab.id);
+    setActiveScreen("chat");
+  }, [activeTab.providerId]);
+
   const renderScreen = () => {
     switch (activeScreen) {
       case "chat": return <ChatView tab={activeTab} providers={providers} allTabs={tabs} onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId} onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} />;
-      case "sessions": return <SessionsView />;
+      case "sessions": return <SessionsView onResumeSession={handleResumeSession} onNewSession={handleNewTab} />;
       case "profiles": return <ProfilesView />;
       case "providers": return <ProvidersView providers={providers} />;
       case "skills": return <SkillsView />;

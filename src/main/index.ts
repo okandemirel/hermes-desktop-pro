@@ -20,7 +20,8 @@ import {
   setModelConfig,
   getEnvValue,
   setEnvValue,
-  listProfiles,
+  getPlatformEnabled,
+  setPlatformEnabled,
   getActiveProfileName,
   getConnectionConfig,
   getPublicConnectionConfig,
@@ -33,10 +34,12 @@ import {
   setSshRemoteApiKey,
   startGateway,
   stopGateway,
+  restartGateway,
   isGatewayRunning,
   isApiReady,
   testRemoteConnection,
   isRemoteMode,
+  notifyProfileSwitched,
 } from "./hermes";
 
 import {
@@ -46,7 +49,73 @@ import {
   testSshConnection,
 } from "./ssh-tunnel";
 
-import { sshReadRemoteApiKey } from "./ssh-remote";
+import {
+  sshReadRemoteApiKey,
+  sshReadSoul,
+  sshWriteSoul,
+  sshResetSoul,
+  sshGetToolsets,
+  sshSetToolsetEnabled,
+  sshReadMemory,
+  sshAddMemoryEntry,
+  sshUpdateMemoryEntry,
+  sshRemoveMemoryEntry,
+  sshWriteUserProfile,
+  sshListModels,
+  sshAddModel,
+  sshRemoveModel,
+  sshUpdateModel,
+  sshListSessions,
+  sshSearchSessions,
+  sshGetSessionMessages,
+  sshListProfiles,
+  sshCreateProfile,
+  sshDeleteProfile,
+  sshListInstalledSkills,
+  sshListBundledSkills,
+  sshGetSkillContent,
+  sshInstallSkill,
+  sshUninstallSkill,
+  sshGetPlatformEnabled,
+  sshSetPlatformEnabled,
+  sshGatewayStatus,
+} from "./ssh-remote";
+
+import {
+  listSessions,
+  searchSessions,
+  getSessionMessages,
+  deleteSession,
+} from "./sessions";
+
+import { readSoul, writeSoul, resetSoul } from "./soul";
+
+import {
+  listInstalledSkills,
+  listBundledSkills,
+  getSkillContent,
+  installSkill,
+  uninstallSkill,
+} from "./skills";
+
+import { getToolsets, setToolsetEnabled } from "./tools";
+
+import {
+  readMemory,
+  addMemoryEntry,
+  updateMemoryEntry,
+  removeMemoryEntry,
+  writeUserProfile,
+} from "./memory";
+
+import { listModels, addModel, removeModel, updateModel } from "./models";
+
+import {
+  listProfiles,
+  createProfile,
+  deleteProfile,
+  setActiveProfile,
+} from "./profiles";
 
 import type { Attachment } from "../shared/attachments";
 
@@ -62,6 +131,30 @@ import {
   getClaw3dLogs,
   type Claw3dSetupProgress,
 } from "./claw3d";
+
+import {
+  listCronJobs,
+  createCronJob,
+  removeCronJob,
+  pauseCronJob,
+  resumeCronJob,
+  triggerCronJob,
+} from "./cronjobs";
+
+import {
+  listBoards as kanbanListBoards,
+  currentBoard as kanbanCurrentBoard,
+  listTasks as kanbanListTasks,
+  getTask as kanbanGetTask,
+  createTask as kanbanCreateTask,
+  assignTask as kanbanAssignTask,
+  completeTask as kanbanCompleteTask,
+  blockTask as kanbanBlockTask,
+  unblockTask as kanbanUnblockTask,
+  archiveTask as kanbanArchiveTask,
+  commentTask as kanbanCommentTask,
+  type CreateTaskInput,
+} from "./kanban";
 
 import icon from "../../resources/icon.png?asset";
 
@@ -269,7 +362,226 @@ function registerIpcHandlers(): void {
   );
 
   // Profiles
-  ipcMain.handle("list-profiles", () => listProfiles());
+  ipcMain.handle("list-profiles", async () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshListProfiles(conn.ssh);
+    return listProfiles();
+  });
+  ipcMain.handle("create-profile", (_event, name: string, clone: boolean) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshCreateProfile(conn.ssh, name, clone);
+    return createProfile(name, clone);
+  });
+  ipcMain.handle("delete-profile", (_event, name: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshDeleteProfile(conn.ssh, name);
+    return deleteProfile(name);
+  });
+  ipcMain.handle("set-active-profile", (_event, name: string) => {
+    if (getConnectionConfig().mode !== "ssh") {
+      setActiveProfile(name);
+      // The desktop now follows this profile: chat/health resolve their URL
+      // from the active profile's own port. Drop the cached health flag so the
+      // next check probes the new gateway rather than the previous profile's.
+      notifyProfileSwitched();
+      // Bring the activated profile's own gateway up if it isn't already —
+      // without stopping any other profile's gateway (their bots stay online).
+      if (!isRemoteMode() && !isGatewayRunning(name)) {
+        startGateway(name);
+      }
+    }
+    return true;
+  });
+
+  // ── Soul (persona / SOUL.md) ──────────────────────────
+  ipcMain.handle("read-soul", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshReadSoul(conn.ssh, profile);
+    return readSoul(profile);
+  });
+
+  ipcMain.handle(
+    "write-soul",
+    (_event, content: string, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshWriteSoul(conn.ssh, content, profile);
+      return writeSoul(content, profile);
+    },
+  );
+
+  ipcMain.handle("reset-soul", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshResetSoul(conn.ssh, profile);
+    return resetSoul(profile);
+  });
+
+  // ── Skills ────────────────────────────────────────────
+  ipcMain.handle("list-installed-skills", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshListInstalledSkills(conn.ssh, profile);
+    return listInstalledSkills(profile);
+  });
+
+  ipcMain.handle("list-bundled-skills", () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshListBundledSkills(conn.ssh);
+    return listBundledSkills();
+  });
+
+  ipcMain.handle("get-skill-content", (_event, path: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshGetSkillContent(conn.ssh, path);
+    return getSkillContent(path);
+  });
+
+  ipcMain.handle("install-skill", (_event, id: string, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshInstallSkill(conn.ssh, id);
+    return installSkill(id, profile);
+  });
+
+  ipcMain.handle("uninstall-skill", (_event, name: string, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshUninstallSkill(conn.ssh, name);
+    return uninstallSkill(name, profile);
+  });
+
+  // ── Tools (platform_toolsets.cli) ─────────────────────
+  ipcMain.handle("get-toolsets", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshGetToolsets(conn.ssh, profile);
+    return getToolsets(profile);
+  });
+
+  ipcMain.handle(
+    "set-toolset-enabled",
+    (_event, key: string, enabled: boolean, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshSetToolsetEnabled(conn.ssh, key, enabled, profile);
+      return setToolsetEnabled(key, enabled, profile);
+    },
+  );
+
+  // ── Memory (MEMORY.md entries + USER.md) ──────────────
+  ipcMain.handle("read-memory", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshReadMemory(conn.ssh, profile);
+    return readMemory(profile);
+  });
+
+  ipcMain.handle(
+    "add-memory-entry",
+    (_event, content: string, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshAddMemoryEntry(conn.ssh, content, profile);
+      return addMemoryEntry(content, profile);
+    },
+  );
+
+  ipcMain.handle(
+    "update-memory-entry",
+    (_event, index: number, content: string, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshUpdateMemoryEntry(conn.ssh, index, content, profile);
+      return updateMemoryEntry(index, content, profile);
+    },
+  );
+
+  ipcMain.handle(
+    "remove-memory-entry",
+    (_event, index: number, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshRemoveMemoryEntry(conn.ssh, index, profile);
+      return removeMemoryEntry(index, profile);
+    },
+  );
+
+  ipcMain.handle(
+    "write-user-profile",
+    (_event, content: string, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshWriteUserProfile(conn.ssh, content, profile);
+      return writeUserProfile(content, profile);
+    },
+  );
+
+  // ── Models (~/.hermes/models.json) ────────────────────
+  ipcMain.handle("list-models", () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshListModels(conn.ssh);
+    return listModels();
+  });
+  ipcMain.handle(
+    "add-model",
+    (
+      _event,
+      name: string,
+      provider: string,
+      model: string,
+      baseUrl: string,
+    ) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh) {
+        return sshAddModel(conn.ssh, name, provider, model, baseUrl);
+      }
+      return addModel(name, provider, model, baseUrl);
+    },
+  );
+  ipcMain.handle("remove-model", (_event, id: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) return sshRemoveModel(conn.ssh, id);
+    return removeModel(id);
+  });
+  ipcMain.handle(
+    "update-model",
+    (_event, id: string, fields: Record<string, string>) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshUpdateModel(conn.ssh, id, fields);
+      return updateModel(id, fields);
+    },
+  );
+
+  // ── Sessions (state.db readonly + FTS) ────────────────
+  ipcMain.handle("list-sessions", (_event, limit?: number, offset?: number) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshListSessions(conn.ssh, limit, offset);
+    return listSessions(limit, offset);
+  });
+
+  ipcMain.handle("search-sessions", (_event, query: string, limit?: number) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshSearchSessions(conn.ssh, query, limit);
+    return searchSessions(query, limit);
+  });
+
+  ipcMain.handle("get-session-messages", (_event, sessionId: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshGetSessionMessages(conn.ssh, sessionId);
+    return getSessionMessages(sessionId);
+  });
+
+  // Deleting a session writes to the local state.db only (no SSH proxy —
+  // matches reference semantics; remote/ssh modes simply no-op against the
+  // local cache when the row isn't present).
+  ipcMain.handle("delete-session", (_event, sessionId: string) => {
+    return deleteSession(sessionId);
+  });
 
   // ── Chat streaming ────────────────────────────────────
   ipcMain.handle(
@@ -430,15 +742,43 @@ function registerIpcHandlers(): void {
   );
 
   // ── Gateway ───────────────────────────────────────────
-  ipcMain.handle("gateway-status", () => ({
-    running: isGatewayRunning(),
-    ready: isApiReady(),
-  }));
+  ipcMain.handle("gateway-status", async () => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh) {
+      const running = await sshGatewayStatus(conn.ssh);
+      return { running, ready: running };
+    }
+    return { running: isGatewayRunning(), ready: isApiReady() };
+  });
   ipcMain.handle("gateway-start", () => startGateway());
   ipcMain.handle("gateway-stop", () => {
     stopGateway();
     return true;
   });
+
+  // Platform toggles (config.yaml platforms section)
+  ipcMain.handle("get-platform-enabled", (_event, profile?: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "ssh" && conn.ssh)
+      return sshGetPlatformEnabled(conn.ssh, profile);
+    return getPlatformEnabled(profile);
+  });
+  ipcMain.handle(
+    "set-platform-enabled",
+    async (_event, platform: string, enabled: boolean, profile?: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh) {
+        await sshSetPlatformEnabled(conn.ssh, platform, enabled, profile);
+        return true;
+      }
+      setPlatformEnabled(platform, enabled, profile);
+      // Restart gateway so it picks up the new platform config
+      if (isGatewayRunning(profile)) {
+        restartGateway(profile);
+      }
+      return true;
+    },
+  );
 
   // ── SSH tunnel ────────────────────────────────────────
   ipcMain.handle("ssh-tunnel-active", () => isSshTunnelActive());
@@ -484,6 +824,97 @@ function registerIpcHandlers(): void {
     return true;
   });
   ipcMain.handle("claw3d-get-logs", () => getClaw3dLogs());
+
+  // ── Schedules / Cron (cron/jobs.json + hermes cron CLI / gateway API) ──
+  // The cronjobs module branches internally between local file/CLI and the
+  // remote gateway over the tunnel — these handlers stay thin (no mode branch).
+  ipcMain.handle(
+    "list-cron-jobs",
+    (_event, includeDisabled?: boolean, profile?: string) =>
+      listCronJobs(includeDisabled, profile),
+  );
+  ipcMain.handle(
+    "create-cron-job",
+    (
+      _event,
+      schedule: string,
+      prompt?: string,
+      name?: string,
+      deliver?: string,
+      profile?: string,
+    ) => createCronJob(schedule, prompt, name, deliver, profile),
+  );
+  ipcMain.handle("remove-cron-job", (_event, jobId: string, profile?: string) =>
+    removeCronJob(jobId, profile),
+  );
+  ipcMain.handle("pause-cron-job", (_event, jobId: string, profile?: string) =>
+    pauseCronJob(jobId, profile),
+  );
+  ipcMain.handle("resume-cron-job", (_event, jobId: string, profile?: string) =>
+    resumeCronJob(jobId, profile),
+  );
+  ipcMain.handle(
+    "trigger-cron-job",
+    (_event, jobId: string, profile?: string) =>
+      triggerCronJob(jobId, profile),
+  );
+
+  // ── Kanban (hermes kanban CLI / SSH tunnel / remote-only) ──
+  // The kanban module owns the local/ssh/remote-only mode branch; these
+  // handlers stay thin pass-throughs.
+  ipcMain.handle("kanban-list-boards", (_event, profile?: string) =>
+    kanbanListBoards(false, profile),
+  );
+  ipcMain.handle("kanban-current-board", (_event, profile?: string) =>
+    kanbanCurrentBoard(profile),
+  );
+  ipcMain.handle(
+    "kanban-list-tasks",
+    (
+      _event,
+      filters?: {
+        status?: string;
+        assignee?: string;
+        tenant?: string;
+        includeArchived?: boolean;
+        profile?: string;
+      },
+    ) => kanbanListTasks(filters ?? {}),
+  );
+  ipcMain.handle("kanban-get-task", (_event, id: string, profile?: string) =>
+    kanbanGetTask(id, profile),
+  );
+  ipcMain.handle(
+    "kanban-create-task",
+    (_event, input: CreateTaskInput, profile?: string) =>
+      kanbanCreateTask(input, profile),
+  );
+  ipcMain.handle(
+    "kanban-assign-task",
+    (_event, id: string, assignee: string | null, profile?: string) =>
+      kanbanAssignTask(id, assignee, profile),
+  );
+  ipcMain.handle(
+    "kanban-complete-task",
+    (_event, id: string, result?: string, profile?: string) =>
+      kanbanCompleteTask(id, result, profile),
+  );
+  ipcMain.handle(
+    "kanban-block-task",
+    (_event, id: string, reason?: string, profile?: string) =>
+      kanbanBlockTask(id, reason, profile),
+  );
+  ipcMain.handle("kanban-unblock-task", (_event, id: string, profile?: string) =>
+    kanbanUnblockTask(id, profile),
+  );
+  ipcMain.handle("kanban-archive-task", (_event, id: string, profile?: string) =>
+    kanbanArchiveTask(id, profile),
+  );
+  ipcMain.handle(
+    "kanban-comment-task",
+    (_event, id: string, body: string, profile?: string) =>
+      kanbanCommentTask(id, body, profile),
+  );
 
   // External links — open in the user's default browser.
   ipcMain.handle("open-external", (_event, url: string) => {
