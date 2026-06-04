@@ -501,7 +501,7 @@ function sendMessageViaApi(
     const probeMod = probeUrl.startsWith("https") ? https : http;
     const probeReq = probeMod.request(
       probeUrl,
-      { method: "POST", headers: probeHeaders },
+      { method: "POST", headers: probeHeaders, timeout: 15000 },
       (res) => {
         let raw = "";
         res.on("data", (d) => {
@@ -525,6 +525,10 @@ function sendMessageViaApi(
         });
       },
     );
+    probeReq.on("timeout", () => {
+      probeReq.destroy();
+      finish(lastError || "Gateway timed out");
+    });
     probeReq.on("error", () => {
       finish(
         "No response received from the model. Check your model configuration and API key.",
