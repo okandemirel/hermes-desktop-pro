@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   Square, Plus, Globe, Image, Code, Wrench, Brain, Activity, Terminal, Paperclip,
   ArrowUp, Search, FileText, Table2, Sparkles, SlidersHorizontal, Command,
@@ -7,7 +7,7 @@ import {
   BarChart3, Lightbulb, Play, Clock, Star, Layers, Bookmark, ShieldCheck, Grid2X2,
   Check, MessageSquare,
 } from "lucide-react";
-import type { ChatTab, ProviderId, ProviderInfo, TokenUsage } from "@shared/types";
+import type { AgentRunEvent, AgentRunEventKind, AgentRunState, ChatMessage, ChatTab, ProviderId, ProviderInfo, TokenUsage } from "@shared/types";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { BrandMark, BrandMedallion } from "./BrandMark";
 import { useChatStream } from "../hooks/useChatStream";
@@ -72,6 +72,175 @@ function greeting(): string {
   return "Good evening";
 }
 
+function truncateText(value: string, max = 130): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= max) return compact;
+  return `${compact.slice(0, max - 1)}…`;
+}
+
+function formatClock(ts?: number): string {
+  if (!ts) return "--:--";
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDuration(startedAt?: number, endedAt?: number): string {
+  if (!startedAt) return "0s";
+  const end = endedAt || Date.now();
+  const seconds = Math.max(0, Math.round((end - startedAt) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}m ${rest}s`;
+}
+
+function runStatusLabel(status: AgentRunState["status"]): string {
+  if (status === "running") return "Running";
+  if (status === "done") return "Complete";
+  if (status === "error") return "Needs attention";
+  if (status === "aborted") return "Stopped";
+  return "Ready";
+}
+
+function runEventIcon(kind: AgentRunEventKind, status: AgentRunEvent["status"]): ReactNode {
+  if (status === "error") return <X size={17} />;
+  if (kind === "start") return <Play size={17} />;
+  if (kind === "context") return <BookOpen size={17} />;
+  if (kind === "reasoning") return <Brain size={17} />;
+  if (kind === "tool") return <Wrench size={17} />;
+  if (kind === "usage") return <Activity size={17} />;
+  if (kind === "done") return <CheckCircle2 size={17} />;
+  if (kind === "abort") return <Square size={15} />;
+  return <Sparkles size={17} />;
+}
+
+function createHistoricalRunState(messages: ChatMessage[]): AgentRunState | null {
+  const lastUser = [...messages].reverse().find(message => message.role === "user");
+  const lastAssistant = [...messages].reverse().find(message => message.role === "assistant");
+  if (!lastUser && !lastAssistant) return null;
+
+  const startedAt = lastUser?.timestamp || lastAssistant?.timestamp || Date.now();
+  const endedAt = lastAssistant?.timestamp && lastAssistant.timestamp >= startedAt ? lastAssistant.timestamp : undefined;
+  const prompt = lastUser?.content || "Session activity";
+  const assistantHasError = !!lastAssistant?.content?.toLowerCase().startsWith("error:");
+  const baseId = lastAssistant?.id || lastUser?.id || `run-${startedAt}`;
+  const events: AgentRunEvent[] = [
+    {
+      id: `${baseId}-historical-start`,
+      kind: "start",
+      label: "Run started",
+      detail: "Loaded from this chat session",
+      status: "done",
+      timestamp: startedAt,
+    },
+    {
+      id: `${baseId}-historical-context`,
+      kind: "context",
+      label: "Context restored",
+      detail: `${messages.length} messages available`,
+      status: "done",
+      timestamp: startedAt,
+    },
+    {
+      id: `${baseId}-historical-output`,
+      kind: assistantHasError ? "error" : "done",
+      label: assistantHasError ? "Run stopped with error" : "Response available",
+      detail: lastAssistant?.content ? truncateText(lastAssistant.content, 96) : "No assistant output yet",
+      status: assistantHasError ? "error" : "done",
+      timestamp: endedAt || startedAt,
+    },
+  ];
+
+  return {
+    id: `${baseId}-historical-run`,
+    assistantMessageId: lastAssistant?.id || null,
+    prompt,
+    startedAt,
+    endedAt,
+    status: assistantHasError ? "error" : "done",
+    events,
+    usage: lastAssistant?.usage,
+  };
+}
+
+function AgentRunTimeline({
+  runState,
+  providerLabel,
+  modelName,
+  assistantPreview,
+  tokenUsage,
+  activeToolCount,
+  onOpenActivity,
+  onOpenTools,
+}: {
+  runState: AgentRunState;
+  providerLabel: string;
+  modelName: string;
+  assistantPreview: string;
+  tokenUsage: TokenUsage;
+  activeToolCount: number;
+  onOpenActivity: () => void;
+  onOpenTools: () => void;
+}) {
+  const status = runStatusLabel(runState.status);
+  const duration = formatDuration(runState.startedAt, runState.endedAt);
+  const toolEvents = runState.events.filter(event => event.kind === "tool").length;
+  const latestEvents = runState.events.slice(-6);
+  const preview = assistantPreview || (runState.status === "running" ? "Hermes is preparing the first visible output." : "No assistant output captured for this run yet.");
+
+  return (
+    <section className="ui-agent-run-timeline" data-status={runState.status} aria-label="Agent run timeline">
+      <div className="ui-agent-run-head">
+        <BrandMedallion size={38} className="ui-agent-run-brand" />
+        <div className="ui-agent-run-title">
+          <span>Agent Run</span>
+          <h2>{truncateText(runState.prompt || "Hermes run", 92)}</h2>
+          <p>{providerLabel} · {modelName} · started {formatClock(runState.startedAt)}</p>
+        </div>
+        <div className="ui-agent-run-state">
+          <span><StatusDot color={runState.status === "running" ? "var(--success)" : runState.status === "error" || runState.status === "aborted" ? "var(--error)" : "var(--accent-text)"} pulse={runState.status === "running"} /> {status}</span>
+          <em>{duration}</em>
+        </div>
+      </div>
+
+      <div className="ui-agent-run-steps">
+        {latestEvents.map((event, index) => (
+          <div key={event.id} className="ui-agent-run-step" data-status={event.status}>
+            <div className="ui-agent-run-node">
+              <span>{runEventIcon(event.kind, event.status)}</span>
+              {index < latestEvents.length - 1 && <i />}
+            </div>
+            <div className="ui-agent-run-step-card">
+              <div className="ui-agent-run-step-main">
+                <strong>{event.label}</strong>
+                <small>{formatClock(event.timestamp)}{event.durationMs ? ` · ${formatDuration(event.timestamp, event.timestamp + event.durationMs)}` : ""}{event.tokens ? ` · ${event.tokens.toLocaleString()} tokens` : ""}</small>
+              </div>
+              {event.detail && <p>{truncateText(event.detail, 118)}</p>}
+              <span className="ui-agent-run-step-badge">{event.status}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="ui-agent-run-output">
+        <div>
+          <span>Partial output</span>
+          <p>{truncateText(preview, 170)}</p>
+        </div>
+        <button type="button" onClick={onOpenActivity}>
+          <Activity size={14} /> Inspect
+        </button>
+      </div>
+
+      <div className="ui-agent-run-footer">
+        <span><Activity size={13} /> Tokens <strong>{tokenUsage.totalTokens.toLocaleString()}</strong></span>
+        <span><Wrench size={13} /> Tools <strong>{toolEvents || activeToolCount}</strong></span>
+        <span><BookOpen size={13} /> Context <strong>128K</strong></span>
+        <button type="button" onClick={onOpenTools}>Manage tools</button>
+      </div>
+    </section>
+  );
+}
+
 export default function ChatView({
   tab,
   providers,
@@ -93,16 +262,14 @@ export default function ChatView({
   const [toolToggles, setToolToggles] = useState<Record<string, boolean>>(
     () => Object.fromEntries(INSPECTOR_TOOLS.map(t => [t.id, t.enabled])),
   );
-  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const tabMenuRef = useRef<HTMLDivElement>(null);
   const suppressCommandMenuRef = useRef(false);
   const activeProvider = providers.find(p => p.id === tab.providerId);
 
-  const { messages, isStreaming, sendMessage, abortStream } = useChatStream({
+  const { messages, isStreaming, runState, sendMessage, abortStream } = useChatStream({
     providerId: tab.providerId, modelId: tab.modelId, conversationKey: tab.id, sessionId: tab.sessionId, initialMessages: tab.messages,
-    onTokenUsage: (usage: TokenUsage) => setTokenUsage(usage),
   });
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -165,6 +332,15 @@ export default function ChatView({
   const sessionTitle = tab.name && tab.name !== "New chat" ? tab.name : "Q2 Market Report";
   const activeTabIndex = Math.max(0, allTabs.findIndex(t => t.id === tab.id));
   const activeTabPosition = activeTabIndex + 1;
+  const displayRunState = useMemo(() => runState || createHistoricalRunState(messages), [runState, messages]);
+  const assistantPreview = useMemo(() => {
+    const lastAssistant = [...messages].reverse().find(message => message.role === "assistant");
+    return truncateText(lastAssistant?.content || lastAssistant?.reasoning || "", 220);
+  }, [messages]);
+  const displayedUsage = useMemo<TokenUsage>(() => {
+    const messageUsage = [...messages].reverse().find(message => message.role === "assistant" && message.usage)?.usage;
+    return displayRunState?.usage || messageUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 };
+  }, [displayRunState, messages]);
 
   const focusCommand = useCallback((cmd: string) => {
     suppressCommandMenuRef.current = true;
@@ -293,9 +469,10 @@ export default function ChatView({
     event?.preventDefault();
     event?.stopPropagation();
     if (allTabs.length <= 1) return;
+    if (id === tab.id && isStreaming) abortStream();
     onClose(id);
     setTabMenuOpen(false);
-  }, [allTabs.length, onClose]);
+  }, [abortStream, allTabs.length, isStreaming, onClose, tab.id]);
 
   const topbarEl = (
     <header className="ui-commandbar drag">
@@ -451,10 +628,10 @@ export default function ChatView({
           </div>
         </div>
       </div>
-      {(isStreaming || tokenUsage.totalTokens > 0) && (
+      {(isStreaming || displayedUsage.totalTokens > 0) && (
         <div className="ui-compose-status">
           {isStreaming && <span><StatusDot color="var(--accent)" pulse /> Streaming</span>}
-          {tokenUsage.totalTokens > 0 && <em>{tokenUsage.totalTokens.toLocaleString()} tokens{(tokenUsage.cost ?? 0) > 0 ? ` · $${(tokenUsage.cost ?? 0).toFixed(4)}` : ""}</em>}
+          {displayedUsage.totalTokens > 0 && <em>{displayedUsage.totalTokens.toLocaleString()} tokens{(displayedUsage.cost ?? 0) > 0 ? ` · $${(displayedUsage.cost ?? 0).toFixed(4)}` : ""}</em>}
         </div>
       )}
     </div>
@@ -477,11 +654,16 @@ export default function ChatView({
     </div>
   );
 
+  const runEvents = displayRunState?.events || [];
+  const runToolEvents = runEvents.filter(event => event.kind === "tool").length;
+  const runStatus = displayRunState ? runStatusLabel(displayRunState.status) : "Ready";
+  const runDuration = displayRunState ? formatDuration(displayRunState.startedAt, displayRunState.endedAt) : "0s";
+
   const inspectorRows = inspectorTab === "activity"
     ? [
-        { icon: Activity, label: "Run status", meta: "Ready" },
-        { icon: Globe, label: "Web Search", meta: toolToggles.web ? "Enabled" : "Off" },
-        { icon: Table2, label: "Data Extraction", meta: toolToggles.data ? "Enabled" : "Off" },
+        { icon: Activity, label: "Run status", meta: runStatus },
+        { icon: Wrench, label: "Tool events", meta: `${runToolEvents || activeToolCount} active` },
+        { icon: Table2, label: "Token usage", meta: displayedUsage.totalTokens ? displayedUsage.totalTokens.toLocaleString() : "Pending" },
       ]
     : inspectorTab === "pinned"
       ? [
@@ -510,6 +692,37 @@ export default function ChatView({
         ))}
         <button className="ui-inspector-close" onClick={() => setInspectorOpen(false)} title="Hide inspector"><X size={16} /></button>
       </div>
+
+      {inspectorTab === "activity" && (
+        <section className="ui-inspector-section">
+          <div className="ui-activity-run-card" data-status={displayRunState?.status || "idle"}>
+            <div className="ui-activity-run-card-head">
+              <span><StatusDot color={displayRunState?.status === "running" ? "var(--success)" : displayRunState?.status === "error" || displayRunState?.status === "aborted" ? "var(--error)" : "var(--accent-text)"} pulse={displayRunState?.status === "running"} /> {runStatus}</span>
+              <em>{runDuration}</em>
+            </div>
+            <h3>{truncateText(displayRunState?.prompt || "No active run", 80)}</h3>
+            <p>{displayRunState ? `${providerLabel} · ${modelName} · ${formatClock(displayRunState.startedAt)}` : "Start a conversation to see live operation steps."}</p>
+            <div className="ui-activity-run-metrics">
+              <div><span>Steps</span><strong>{runEvents.length}</strong></div>
+              <div><span>Tools</span><strong>{runToolEvents || activeToolCount}</strong></div>
+              <div><span>Tokens</span><strong>{displayedUsage.totalTokens.toLocaleString()}</strong></div>
+            </div>
+          </div>
+          <div className="ui-activity-step-list">
+            {(runEvents.length ? runEvents.slice(-5) : [
+              { id: "activity-idle", kind: "start" as const, label: "Waiting for run", detail: "Hermes will show live work here", status: "queued" as const, timestamp: Date.now() },
+            ]).map(event => (
+              <div key={event.id} className="ui-activity-step" data-status={event.status}>
+                <span>{runEventIcon(event.kind, event.status)}</span>
+                <div>
+                  <strong>{event.label}</strong>
+                  <small>{event.detail ? truncateText(event.detail, 74) : formatClock(event.timestamp)}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {inspectorTab === "inspector" && (
         <>
@@ -632,6 +845,18 @@ export default function ChatView({
               <div className="ui-thread-canvas overflow-y-auto">
                 <div className="ui-transcript-rail">
                   {messages.map((msg, i) => <ChatMessageBubble key={i} message={msg} isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"} />)}
+                  {displayRunState && (
+                    <AgentRunTimeline
+                      runState={displayRunState}
+                      providerLabel={providerLabel}
+                      modelName={modelName}
+                      assistantPreview={assistantPreview}
+                      tokenUsage={displayedUsage}
+                      activeToolCount={activeToolCount}
+                      onOpenActivity={() => toggleInspector("activity")}
+                      onOpenTools={() => focusCommand("/tools ")}
+                    />
+                  )}
                   <div className="ui-run-controls-card">
                     <div className="flex items-center gap-2">
                       <Sparkles size={15} className="text-[var(--accent-text)]" />

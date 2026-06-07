@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { ChatMessage, ProviderId, TokenUsage } from "@shared/types";
+import type { AgentRunEvent, AgentRunEventKind, AgentRunEventStatus, AgentRunState, ChatMessage, ProviderId, TokenUsage } from "@shared/types";
 
 interface UseChatStreamOptions {
   providerId: ProviderId;
@@ -13,6 +13,7 @@ interface UseChatStreamOptions {
 interface UseChatStreamReturn {
   messages: ChatMessage[];
   isStreaming: boolean;
+  runState: AgentRunState | null;
   sendMessage: (text: string) => Promise<void>;
   abortStream: () => void;
 }
@@ -22,6 +23,7 @@ interface ConversationState {
   isStreaming: boolean;
   sessionId?: string;
   activeAssistantId: string | null;
+  runState: AgentRunState | null;
 }
 
 function createConversationState(options: UseChatStreamOptions): ConversationState {
@@ -30,7 +32,42 @@ function createConversationState(options: UseChatStreamOptions): ConversationSta
     isStreaming: false,
     sessionId: options.sessionId,
     activeAssistantId: null,
+    runState: null,
   };
+}
+
+function createRunEvent(
+  id: string,
+  kind: AgentRunEventKind,
+  label: string,
+  status: AgentRunEventStatus,
+  detail?: string,
+  tokens?: number,
+): AgentRunEvent {
+  return {
+    id,
+    kind,
+    label,
+    status,
+    detail,
+    tokens,
+    timestamp: Date.now(),
+  };
+}
+
+function completeRunningEvents(events: AgentRunEvent[], completedAt = Date.now()): AgentRunEvent[] {
+  return events.map(event => (
+    event.status === "running" || event.status === "queued"
+      ? { ...event, status: "done", durationMs: Math.max(0, completedAt - event.timestamp) }
+      : event
+  ));
+}
+
+function cleanToolLabel(tool: string): string {
+  return tool
+    .replace(/^[^\p{L}\p{N}/._-]+/u, "")
+    .replace(/\s+/g, " ")
+    .trim() || "Tool progress";
 }
 
 export function useChatStream(options: UseChatStreamOptions): UseChatStreamReturn {
@@ -77,24 +114,95 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     });
   }, []);
 
+  const patchRunState = useCallback((key: string | null, patch: (run: AgentRunState | null) => AgentRunState | null) => {
+    if (!key) return;
+    setStateByKey(prev => {
+      const state = prev[key];
+      if (!state) return prev;
+      return {
+        ...prev,
+        [key]: {
+          ...state,
+          runState: patch(state.runState),
+        },
+      };
+    });
+  }, []);
+
   // Subscribe to the 6 stream events ONCE; tear them down on unmount.
   // The preload subscribers each return an unsubscribe fn, used for cleanup.
   useEffect(() => {
     const unsubChunk = window.hermes.onStreamChunk((text: string) => {
-      patchActive(activeConversationKey.current, m => ({ ...m, content: m.content + text }));
+      const key = activeConversationKey.current;
+      patchActive(key, m => ({ ...m, content: m.content + text }));
+      patchRunState(key, run => {
+        if (!run) return run;
+        const hasOutput = run.events.some(event => event.kind === "output");
+        const events: AgentRunEvent[] = hasOutput
+          ? run.events.map(event => event.kind === "output" && event.status === "queued"
+            ? { ...event, status: "running" as const, detail: "Streaming assistant response" }
+            : event)
+          : [...run.events, createRunEvent(`${run.id}-output`, "output", "Generating response", "running", "Streaming assistant response")];
+        return { ...run, events };
+      });
     });
     const unsubReasoning = window.hermes.onReasoningChunk((text: string) => {
-      patchActive(activeConversationKey.current, m => ({ ...m, reasoning: (m.reasoning || "") + text }));
+      const key = activeConversationKey.current;
+      patchActive(key, m => ({ ...m, reasoning: (m.reasoning || "") + text }));
+      patchRunState(key, run => {
+        if (!run || run.events.some(event => event.kind === "reasoning")) return run;
+        return {
+          ...run,
+          events: [...run.events, createRunEvent(`${run.id}-reasoning`, "reasoning", "Reasoning trace", "running", "Hermes is exposing intermediate reasoning")],
+        };
+      });
     });
-    const unsubTool = window.hermes.onToolProgress(() => {
-      // Tool progress is surfaced elsewhere; no-op here for now.
+    const unsubTool = window.hermes.onToolProgress((tool: string) => {
+      const key = activeConversationKey.current;
+      patchRunState(key, run => {
+        if (!run) return run;
+        const label = cleanToolLabel(tool);
+        const completed: AgentRunEvent[] = run.events.map(event => event.kind === "tool" && event.status === "running"
+          ? { ...event, status: "done" as const, durationMs: Math.max(0, Date.now() - event.timestamp) }
+          : event);
+        return {
+          ...run,
+          events: [
+            ...completed,
+            createRunEvent(`${run.id}-tool-${Date.now()}`, "tool", label, "running", "Tool progress reported by the active run"),
+          ],
+        };
+      });
     });
     const unsubUsage = window.hermes.onUsage((usage: TokenUsage) => {
       onTokenUsageRef.current?.(usage);
+      const key = activeConversationKey.current;
+      patchActive(key, m => ({ ...m, usage }));
+      patchRunState(key, run => {
+        if (!run) return run;
+        const usageEvent = createRunEvent(`${run.id}-usage`, "usage", "Token usage recorded", "done", "Prompt and completion accounting updated", usage.totalTokens);
+        const events = run.events.some(event => event.kind === "usage")
+          ? run.events.map(event => event.kind === "usage" ? usageEvent : event)
+          : [...run.events, usageEvent];
+        return { ...run, usage, events };
+      });
     });
     const unsubError = window.hermes.onStreamError((error: string) => {
       const key = activeConversationKey.current;
       patchActive(key, m => ({ ...m, content: m.content || `Error: ${error}` }));
+      patchRunState(key, run => {
+        if (!run) return run;
+        const endedAt = Date.now();
+        return {
+          ...run,
+          status: "error",
+          endedAt,
+          events: [
+            ...completeRunningEvents(run.events, endedAt),
+            createRunEvent(`${run.id}-error`, "error", "Run stopped with error", "error", error),
+          ],
+        };
+      });
       if (key) {
         setStateByKey(prev => {
           const state = prev[key];
@@ -107,6 +215,19 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     const unsubDone = window.hermes.onStreamDone((sessionId?: string) => {
       const key = activeConversationKey.current;
       if (key) {
+        patchRunState(key, run => {
+          if (!run) return run;
+          const endedAt = Date.now();
+          return {
+            ...run,
+            status: "done",
+            endedAt,
+            events: [
+              ...completeRunningEvents(run.events, endedAt),
+              createRunEvent(`${run.id}-done`, "done", "Run complete", "done", "Final response delivered"),
+            ],
+          };
+        });
         setStateByKey(prev => {
           const state = prev[key];
           if (!state) return prev;
@@ -140,6 +261,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     const userMsg: ChatMessage = { id: `${key}-msg-${++msgIdCounter.current}`, role: "user", content: text, timestamp: Date.now() };
     const assistantId = `${key}-msg-${++msgIdCounter.current}`;
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "", timestamp: Date.now() };
+    const runId = `${assistantId}-run`;
 
     // Build history from prior messages (before this turn) — user/assistant only.
     // currentState.messages reflects the last-rendered messages, captured before
@@ -157,6 +279,18 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
           messages: [...state.messages, userMsg, assistantMsg],
           activeAssistantId: assistantId,
           isStreaming: true,
+          runState: {
+            id: runId,
+            assistantMessageId: assistantId,
+            prompt: text,
+            startedAt: userMsg.timestamp || Date.now(),
+            status: "running",
+            events: [
+              createRunEvent(`${runId}-start`, "start", "Run started", "done", "Hermes accepted the prompt"),
+              createRunEvent(`${runId}-context`, "context", "Context prepared", "done", `${history.length} prior messages included`),
+              createRunEvent(`${runId}-output`, "output", "Generating response", "queued", "Waiting for the first assistant token"),
+            ],
+          },
         },
       };
     });
@@ -181,6 +315,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
       setStateByKey(prev => {
         const state = prev[key];
         if (!state) return prev;
+        const endedAt = Date.now();
         return {
           ...prev,
           [key]: {
@@ -188,6 +323,15 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
             messages: state.messages.map(m => (m.id === assistantId && !m.content ? { ...m, content: `Error: ${message}` } : m)),
             activeAssistantId: null,
             isStreaming: false,
+            runState: state.runState ? {
+              ...state.runState,
+              status: "error",
+              endedAt,
+              events: [
+                ...completeRunningEvents(state.runState.events, endedAt),
+                createRunEvent(`${state.runState.id}-error-local`, "error", "Send failed", "error", message),
+              ],
+            } : state.runState,
           },
         };
       });
@@ -202,10 +346,27 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     setStateByKey(prev => {
       const state = prev[key];
       if (!state) return prev;
-      return { ...prev, [key]: { ...state, activeAssistantId: null, isStreaming: false } };
+      const endedAt = Date.now();
+      return {
+        ...prev,
+        [key]: {
+          ...state,
+          activeAssistantId: null,
+          isStreaming: false,
+          runState: state.runState ? {
+            ...state.runState,
+            status: "aborted",
+            endedAt,
+            events: [
+              ...completeRunningEvents(state.runState.events, endedAt),
+              createRunEvent(`${state.runState.id}-abort`, "abort", "Run aborted", "error", "Stopped by the user"),
+            ],
+          } : state.runState,
+        },
+      };
     });
   }, [conversationKey]);
 
   const currentState = stateByKey[conversationKey] || createConversationState(options);
-  return { messages: currentState.messages, isStreaming: currentState.isStreaming, sendMessage, abortStream };
+  return { messages: currentState.messages, isStreaming: currentState.isStreaming, runState: currentState.runState, sendMessage, abortStream };
 }

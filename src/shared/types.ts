@@ -69,6 +69,32 @@ export interface ChatMessage {
   usage?: TokenUsage;
 }
 
+export type AgentRunEventKind = "start" | "context" | "reasoning" | "tool" | "output" | "usage" | "done" | "error" | "abort";
+export type AgentRunEventStatus = "queued" | "running" | "done" | "error";
+export type AgentRunStatus = "idle" | "running" | "done" | "error" | "aborted";
+
+export interface AgentRunEvent {
+  id: string;
+  kind: AgentRunEventKind;
+  label: string;
+  detail?: string;
+  status: AgentRunEventStatus;
+  timestamp: number;
+  durationMs?: number;
+  tokens?: number;
+}
+
+export interface AgentRunState {
+  id: string;
+  assistantMessageId: string | null;
+  prompt: string;
+  startedAt: number;
+  endedAt?: number;
+  status: AgentRunStatus;
+  events: AgentRunEvent[];
+  usage?: TokenUsage;
+}
+
 export interface ToolCall {
   callId: string;
   name: string;
