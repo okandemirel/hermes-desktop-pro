@@ -8,6 +8,10 @@ import type {
   InstalledSkill,
   SkillSearchResult,
   CronJob,
+  CronJobUpdateInput,
+  DispatchMessageOptions,
+  DispatchMessageResult,
+  DispatchStreamEvent,
   KanbanTask,
   KanbanBoard,
   KanbanTaskDetail,
@@ -119,6 +123,12 @@ const api = {
     profile?: string,
   ): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("remove-cron-job", jobId, profile),
+  updateCronJob: (
+    jobId: string,
+    input: CronJobUpdateInput,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("update-cron-job", jobId, input, profile),
   pauseCronJob: (
     jobId: string,
     profile?: string,
@@ -280,10 +290,18 @@ const api = {
       history?: Array<{ role: string; content: string }>;
       attachments?: Attachment[];
       contextFolder?: string;
+      temperature?: number;
     } = {},
   ): Promise<{ response: string; sessionId?: string }> =>
     ipcRenderer.invoke("send-message", message, options),
+  dispatchMessage: (
+    message: string,
+    options: DispatchMessageOptions,
+  ): Promise<DispatchMessageResult> =>
+    ipcRenderer.invoke("dispatch-message", message, options),
   abortChat: (): void => ipcRenderer.send("chat-abort"),
+  abortDispatch: (dispatchId?: string, runId?: string): void =>
+    ipcRenderer.send("dispatch-abort", dispatchId, runId),
 
   // Session history
   listSessions: (
@@ -366,6 +384,12 @@ const api = {
     const handler = (_: any, usage: any) => cb(usage);
     ipcRenderer.on("stream-usage", handler);
     return () => ipcRenderer.removeListener("stream-usage", handler);
+  },
+
+  onDispatchEvent: (cb: (event: DispatchStreamEvent) => void): (() => void) => {
+    const handler = (_: any, event: DispatchStreamEvent) => cb(event);
+    ipcRenderer.on("dispatch-event", handler);
+    return () => ipcRenderer.removeListener("dispatch-event", handler);
   },
 
   // Install wizard (first-run, local mode)

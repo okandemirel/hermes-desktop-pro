@@ -5,8 +5,16 @@ import {
   shell,
   Menu,
 } from "electron";
-import type { Rectangle } from "electron";
+import type { IpcMainInvokeEvent, Rectangle, WebContents } from "electron";
+import type {
+  CronJobUpdateInput,
+  DispatchMessageOptions,
+  DispatchMessageResult,
+  DispatchStreamEvent,
+  ProfileDispatchTarget,
+} from "@shared/types";
 import { join } from "path";
+import { randomUUID } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 
@@ -147,6 +155,7 @@ import {
   listCronJobs,
   createCronJob,
   removeCronJob,
+  updateCronJob,
   pauseCronJob,
   resumeCronJob,
   triggerCronJob,
@@ -259,9 +268,157 @@ function createWindow(): BrowserWindow {
 // when the renderer goes away mid-stream.
 let currentChatAbort: (() => void) | null = null;
 
+interface DispatchAbortHandle {
+  dispatchId: string;
+  profileName: string;
+  sender: WebContents;
+  abort: () => void;
+}
+
+const dispatchAborters = new Map<string, DispatchAbortHandle>();
+
 // Guards the install-hermes IPC against concurrent runs (a double-click would
 // otherwise double-spawn the install script).
 let installInProgress = false;
+
+function dispatchRunId(dispatchId: string, profileName: string): string {
+  return `${dispatchId}-${profileName.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+function emitDispatch(sender: WebContents, payload: DispatchStreamEvent): boolean {
+  if (sender.isDestroyed()) return false;
+  try {
+    sender.send("dispatch-event", payload);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function prepareChatTransport(profile?: string): Promise<void> {
+  if (!isRemoteMode() && !isGatewayRunning(profile)) {
+    startGateway(profile);
+  }
+
+  const conn = getConnectionConfig();
+  if (conn.mode === "ssh" && conn.ssh.host) {
+    await ensureSshTunnelIfNeeded();
+    setSshRemoteApiKey(await sshReadRemoteApiKey(conn.ssh));
+  }
+}
+
+async function runDispatchTarget(
+  event: IpcMainInvokeEvent,
+  dispatchId: string,
+  runId: string,
+  message: string,
+  target: ProfileDispatchTarget,
+  options: DispatchMessageOptions,
+): Promise<string | undefined> {
+  const profileName = target.profileName;
+  const sender = event.sender;
+
+  await prepareChatTransport(profileName);
+  emitDispatch(sender, {
+    dispatchId,
+    runId,
+    profileName,
+    kind: "started",
+    timestamp: Date.now(),
+  });
+
+  return await new Promise((resolve) => {
+    let sessionId: string | undefined;
+    sendMessage(
+      message,
+      {
+        onChunk: text => emitDispatch(sender, {
+          dispatchId,
+          runId,
+          profileName,
+          kind: "chunk",
+          text,
+          timestamp: Date.now(),
+        }),
+        onReasoningChunk: text => emitDispatch(sender, {
+          dispatchId,
+          runId,
+          profileName,
+          kind: "reasoning",
+          text,
+          timestamp: Date.now(),
+        }),
+        onToolProgress: tool => emitDispatch(sender, {
+          dispatchId,
+          runId,
+          profileName,
+          kind: "tool",
+          tool,
+          timestamp: Date.now(),
+        }),
+        onUsage: usage => emitDispatch(sender, {
+          dispatchId,
+          runId,
+          profileName,
+          kind: "usage",
+          usage,
+          timestamp: Date.now(),
+        }),
+        onError: error => {
+          dispatchAborters.delete(runId);
+          emitDispatch(sender, {
+            dispatchId,
+            runId,
+            profileName,
+            kind: "error",
+            error,
+            timestamp: Date.now(),
+          });
+          resolve(sessionId);
+        },
+        onDone: sid => {
+          sessionId = sid;
+          dispatchAborters.delete(runId);
+          emitDispatch(sender, {
+            dispatchId,
+            runId,
+            profileName,
+            kind: "done",
+            sessionId: sid,
+            timestamp: Date.now(),
+          });
+          resolve(sessionId);
+        },
+      },
+      profileName,
+      options.resumeSessionByProfile?.[profileName],
+      options.history,
+      options.attachments as Attachment[] | undefined,
+      options.contextFolder,
+      { temperature: options.temperature },
+    )
+      .then(handle => {
+        dispatchAborters.set(runId, {
+          dispatchId,
+          profileName,
+          sender,
+          abort: handle.abort,
+        });
+      })
+      .catch(err => {
+        dispatchAborters.delete(runId);
+        emitDispatch(sender, {
+          dispatchId,
+          runId,
+          profileName,
+          kind: "error",
+          error: String(err?.message ?? err),
+          timestamp: Date.now(),
+        });
+        resolve(sessionId);
+      });
+  });
+}
 
 function registerIpcHandlers(): void {
   // Config
@@ -613,6 +770,7 @@ function registerIpcHandlers(): void {
         history?: Array<{ role: string; content: string }>;
         attachments?: Attachment[];
         contextFolder?: string;
+        temperature?: number;
       } = {},
     ): Promise<{ response: string; sessionId?: string }> => {
       // Streaming sends to `event.sender` throw "Object has been destroyed" if
@@ -685,6 +843,7 @@ function registerIpcHandlers(): void {
           options.history,
           options.attachments,
           options.contextFolder,
+          { temperature: options.temperature },
         )
           .then((handle) => {
             currentChatAbort = handle.abort;
@@ -698,9 +857,105 @@ function registerIpcHandlers(): void {
     },
   );
 
+  ipcMain.handle(
+    "dispatch-message",
+    async (
+      event,
+      message: string,
+      options: DispatchMessageOptions,
+    ): Promise<DispatchMessageResult> => {
+      const dispatchId = options.dispatchId || `dispatch-${Date.now()}-${randomUUID()}`;
+      const seen = new Set<string>();
+      const targets = (options.targets.length > 0 ? options.targets : [{ profileName: "default", isPrimary: true }])
+        .filter(target => {
+          const name = target.profileName.trim();
+          if (!name || seen.has(name)) return false;
+          seen.add(name);
+          return true;
+        })
+        .map((target, index, all) => ({
+          ...target,
+          isPrimary: all.some(item => item.isPrimary) ? !!target.isPrimary : index === 0,
+        }));
+      const sessionIdsByProfile: Record<string, string | undefined> = {};
+
+      const runOne = async (target: ProfileDispatchTarget): Promise<void> => {
+        const runId = dispatchRunId(dispatchId, target.profileName);
+        sessionIdsByProfile[target.profileName] = await runDispatchTarget(
+          event,
+          dispatchId,
+          runId,
+          message,
+          target,
+          options,
+        );
+      };
+
+      const executeDispatch = async () => {
+        for (const target of targets) {
+          emitDispatch(event.sender, {
+            dispatchId,
+            runId: dispatchRunId(dispatchId, target.profileName),
+            profileName: target.profileName,
+            kind: "queued",
+            timestamp: Date.now(),
+          });
+        }
+
+        if (options.mode === "parallel") {
+          await Promise.all(targets.map(runOne));
+          return;
+        }
+
+        if (options.mode === "hybrid") {
+          const primary = targets.find(target => target.isPrimary) || targets[0];
+          const secondary = targets.filter(target => target.profileName !== primary.profileName);
+          await runOne(primary);
+          await Promise.all(secondary.map(runOne));
+          return;
+        }
+
+        for (const target of targets) {
+          await runOne(target);
+        }
+      };
+
+      setImmediate(() => {
+        void executeDispatch();
+      });
+      return { dispatchId, sessionIdsByProfile };
+    },
+  );
+
   ipcMain.on("chat-abort", () => {
     currentChatAbort?.();
     currentChatAbort = null;
+  });
+
+  ipcMain.on("dispatch-abort", (_event, dispatchId?: string, runId?: string) => {
+    const abortRun = (key: string, handle: DispatchAbortHandle) => {
+      handle.abort();
+      dispatchAborters.delete(key);
+      emitDispatch(handle.sender, {
+        dispatchId: handle.dispatchId,
+        runId: key,
+        profileName: handle.profileName,
+        kind: "aborted",
+        timestamp: Date.now(),
+      });
+    };
+
+    if (runId) {
+      const handle = dispatchAborters.get(runId);
+      if (handle) abortRun(runId, handle);
+      return;
+    }
+
+    for (const [key, handle] of Array.from(dispatchAborters.entries())) {
+      if (!dispatchId || handle.dispatchId === dispatchId) {
+        abortRun(key, handle);
+      }
+    }
   });
 
   // ── Connection config ─────────────────────────────────
@@ -916,6 +1171,11 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("remove-cron-job", (_event, jobId: string, profile?: string) =>
     removeCronJob(jobId, profile),
+  );
+  ipcMain.handle(
+    "update-cron-job",
+    (_event, jobId: string, input: CronJobUpdateInput, profile?: string) =>
+      updateCronJob(jobId, input, profile),
   );
   ipcMain.handle("pause-cron-job", (_event, jobId: string, profile?: string) =>
     pauseCronJob(jobId, profile),

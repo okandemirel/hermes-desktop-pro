@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import {
   MessageSquare, Clock, User, Brain, Cpu, HardDrive,
   Heart, Wrench, Calendar, Radio, Layout, Box, Package,
-  PanelLeftClose, PanelLeft, Plus, FileText, Bell, HelpCircle, SlidersHorizontal, Settings,
+  CalendarClock, PanelLeftClose, PanelLeft, Plus, FileText, Bell, HelpCircle, SlidersHorizontal, Settings,
 } from "lucide-react";
 import ChatView from "./components/ChatView";
 import SessionsView from "./components/SessionsView";
@@ -20,10 +20,11 @@ import KanbanView from "./screens/Kanban/Kanban";
 import OfficeView from "./screens/Office/Office";
 import { BrandMark, HermesWordmark } from "./components/BrandMark";
 import { cx, StatusDot } from "./ui";
-import type { ChatTab, ProviderId, ProviderInfo } from "@shared/types";
+import type { ChatTab, DispatchMode, ProfileDispatchTarget, ProviderId, ProviderInfo } from "@shared/types";
 import { getAllProviders } from "@shared/providers";
+import { sessionHistoryToChatMessages } from "./sessionHistory";
 
-type NavScreen = "chat" | "sessions" | "profiles" | "providers" | "skills" | "models" | "memory" | "soul" | "tools" | "schedules" | "gateway" | "kanban" | "office" | "settings";
+type NavScreen = "chat" | "sessions" | "profiles" | "providers" | "skills" | "models" | "memory" | "soul" | "tools" | "schedules" | "cronJobs" | "gateway" | "kanban" | "office" | "settings";
 type NavItem = { id: NavScreen; label: string; icon: typeof MessageSquare; shortcut?: string };
 type SidebarSession = {
   id: string;
@@ -58,6 +59,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   ] },
   { label: "Operations", items: [
     { id: "schedules", label: "Schedules", icon: Calendar },
+    { id: "cronJobs", label: "Cron Jobs", icon: CalendarClock },
     { id: "kanban", label: "Kanban", icon: Layout },
     { id: "settings", label: "Settings", icon: Settings },
   ] },
@@ -172,22 +174,57 @@ export default function App() {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, modelId } : t));
   }, []);
 
+  const handleUpdateDispatch = useCallback((tabId: string, mode: DispatchMode, targets: ProfileDispatchTarget[]) => {
+    setTabs(prev => prev.map(t => t.id === tabId ? { ...t, dispatchMode: mode, dispatchTargets: targets } : t));
+  }, []);
+
   // Open a stored session in Chat: open a fresh tab seeded with the session id
   // (useChatStream resumes from tab.sessionId) and switch to the Chat screen.
-  const handleResumeSession = useCallback((sessionId: string, title?: string) => {
+  const handleResumeSession = useCallback(async (sessionId: string, title?: string) => {
+    const existing = tabs.find(t => t.sessionId === sessionId);
+    if (existing?.messages?.length) {
+      setActiveTabId(existing.id);
+      setActiveScreen("chat");
+      return;
+    }
+
+    const providerId = activeTab.providerId;
+    if (existing) {
+      setActiveTabId(existing.id);
+      setActiveScreen("chat");
+    }
+
+    let messages: ChatTab["messages"] = [];
+    try {
+      const history = await window.hermes.getSessionMessages(sessionId);
+      messages = sessionHistoryToChatMessages(sessionId, history);
+    } catch {
+      messages = [];
+    }
+
+    if (existing) {
+      setTabs(prev => prev.map(t => (
+        t.id === existing.id
+          ? { ...t, name: title || t.name, messages }
+          : t
+      )));
+      return;
+    }
+
     const tab: ChatTab = {
-      ...createTab(activeTab.providerId),
+      ...createTab(providerId),
       sessionId,
       name: title || "Resumed chat",
+      messages,
     };
     setTabs(prev => [...prev, tab]);
     setActiveTabId(tab.id);
     setActiveScreen("chat");
-  }, [activeTab.providerId]);
+  }, [activeTab.providerId, tabs]);
 
   const renderScreen = () => {
     switch (activeScreen) {
-      case "chat": return <ChatView tab={activeTab} providers={providers} allTabs={tabs} onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId} onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} />;
+      case "chat": return <ChatView tab={activeTab} providers={providers} allTabs={tabs} onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId} onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} onUpdateDispatch={handleUpdateDispatch} onOpenTools={() => setActiveScreen("tools")} onOpenMemory={() => setActiveScreen("memory")} onOpenModels={() => setActiveScreen("models")} onOpenSessions={() => setActiveScreen("sessions")} onOpenSettings={() => setActiveScreen("settings")} />;
       case "sessions": return <SessionsView onResumeSession={handleResumeSession} onNewSession={handleNewTab} />;
       case "profiles": return <ProfilesView />;
       case "providers": return <ProvidersView providers={providers} />;
@@ -197,6 +234,7 @@ export default function App() {
       case "soul": return <SoulEditor />;
       case "tools": return <ToolsView />;
       case "schedules": return <SchedulesView />;
+      case "cronJobs": return <SettingsView initialSection="cronJobs" standaloneSection />;
       case "gateway": return <GatewayView />;
       case "kanban": return <KanbanView />;
       case "office": return <OfficeView />;

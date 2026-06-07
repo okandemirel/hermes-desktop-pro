@@ -3,7 +3,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { execFile } from "child_process";
 import { HERMES_HOME, HERMES_PYTHON, hermesCliArgs } from "./installer";
-import { profileHome } from "./utils";
+import { isValidProfileName, profileHome, safeWriteFile } from "./utils";
 import { END_OF_OPTIONS, isSafePositional, isValidIdSlug } from "./cli-safety";
 import {
   isRemoteMode,
@@ -12,11 +12,22 @@ import {
   normaliseRemoteUrl,
 } from "./hermes";
 import { getConnectionConfig } from "./config";
+import { buildRemoteHermesCmd, sshExec } from "./ssh-remote";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
-import type { CronJob } from "@shared/types";
+import type { CronJob, CronJobUpdateInput } from "@shared/types";
+import type { SshConfig } from "./ssh-tunnel";
 
 function jobsFilePath(profile?: string): string {
   return join(profileHome(profile), "cron", "jobs.json");
+}
+
+function sshConfig(): SshConfig | null {
+  const conn = getConnectionConfig();
+  return conn.mode === "ssh" && conn.ssh ? conn.ssh : null;
+}
+
+function ensureValidProfile(profile?: string): boolean {
+  return profile === undefined || profile === "" || isValidProfileName(profile);
 }
 
 function normalizeJob(job: Record<string, unknown>): CronJob | null {
@@ -114,6 +125,146 @@ async function remoteJsonError(res: Response): Promise<string> {
   }
 }
 
+async function sshReadCronJobs(profile?: string): Promise<CronJob[]> {
+  const config = sshConfig();
+  if (!config) return [];
+  if (!ensureValidProfile(profile)) return [];
+  const profileLiteral = JSON.stringify(profile || "default");
+  const script = `
+import json, os
+profile = ${profileLiteral}
+home = os.path.expanduser("~/.hermes")
+if profile and profile != "default":
+    home = os.path.join(home, "profiles", profile)
+path = os.path.join(home, "cron", "jobs.json")
+if not os.path.exists(path):
+    print(json.dumps({"jobs": []}))
+else:
+    with open(path, "r", encoding="utf-8") as handle:
+        print(handle.read())
+`;
+  try {
+    const content = await sshExec(config, "python3 -", script, 15000);
+    const parsed = JSON.parse(content.trim() || "{\"jobs\": []}");
+    const raw = Array.isArray(parsed) ? parsed : parsed.jobs || [];
+    const jobs: CronJob[] = [];
+    for (const job of raw) {
+      const normalized = normalizeJob(job);
+      if (normalized) jobs.push(normalized);
+    }
+    return jobs;
+  } catch (err) {
+    console.error("[CRON] SSH list error:", err);
+    return [];
+  }
+}
+
+function runSshCronCommand(
+  args: string[],
+  profile?: string,
+): Promise<{ success: boolean; output: string; error?: string }> {
+  const config = sshConfig();
+  if (!config) {
+    return Promise.resolve({ success: false, output: "", error: "SSH is not configured" });
+  }
+  if (!ensureValidProfile(profile)) {
+    return Promise.resolve({ success: false, output: "", error: "Invalid profile name" });
+  }
+  const cliArgs = [];
+  if (profile && profile !== "default") cliArgs.push("-p", profile);
+  cliArgs.push("cron", ...args);
+  return sshExec(config, buildRemoteHermesCmd(cliArgs), undefined, 15000)
+    .then(output => ({ success: true, output }))
+    .catch((err: Error) => ({ success: false, output: "", error: err.message }));
+}
+
+async function updateSshCronJob(
+  jobId: string,
+  input: CronJobUpdateInput,
+  profile?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const config = sshConfig();
+  if (!config) return { success: false, error: "SSH is not configured" };
+  if (!ensureValidProfile(profile)) return { success: false, error: "Invalid profile name" };
+  if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+  if (input.schedule !== undefined && !input.schedule.trim()) {
+    return { success: false, error: "Schedule is required" };
+  }
+
+  const payloadLiteral = JSON.stringify(JSON.stringify({
+    profile: profile || "default",
+    jobId,
+    input,
+  }));
+  const script = `
+import json, os, tempfile
+payload = json.loads(${payloadLiteral})
+profile = payload.get("profile") or "default"
+job_id = payload.get("jobId") or ""
+updates = payload.get("input") or {}
+home = os.path.expanduser("~/.hermes")
+if profile != "default":
+    home = os.path.join(home, "profiles", profile)
+path = os.path.join(home, "cron", "jobs.json")
+if not os.path.exists(path):
+    print(json.dumps({"success": False, "error": "Cron jobs file not found"}))
+    raise SystemExit(0)
+with open(path, "r", encoding="utf-8") as handle:
+    parsed = json.load(handle)
+jobs = parsed if isinstance(parsed, list) else parsed.get("jobs", [])
+target = None
+for job in jobs:
+    if isinstance(job, dict) and str(job.get("id", "")) == job_id:
+        target = job
+        break
+if target is None:
+    print(json.dumps({"success": False, "error": "Cron job not found"}))
+    raise SystemExit(0)
+if "name" in updates:
+    target["name"] = (updates.get("name") or "").strip() or "(unnamed)"
+if "prompt" in updates:
+    target["prompt"] = updates.get("prompt") or ""
+if "schedule" in updates:
+    schedule_value = (updates.get("schedule") or "").strip()
+    current = target.get("schedule")
+    if isinstance(current, dict):
+        current["value"] = schedule_value
+        target["schedule"] = current
+    else:
+        target["schedule"] = {"value": schedule_value}
+    target["schedule_display"] = schedule_value
+if "deliver" in updates:
+    raw = updates.get("deliver")
+    values = raw if isinstance(raw, list) else [raw]
+    cleaned = []
+    for value in values:
+        for part in str(value or "").split(","):
+            part = part.strip()
+            if part:
+                cleaned.append(part)
+    target["deliver"] = cleaned or ["local"]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+fd, temp_path = tempfile.mkstemp(prefix=".jobs.", suffix=".tmp", dir=os.path.dirname(path))
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(parsed, handle, indent=2)
+        handle.write("\\n")
+    os.replace(temp_path, path)
+finally:
+    if os.path.exists(temp_path):
+        os.unlink(temp_path)
+print(json.dumps({"success": True}))
+`;
+
+  try {
+    const out = await sshExec(config, "python3 -", script, 15000);
+    const result = JSON.parse(out.trim() || "{\"success\": false, \"error\": \"No SSH response\"}") as { success?: boolean; error?: string };
+    return result.success ? { success: true } : { success: false, error: result.error || "Cron job could not be saved" };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
 /**
  * Read cron jobs from the jobs.json file (async to avoid blocking the main process).
  * In remote mode, fetches from the Hermes API server's /api/jobs endpoint instead.
@@ -122,6 +273,12 @@ export async function listCronJobs(
   includeDisabled = true,
   profile?: string,
 ): Promise<CronJob[]> {
+  const ssh = sshConfig();
+  if (ssh) {
+    const jobs = await sshReadCronJobs(profile);
+    return includeDisabled ? jobs : jobs.filter(job => job.enabled);
+  }
+
   if (isRemoteMode()) {
     try {
       const qs = includeDisabled ? "?include_disabled=true" : "";
@@ -213,6 +370,22 @@ export async function createCronJob(
   deliver?: string,
   profile?: string,
 ): Promise<{ success: boolean; error?: string }> {
+  if (sshConfig()) {
+    if (!isSafePositional(schedule)) {
+      return { success: false, error: "Schedule must not start with '-'" };
+    }
+    if (prompt && !isSafePositional(prompt)) {
+      return { success: false, error: "Prompt must not start with '-'" };
+    }
+    const args = ["create"];
+    if (name) args.push("--name", name);
+    if (deliver) args.push("--deliver", deliver);
+    args.push(END_OF_OPTIONS, schedule);
+    if (prompt) args.push(prompt);
+    const result = await runSshCronCommand(args, profile);
+    return { success: result.success, error: result.error };
+  }
+
   if (isRemoteMode()) {
     try {
       const res = await remoteFetch("/api/jobs", {
@@ -257,6 +430,11 @@ export async function removeCronJob(
   profile?: string,
 ): Promise<{ success: boolean; error?: string }> {
   if (!jobId) return { success: false, error: "Missing job ID" };
+  if (sshConfig()) {
+    if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+    const result = await runSshCronCommand(["remove", END_OF_OPTIONS, jobId], profile);
+    return { success: result.success, error: result.error };
+  }
   if (isRemoteMode()) {
     try {
       const res = await remoteFetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
@@ -273,6 +451,95 @@ export async function removeCronJob(
   if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
   const result = await runCronCommand(["remove", END_OF_OPTIONS, jobId], profile);
   return { success: result.success, error: result.error };
+}
+
+function normaliseDeliverInput(deliver: string | string[] | undefined): string[] | undefined {
+  if (deliver === undefined) return undefined;
+  const values = Array.isArray(deliver) ? deliver : [deliver];
+  const cleaned = values
+    .flatMap(value => String(value).split(","))
+    .map(value => value.trim())
+    .filter(Boolean);
+  return cleaned.length > 0 ? cleaned : ["local"];
+}
+
+function applyCronJobUpdate(
+  job: Record<string, unknown>,
+  input: CronJobUpdateInput,
+): void {
+  if (input.name !== undefined) job.name = input.name.trim() || "(unnamed)";
+  if (input.prompt !== undefined) job.prompt = input.prompt;
+
+  if (input.schedule !== undefined) {
+    const scheduleValue = input.schedule.trim();
+    const currentSchedule = job.schedule;
+    if (
+      currentSchedule &&
+      typeof currentSchedule === "object" &&
+      !Array.isArray(currentSchedule)
+    ) {
+      job.schedule = { ...(currentSchedule as Record<string, unknown>), value: scheduleValue };
+    } else {
+      job.schedule = { value: scheduleValue };
+    }
+    job.schedule_display = scheduleValue;
+  }
+
+  const deliver = normaliseDeliverInput(input.deliver);
+  if (deliver) job.deliver = deliver;
+}
+
+export async function updateCronJob(
+  jobId: string,
+  input: CronJobUpdateInput,
+  profile?: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!jobId) return { success: false, error: "Missing job ID" };
+  if (sshConfig()) return updateSshCronJob(jobId, input, profile);
+
+  if (isRemoteMode()) {
+    try {
+      const res = await remoteFetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        return { success: false, error: await remoteJsonError(res) };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
+
+  if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+  if (input.schedule !== undefined && !input.schedule.trim()) {
+    return { success: false, error: "Schedule is required" };
+  }
+
+  const filePath = jobsFilePath(profile);
+  if (!existsSync(filePath)) return { success: false, error: "Cron jobs file not found" };
+
+  try {
+    const content = await readFile(filePath, "utf-8");
+    const parsed = JSON.parse(content) as unknown;
+    const rawJobs = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { jobs?: unknown[] }).jobs || [];
+    const jobs = rawJobs.filter(
+      (job): job is Record<string, unknown> =>
+        !!job && typeof job === "object" && !Array.isArray(job),
+    );
+    const job = jobs.find(candidate => String(candidate.id || "") === jobId);
+    if (!job) return { success: false, error: "Cron job not found" };
+
+    applyCronJobUpdate(job, input);
+    safeWriteFile(filePath, JSON.stringify(parsed, null, 2));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
 }
 
 async function remoteJobAction(
@@ -298,6 +565,11 @@ export async function pauseCronJob(
   profile?: string,
 ): Promise<{ success: boolean; error?: string }> {
   if (!jobId) return { success: false, error: "Missing job ID" };
+  if (sshConfig()) {
+    if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+    const result = await runSshCronCommand(["pause", END_OF_OPTIONS, jobId], profile);
+    return { success: result.success, error: result.error };
+  }
   if (isRemoteMode()) return remoteJobAction(jobId, "pause");
   if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
   const result = await runCronCommand(["pause", END_OF_OPTIONS, jobId], profile);
@@ -309,6 +581,11 @@ export async function resumeCronJob(
   profile?: string,
 ): Promise<{ success: boolean; error?: string }> {
   if (!jobId) return { success: false, error: "Missing job ID" };
+  if (sshConfig()) {
+    if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+    const result = await runSshCronCommand(["resume", END_OF_OPTIONS, jobId], profile);
+    return { success: result.success, error: result.error };
+  }
   if (isRemoteMode()) return remoteJobAction(jobId, "resume");
   if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
   const result = await runCronCommand(["resume", END_OF_OPTIONS, jobId], profile);
@@ -320,6 +597,11 @@ export async function triggerCronJob(
   profile?: string,
 ): Promise<{ success: boolean; error?: string }> {
   if (!jobId) return { success: false, error: "Missing job ID" };
+  if (sshConfig()) {
+    if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
+    const result = await runSshCronCommand(["run", END_OF_OPTIONS, jobId], profile);
+    return { success: result.success, error: result.error };
+  }
   if (isRemoteMode()) return remoteJobAction(jobId, "run");
   if (!isValidIdSlug(jobId)) return { success: false, error: "Invalid job ID" };
   const result = await runCronCommand(["run", END_OF_OPTIONS, jobId], profile);

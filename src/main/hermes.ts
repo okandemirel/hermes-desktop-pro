@@ -283,6 +283,10 @@ export interface ChatCallbacks {
   }) => void;
 }
 
+type ChatRuntimeOptions = {
+  temperature?: number;
+};
+
 type ChatContent =
   | string
   | Array<
@@ -375,6 +379,7 @@ function sendMessageViaApi(
   history?: Array<{ role: string; content: string }>,
   attachments?: Attachment[],
   contextFolder?: string,
+  runtimeOptions?: ChatRuntimeOptions,
 ): ChatHandle {
   const mc = getModelConfig(profile);
   const controller = new AbortController();
@@ -402,10 +407,17 @@ function sendMessageViaApi(
   const ctxSystem = contextFolderSystemMessage(contextFolder);
   if (ctxSystem) messages.unshift(ctxSystem);
 
+  const temperature =
+    typeof runtimeOptions?.temperature === "number" &&
+    Number.isFinite(runtimeOptions.temperature)
+      ? Math.min(1, Math.max(0, runtimeOptions.temperature))
+      : undefined;
+
   const body = JSON.stringify({
     model: mc.model || "hermes-agent",
     messages,
     stream: true,
+    ...(temperature !== undefined ? { temperature } : {}),
     ...(_resumeSessionId ? { session_id: _resumeSessionId } : {}),
   });
 
@@ -490,6 +502,7 @@ function sendMessageViaApi(
       model: mc.model || "hermes-agent",
       messages: [{ role: "user", content: userContent }],
       stream: false,
+      ...(temperature !== undefined ? { temperature } : {}),
     });
     const probeBodyBuf = Buffer.from(probeBody, "utf-8");
     // Per-request Content-Length (the outer `headers` object's value
@@ -1005,6 +1018,7 @@ export async function sendMessage(
   history?: Array<{ role: string; content: string }>,
   attachments?: Attachment[],
   contextFolder?: string,
+  runtimeOptions?: ChatRuntimeOptions,
 ): Promise<ChatHandle> {
   ensureInitialized();
 
@@ -1018,6 +1032,7 @@ export async function sendMessage(
       history,
       attachments,
       contextFolder,
+      runtimeOptions,
     );
   }
 
@@ -1045,6 +1060,7 @@ export async function sendMessage(
       history,
       attachments,
       contextFolder,
+      runtimeOptions,
     );
   }
 

@@ -109,6 +109,85 @@ export interface TokenUsage {
   cost?: number;
 }
 
+// ─── Profile dispatch types ────────────────────────────────────
+export type DispatchMode = "single" | "sequential" | "parallel" | "hybrid";
+
+export interface ProfileDispatchTarget {
+  profileName: string;
+  isPrimary?: boolean;
+  providerId?: ProviderId;
+  modelId?: string;
+  label?: string;
+  isDefault?: boolean;
+  isActive?: boolean;
+}
+
+export interface DispatchMessageOptions {
+  dispatchId?: string;
+  mode: DispatchMode;
+  targets: ProfileDispatchTarget[];
+  resumeSessionByProfile?: Record<string, string | undefined>;
+  history?: Array<{ role: string; content: string }>;
+  attachments?: Attachment[];
+  contextFolder?: string;
+  temperature?: number;
+}
+
+export interface DispatchMessageResult {
+  dispatchId: string;
+  sessionIdsByProfile: Record<string, string | undefined>;
+}
+
+export type DispatchEventKind =
+  | "queued"
+  | "started"
+  | "chunk"
+  | "reasoning"
+  | "tool"
+  | "usage"
+  | "done"
+  | "error"
+  | "aborted";
+
+export interface DispatchStreamEvent {
+  dispatchId: string;
+  runId: string;
+  profileName: string;
+  kind: DispatchEventKind;
+  text?: string;
+  tool?: string;
+  usage?: TokenUsage;
+  sessionId?: string;
+  error?: string;
+  timestamp: number;
+}
+
+export interface ProfileRunState {
+  runId: string;
+  profileName: string;
+  assistantMessageId: string;
+  sessionId?: string;
+  status: AgentRunStatus;
+  content: string;
+  reasoning?: string;
+  events: AgentRunEvent[];
+  usage?: TokenUsage;
+  startedAt?: number;
+  endedAt?: number;
+  error?: string;
+}
+
+export interface DispatchRunState {
+  dispatchId: string;
+  mode: DispatchMode;
+  prompt: string;
+  targets: ProfileDispatchTarget[];
+  status: AgentRunStatus;
+  startedAt: number;
+  endedAt?: number;
+  profileRuns: ProfileRunState[];
+}
+
 // ─── Chat tab types ─────────────────────────────────────────────
 export interface ChatTab {
   id: string;
@@ -119,6 +198,8 @@ export interface ChatTab {
   sessionId?: string;
   baseUrl?: string;
   messages?: ChatMessage[];
+  dispatchMode?: DispatchMode;
+  dispatchTargets?: ProfileDispatchTarget[];
   isStreaming?: boolean;
   createdAt?: number;
   dirty?: boolean;
@@ -232,6 +313,13 @@ export interface CronJob {
   deliver: string[];
   skills: string[];
   script: string | null;
+}
+
+export interface CronJobUpdateInput {
+  name?: string;
+  schedule?: string;
+  prompt?: string;
+  deliver?: string | string[];
 }
 
 // ─── Kanban types ───────────────────────────────────────────────

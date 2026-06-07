@@ -3,14 +3,29 @@ import {
   Square, Plus, Globe, Image, Code, Wrench, Brain, Activity, Terminal, Paperclip,
   ArrowUp, Search, FileText, Table2, Sparkles, SlidersHorizontal, Command,
   Database, BookOpen, Settings2, ChevronDown, CheckCircle2, Copy, ExternalLink,
-  ThumbsUp, ThumbsDown, Share2, X, Mic, Box,
+  ThumbsUp, ThumbsDown, Share2, X, Mic, Box, Users,
   BarChart3, Lightbulb, Play, Clock, Star, Layers, Bookmark, ShieldCheck, Grid2X2,
   Check, MessageSquare,
 } from "lucide-react";
-import type { AgentRunEvent, AgentRunEventKind, AgentRunState, ChatMessage, ChatTab, ProviderId, ProviderInfo, TokenUsage } from "@shared/types";
+import type {
+  AgentRunEvent,
+  AgentRunEventKind,
+  AgentRunState,
+  ChatMessage,
+  ChatTab,
+  DispatchMode,
+  DispatchRunState,
+  ProfileDispatchTarget,
+  ProfileInfo,
+  ProviderId,
+  ProviderInfo,
+  TokenUsage,
+  ToolsetInfo,
+} from "@shared/types";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { BrandMark, BrandMedallion } from "./BrandMark";
 import { useChatStream } from "../hooks/useChatStream";
+import { normalizeDispatchTargets, sendLabelForDispatch } from "../chatDispatch";
 import { IconButton, StatusDot, Toggle } from "../ui";
 
 interface ChatViewProps {
@@ -18,6 +33,12 @@ interface ChatViewProps {
   onClose: (id: string) => void; onNewTab: () => void; onSelectTab: (id: string) => void;
   onUpdateProvider: (tabId: string, providerId: ProviderId) => void;
   onUpdateModel: (tabId: string, modelId: string) => void;
+  onOpenTools?: () => void;
+  onOpenMemory?: () => void;
+  onOpenModels?: () => void;
+  onOpenSessions?: () => void;
+  onOpenSettings?: () => void;
+  onUpdateDispatch?: (tabId: string, mode: DispatchMode, targets: ProfileDispatchTarget[]) => void;
 }
 
 type InspectorTab = "inspector" | "context" | "activity" | "pinned";
@@ -50,13 +71,7 @@ const QUICK_ACTIONS = [
   { icon: Play, label: "Create Plan", cmd: "Create a plan for " },
 ];
 
-const INSPECTOR_TOOLS = [
-  { id: "web", icon: Globe, label: "Web Search", enabled: true },
-  { id: "docs", icon: FileText, label: "Document Analysis", enabled: true },
-  { id: "data", icon: Table2, label: "Data Extraction", enabled: true },
-  { id: "code", icon: Code, label: "Code Interpreter", enabled: false },
-  { id: "image", icon: Image, label: "Image Generation", enabled: false },
-];
+const INSPECTOR_TOOL_ORDER = ["web", "file", "code_execution", "image_gen", "memory"];
 
 const MEMORY_ROWS = [
   { icon: Database, label: "Project Knowledge", meta: "120 items", active: true },
@@ -103,6 +118,17 @@ function runEventIcon(kind: AgentRunEventKind, status: AgentRunEvent["status"]):
   if (kind === "done") return <CheckCircle2 size={17} />;
   if (kind === "abort") return <Square size={15} />;
   return <Sparkles size={17} />;
+}
+
+function iconForToolset(key: string) {
+  if (key === "web" || key === "browser") return Globe;
+  if (key === "file" || key === "vision" || key === "image_gen") return key === "image_gen" ? Image : FileText;
+  if (key === "code_execution") return Code;
+  if (key === "terminal") return Terminal;
+  if (key === "memory" || key === "session_search") return Database;
+  if (key === "skills" || key === "delegation") return Brain;
+  if (key === "cronjob" || key === "todo") return Activity;
+  return Wrench;
 }
 
 function createHistoricalRunState(messages: ChatMessage[]): AgentRunState | null {
@@ -233,6 +259,94 @@ function AgentRunTimeline({
   );
 }
 
+function ProfileDispatchTimeline({
+  dispatchRun,
+  tokenUsage,
+  onOpenActivity,
+  onAbortDispatch,
+}: {
+  dispatchRun: DispatchRunState;
+  tokenUsage: TokenUsage;
+  onOpenActivity: () => void;
+  onAbortDispatch: (runId?: string) => void;
+}) {
+  const status = runStatusLabel(dispatchRun.status);
+  const duration = formatDuration(dispatchRun.startedAt, dispatchRun.endedAt);
+  const completedRuns = dispatchRun.profileRuns.filter(run => run.status === "done").length;
+  const activeRuns = dispatchRun.profileRuns.filter(run => run.status === "running" || run.status === "idle").length;
+
+  return (
+    <section className="ui-dispatch-run" data-status={dispatchRun.status} aria-label="Profile dispatch execution">
+      <div className="ui-dispatch-run-head">
+        <div className="ui-dispatch-run-icon"><Users size={19} /></div>
+        <div className="ui-dispatch-run-title">
+          <span>{dispatchRun.mode} execution</span>
+          <h2>{truncateText(dispatchRun.prompt, 92)}</h2>
+          <p>{dispatchRun.profileRuns.length} profile runs · {completedRuns} done · {activeRuns} active</p>
+        </div>
+        <div className="ui-dispatch-run-state">
+          <span><StatusDot color={dispatchRun.status === "running" ? "var(--success)" : dispatchRun.status === "error" || dispatchRun.status === "aborted" ? "var(--error)" : "var(--accent-text)"} pulse={dispatchRun.status === "running"} /> {status}</span>
+          <em>{duration}</em>
+        </div>
+      </div>
+
+      <div className="ui-dispatch-profile-grid">
+        {dispatchRun.profileRuns.map(run => {
+          const latestEvent = [...run.events].reverse().find(Boolean);
+          const dispatchTarget = dispatchRun.targets.find(target => target.profileName === run.profileName);
+          const preview = run.content || run.reasoning || latestEvent?.detail || "Waiting for live profile output.";
+          return (
+            <article key={run.runId} className="ui-dispatch-profile-card" data-status={run.status}>
+              <div className="ui-dispatch-profile-card-head">
+                <div>
+                  <strong>{run.profileName}</strong>
+                  <span>{dispatchTarget?.isPrimary ? "Primary profile" : "Profile execution"}</span>
+                </div>
+                <div className="ui-dispatch-profile-actions">
+                  <em>{run.usage?.totalTokens ? `${run.usage.totalTokens.toLocaleString()} tok` : run.status}</em>
+                  {(run.status === "running" || run.status === "idle") && (
+                    <button type="button" onClick={() => onAbortDispatch(run.runId)} title={`Stop ${run.profileName}`}>
+                      <Square size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p>{truncateText(preview, 170)}</p>
+              <div className="ui-dispatch-step-strip">
+                {(run.events.length ? run.events.slice(-4) : [{
+                  id: `${run.runId}-waiting`,
+                  kind: "start" as const,
+                  label: "Queued",
+                  detail: "Waiting for backend execution",
+                  status: "queued" as const,
+                  timestamp: dispatchRun.startedAt,
+                }]).map(event => (
+                  <span key={event.id} data-status={event.status}>
+                    {runEventIcon(event.kind, event.status)}
+                    <em>{truncateText(event.label, 26)}</em>
+                  </span>
+                ))}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="ui-dispatch-run-footer">
+        <span><Activity size={13} /> Tokens <strong>{tokenUsage.totalTokens.toLocaleString()}</strong></span>
+        <span><Users size={13} /> Targets <strong>{dispatchRun.profileRuns.length}</strong></span>
+        <span><Wrench size={13} /> Mode <strong>{dispatchRun.mode}</strong></span>
+        <button type="button" onClick={onOpenActivity}><Activity size={13} /> Inspect</button>
+        {dispatchRun.status === "running" && (
+          <button type="button" className="ui-dispatch-stop" onClick={() => onAbortDispatch()}>
+            <Square size={12} /> Stop all
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function ChatView({
   tab,
   providers,
@@ -242,6 +356,12 @@ export default function ChatView({
   onSelectTab,
   onUpdateProvider,
   onUpdateModel,
+  onOpenTools,
+  onOpenMemory,
+  onOpenModels,
+  onOpenSessions,
+  onOpenSettings,
+  onUpdateDispatch,
 }: ChatViewProps) {
   const [input, setInput] = useState("");
   const [showCommands, setShowCommands] = useState(false);
@@ -251,20 +371,68 @@ export default function ChatView({
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const [openControlSelect, setOpenControlSelect] = useState<string | null>(null);
-  const [toolToggles, setToolToggles] = useState<Record<string, boolean>>(
-    () => Object.fromEntries(INSPECTOR_TOOLS.map(t => [t.id, t.enabled])),
-  );
+  const [inspectorToolsets, setInspectorToolsets] = useState<ToolsetInfo[]>([]);
+  const [toolsetsLoaded, setToolsetsLoaded] = useState(false);
+  const [toolBusyKey, setToolBusyKey] = useState<string | null>(null);
+  const [inspectorError, setInspectorError] = useState("");
+  const [temperature, setTemperature] = useState(0.3);
+  const [temperatureSaving, setTemperatureSaving] = useState(false);
+  const [temperatureError, setTemperatureError] = useState("");
+  const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
+  const [profilePickerOpen, setProfilePickerOpen] = useState(false);
+  const [dispatchMode, setDispatchMode] = useState<DispatchMode>(tab.dispatchMode || "single");
+  const [dispatchTargets, setDispatchTargets] = useState<ProfileDispatchTarget[]>(tab.dispatchTargets || []);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const tabMenuRef = useRef<HTMLDivElement>(null);
+  const profilePickerRef = useRef<HTMLDivElement>(null);
   const suppressCommandMenuRef = useRef(false);
   const activeProvider = providers.find(p => p.id === tab.providerId);
 
-  const { messages, isStreaming, runState, sendMessage, abortStream } = useChatStream({
-    providerId: tab.providerId, modelId: tab.modelId, conversationKey: tab.id, sessionId: tab.sessionId, initialMessages: tab.messages,
+  const activeProfileName = profiles.find(profile => profile.isActive)?.name || "default";
+  const normalizedDispatchTargets = useMemo(
+    () => normalizeDispatchTargets(dispatchTargets, activeProfileName),
+    [dispatchTargets, activeProfileName],
+  );
+  const sendButtonLabel = sendLabelForDispatch(dispatchMode, normalizedDispatchTargets.length);
+
+  const { messages, isStreaming, runState, dispatchRunState, sendMessage, abortStream, abortDispatch } = useChatStream({
+    providerId: tab.providerId,
+    modelId: tab.modelId,
+    conversationKey: tab.id,
+    sessionId: tab.sessionId,
+    initialMessages: tab.messages,
+    temperature,
+    dispatchMode,
+    dispatchTargets: normalizedDispatchTargets,
+    activeProfileName,
   });
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  useEffect(() => {
+    setDispatchMode(tab.dispatchMode || "single");
+    setDispatchTargets(tab.dispatchTargets || []);
+    setProfilePickerOpen(false);
+  }, [tab.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setProfilesLoaded(false);
+    window.hermes.listProfiles()
+      .then((rows: ProfileInfo[]) => {
+        if (cancelled) return;
+        setProfiles(rows || []);
+      })
+      .catch(() => {
+        if (!cancelled) setProfiles([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProfilesLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!tabMenuOpen) return;
@@ -282,6 +450,23 @@ export default function ChatView({
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [tabMenuOpen]);
+
+  useEffect(() => {
+    if (!profilePickerOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (profilePickerRef.current?.contains(event.target as Node)) return;
+      setProfilePickerOpen(false);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setProfilePickerOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [profilePickerOpen]);
 
   useEffect(() => {
     if (!openControlSelect) return;
@@ -302,6 +487,39 @@ export default function ChatView({
   }, [openControlSelect]);
 
   useEffect(() => {
+    let cancelled = false;
+    setToolsetsLoaded(false);
+    window.hermes.getToolsets()
+      .then((toolsets: ToolsetInfo[]) => {
+        if (cancelled) return;
+        setInspectorToolsets(toolsets);
+        setInspectorError("");
+      })
+      .catch(() => {
+        if (!cancelled) setInspectorError("Tool settings could not be loaded.");
+      })
+      .finally(() => {
+        if (!cancelled) setToolsetsLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.hermes.getConfigValue("model.temperature")
+      .then((value: unknown) => {
+        const parsed = typeof value === "number" ? value : Number(value);
+        if (!cancelled && Number.isFinite(parsed)) {
+          setTemperature(Math.min(1, Math.max(0, parsed)));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setTemperatureError("Temperature setting could not be loaded.");
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     if (suppressCommandMenuRef.current) {
       suppressCommandMenuRef.current = false;
       setShowCommands(false);
@@ -320,19 +538,88 @@ export default function ChatView({
 
   const modelName = activeProvider?.models?.find(m => m.id === tab.modelId)?.name || tab.modelId || "Auto";
   const providerLabel = activeProvider?.label || tab.providerId;
-  const activeToolCount = Object.values(toolToggles).filter(Boolean).length;
+  const activeToolCount = inspectorToolsets.filter(toolset => toolset.enabled).length;
+  const inspectorVisibleToolsets = useMemo(() => {
+    const byKey = new Map(inspectorToolsets.map(toolset => [toolset.key, toolset]));
+    const ordered = INSPECTOR_TOOL_ORDER
+      .map(key => byKey.get(key))
+      .filter((toolset): toolset is ToolsetInfo => Boolean(toolset));
+    return ordered.length > 0 ? ordered : inspectorToolsets.slice(0, 5);
+  }, [inspectorToolsets]);
   const sessionTitle = tab.name && tab.name !== "New chat" ? tab.name : "Q2 Market Report";
   const activeTabIndex = Math.max(0, allTabs.findIndex(t => t.id === tab.id));
   const activeTabPosition = activeTabIndex + 1;
-  const displayRunState = useMemo(() => runState || createHistoricalRunState(messages), [runState, messages]);
+  const displayRunState = useMemo(() => (
+    dispatchRunState ? null : runState || createHistoricalRunState(messages)
+  ), [dispatchRunState, runState, messages]);
   const assistantPreview = useMemo(() => {
     const lastAssistant = [...messages].reverse().find(message => message.role === "assistant");
     return truncateText(lastAssistant?.content || lastAssistant?.reasoning || "", 220);
   }, [messages]);
   const displayedUsage = useMemo<TokenUsage>(() => {
     const messageUsage = [...messages].reverse().find(message => message.role === "assistant" && message.usage)?.usage;
+    if (dispatchRunState) {
+      return dispatchRunState.profileRuns.reduce<TokenUsage>((acc, run) => ({
+        promptTokens: acc.promptTokens + (run.usage?.promptTokens || 0),
+        completionTokens: acc.completionTokens + (run.usage?.completionTokens || 0),
+        totalTokens: acc.totalTokens + (run.usage?.totalTokens || 0),
+        cost: (acc.cost || 0) + (run.usage?.cost || 0),
+      }), { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 });
+    }
     return displayRunState?.usage || messageUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 };
-  }, [displayRunState, messages]);
+  }, [dispatchRunState, displayRunState, messages]);
+
+  const persistDispatchSelection = useCallback((nextMode: DispatchMode, nextTargets: ProfileDispatchTarget[]) => {
+    const normalized = normalizeDispatchTargets(nextTargets, activeProfileName);
+    setDispatchMode(nextMode);
+    setDispatchTargets(normalized);
+    onUpdateDispatch?.(tab.id, nextMode, normalized);
+  }, [activeProfileName, onUpdateDispatch, tab.id]);
+
+  const targetFromProfile = useCallback((profile: ProfileInfo): ProfileDispatchTarget => ({
+    profileName: profile.name,
+    label: profile.name,
+    isDefault: profile.isDefault,
+    isActive: profile.isActive,
+    providerId: profile.provider as ProviderId,
+    modelId: profile.model || undefined,
+  }), []);
+
+  const changeDispatchMode = useCallback((nextMode: DispatchMode) => {
+    const normalized = normalizeDispatchTargets(dispatchTargets, activeProfileName);
+    const nextTargets = nextMode === "single"
+      ? normalized.slice(0, 1).map(target => ({ ...target, isPrimary: true }))
+      : normalized;
+    persistDispatchSelection(nextMode, nextTargets);
+  }, [activeProfileName, dispatchTargets, persistDispatchSelection]);
+
+  const toggleDispatchTarget = useCallback((profile: ProfileInfo) => {
+    const normalized = normalizeDispatchTargets(dispatchTargets, activeProfileName);
+    const exists = normalized.some(target => target.profileName === profile.name);
+
+    if (dispatchMode === "single") {
+      persistDispatchSelection("single", [{ ...targetFromProfile(profile), isPrimary: true }]);
+      return;
+    }
+
+    const nextTargets = exists
+      ? normalized.filter(target => target.profileName !== profile.name)
+      : [...normalized, targetFromProfile(profile)];
+    const safeTargets = nextTargets.length > 0 ? nextTargets : [{ ...targetFromProfile(profile), isPrimary: true }];
+    const hasPrimary = safeTargets.some(target => target.isPrimary);
+    persistDispatchSelection(
+      dispatchMode,
+      safeTargets.map((target, index) => ({ ...target, isPrimary: hasPrimary ? !!target.isPrimary : index === 0 })),
+    );
+  }, [activeProfileName, dispatchMode, dispatchTargets, persistDispatchSelection, targetFromProfile]);
+
+  const markDispatchPrimary = useCallback((profileName: string) => {
+    const normalized = normalizeDispatchTargets(dispatchTargets, activeProfileName);
+    persistDispatchSelection(
+      dispatchMode,
+      normalized.map(target => ({ ...target, isPrimary: target.profileName === profileName })),
+    );
+  }, [activeProfileName, dispatchMode, dispatchTargets, persistDispatchSelection]);
 
   const focusCommand = useCallback((cmd: string) => {
     suppressCommandMenuRef.current = true;
@@ -340,6 +627,69 @@ export default function ChatView({
     setShowCommands(false);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
+
+  const openToolsManagement = useCallback(() => {
+    if (onOpenTools) onOpenTools();
+    else focusCommand("/tools ");
+  }, [focusCommand, onOpenTools]);
+
+  const openMemoryManagement = useCallback(() => {
+    if (onOpenMemory) onOpenMemory();
+    else focusCommand("/memory ");
+  }, [focusCommand, onOpenMemory]);
+
+  const openModelManagement = useCallback(() => {
+    if (onOpenModels) onOpenModels();
+    else focusCommand("/model ");
+  }, [focusCommand, onOpenModels]);
+
+  const openSettingsManagement = useCallback(() => {
+    if (onOpenSettings) onOpenSettings();
+    else focusCommand("/context ");
+  }, [focusCommand, onOpenSettings]);
+
+  const toggleInspectorToolset = useCallback(async (key: string, enabled: boolean) => {
+    setToolBusyKey(key);
+    setInspectorError("");
+    setInspectorToolsets(prev => prev.map(toolset => toolset.key === key ? { ...toolset, enabled } : toolset));
+    try {
+      const ok = await window.hermes.setToolsetEnabled(key, enabled);
+      if (!ok) throw new Error("Tool setting was not persisted.");
+    } catch {
+      setInspectorToolsets(prev => prev.map(toolset => toolset.key === key ? { ...toolset, enabled: !enabled } : toolset));
+      setInspectorError("Tool setting could not be saved.");
+    } finally {
+      setToolBusyKey(current => current === key ? null : current);
+    }
+  }, []);
+
+  const commitTemperature = useCallback(async (nextValue: number) => {
+    const normalized = Math.min(1, Math.max(0, Number(nextValue.toFixed(1))));
+    setTemperatureSaving(true);
+    setTemperatureError("");
+    try {
+      const ok = await window.hermes.setConfigValue("model.temperature", normalized);
+      if (!ok) throw new Error("Temperature setting was not persisted.");
+      setTemperature(normalized);
+    } catch {
+      setTemperatureError("Temperature setting could not be saved.");
+    } finally {
+      setTemperatureSaving(false);
+    }
+  }, []);
+
+  const handleInspectorRowAction = useCallback((label: string) => {
+    if (label === "Workspace" || label === "Mode") {
+      openSettingsManagement();
+      return;
+    }
+    if (label === "Session") {
+      if (onOpenSessions) onOpenSessions();
+      else focusCommand("/session ");
+      return;
+    }
+    focusCommand(`/${label.toLowerCase().replace(/\s+/g, "-")} `);
+  }, [focusCommand, onOpenSessions, openSettingsManagement]);
 
   const copyPreview = useCallback(() => {
     void navigator.clipboard?.writeText("Key insights copied from Hermes agent preview.");
@@ -457,14 +807,110 @@ export default function ChatView({
     setTabMenuOpen(false);
   }, [onSelectTab]);
 
-  const closeChatTab = useCallback((id: string, event?: MouseEvent<HTMLButtonElement>) => {
+  const closeChatTab = useCallback((id: string, event?: MouseEvent<HTMLButtonElement>, options?: { keepMenuOpen?: boolean }) => {
     event?.preventDefault();
     event?.stopPropagation();
     if (allTabs.length <= 1) return;
     if (id === tab.id && isStreaming) abortStream();
     onClose(id);
-    setTabMenuOpen(false);
+    if (!options?.keepMenuOpen) setTabMenuOpen(false);
   }, [abortStream, allTabs.length, isStreaming, onClose, tab.id]);
+
+  const renderProfileDispatchPicker = () => {
+    const selectedNames = new Set(normalizedDispatchTargets.map(target => target.profileName));
+    const primaryName = normalizedDispatchTargets.find(target => target.isPrimary)?.profileName || normalizedDispatchTargets[0]?.profileName || activeProfileName;
+    const displayProfiles: ProfileInfo[] = profiles.length > 0 ? profiles : [{
+      name: activeProfileName,
+      path: "",
+      isDefault: activeProfileName === "default",
+      isActive: true,
+      model: modelName,
+      provider: tab.providerId,
+      hasEnv: false,
+      hasSoul: false,
+      skillCount: 0,
+      gatewayRunning: false,
+    }];
+
+    return (
+      <div className="ui-profile-dispatch no-drag" ref={profilePickerRef}>
+        <button
+          type="button"
+          className="ui-profile-dispatch-trigger"
+          aria-haspopup="dialog"
+          aria-expanded={profilePickerOpen}
+          onClick={() => setProfilePickerOpen(open => !open)}
+          title="Profile dispatch"
+        >
+          <Users size={15} />
+          <span>{dispatchMode}</span>
+          <strong>{normalizedDispatchTargets.length}</strong>
+          <ChevronDown size={13} />
+        </button>
+        {profilePickerOpen && (
+          <div className="ui-profile-dispatch-panel slide-up" role="dialog" aria-label="Profile dispatch settings">
+            <div className="ui-profile-dispatch-head">
+              <div>
+                <span>Profile dispatch</span>
+                <strong>{sendButtonLabel}</strong>
+              </div>
+              <button type="button" onClick={() => setProfilePickerOpen(false)} title="Close profile dispatch">
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="ui-profile-mode-grid" role="radiogroup" aria-label="Execution mode">
+              {(["single", "sequential", "parallel", "hybrid"] as DispatchMode[]).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  data-active={dispatchMode === mode}
+                  onClick={() => changeDispatchMode(mode)}
+                >
+                  <span>{mode}</span>
+                  <em>
+                    {mode === "single" ? "one profile" : mode === "sequential" ? "one by one" : mode === "parallel" ? "same time" : "primary then team"}
+                  </em>
+                </button>
+              ))}
+            </div>
+
+            <div className="ui-profile-dispatch-list" aria-label="Profiles">
+              {!profilesLoaded && <div className="ui-profile-dispatch-empty">Loading profiles…</div>}
+              {profilesLoaded && displayProfiles.map(profile => {
+                const selected = selectedNames.has(profile.name);
+                const primary = primaryName === profile.name;
+                return (
+                  <div key={profile.name} className="ui-profile-dispatch-row" data-selected={selected} data-primary={primary}>
+                    <button
+                      type="button"
+                      className="ui-profile-dispatch-select"
+                      onClick={() => toggleDispatchTarget(profile)}
+                    >
+                      <span className="ui-profile-dispatch-check">{selected ? <Check size={13} /> : null}</span>
+                      <span className="ui-profile-dispatch-name">
+                        <strong>{profile.name}</strong>
+                        <em>{profile.isActive ? "active" : profile.isDefault ? "default" : `${profile.skillCount} skills`}</em>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="ui-profile-dispatch-primary"
+                      onClick={() => markDispatchPrimary(profile.name)}
+                      disabled={!selected}
+                      title={`Set ${profile.name} as primary`}
+                    >
+                      {primary ? "Primary" : "Lead"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const topbarEl = (
     <header className="ui-commandbar drag">
@@ -545,7 +991,7 @@ export default function ChatView({
                   <button
                     type="button"
                     className="ui-chat-tab-menu-close"
-                    onClick={event => closeChatTab(t.id, event)}
+                    onClick={event => closeChatTab(t.id, event, { keepMenuOpen: true })}
                     disabled={allTabs.length <= 1}
                     title={allTabs.length <= 1 ? "Keep at least one chat open" : `Close ${t.name}`}
                     aria-label={`Close ${t.name}`}
@@ -567,7 +1013,7 @@ export default function ChatView({
         </button>
         <IconButton title="Activity" onClick={() => toggleInspector("activity")}><Activity size={16} /></IconButton>
         <IconButton title="Security" onClick={() => focusCommand("/security ")}><ShieldCheck size={16} /></IconButton>
-        <IconButton title="Apps" onClick={() => focusCommand("/tools ")}><Grid2X2 size={16} /></IconButton>
+        <IconButton title="Apps" onClick={openToolsManagement}><Grid2X2 size={16} /></IconButton>
         <IconButton title="Settings" onClick={() => toggleInspector("context")}><Settings2 size={16} /></IconButton>
         <button className="ui-run-button" onClick={handleNewChat}>
           <Plus size={18} /> <span className="ui-run-label">New</span>
@@ -604,16 +1050,17 @@ export default function ChatView({
             ))}
           </div>
           <div className="flex items-center gap-2 min-w-0">
+            {renderProfileDispatchPicker()}
             <button className="ui-compose-tool" onClick={() => focusCommand("/voice ")} title="Voice">
               <Mic size={17} />
             </button>
             <span className="ui-model-chip">{providerLabel} · {modelName}</span>
             {isStreaming ? (
-              <button onClick={abortStream} className="ui-send-button ui-send-button-stop" title="Stop">
+              <button onClick={() => dispatchRunState ? abortDispatch() : abortStream()} className="ui-send-button ui-send-button-stop" title={dispatchRunState ? "Stop all profile runs" : "Stop"}>
                 <Square size={13} fill="currentColor" />
               </button>
             ) : (
-              <button onClick={handleSend} disabled={!input.trim()} className="ui-send-button" title="Send">
+              <button onClick={handleSend} disabled={!input.trim()} className="ui-send-button" title={sendButtonLabel} aria-label={sendButtonLabel}>
                 <ArrowUp size={18} />
               </button>
             )}
@@ -646,14 +1093,24 @@ export default function ChatView({
     </div>
   );
 
-  const runEvents = displayRunState?.events || [];
+  const runEvents = dispatchRunState
+    ? dispatchRunState.profileRuns.flatMap(run => run.events.map(event => ({
+        ...event,
+        label: `${run.profileName}: ${event.label}`,
+      })))
+    : displayRunState?.events || [];
   const runToolEvents = runEvents.filter(event => event.kind === "tool").length;
-  const runStatus = displayRunState ? runStatusLabel(displayRunState.status) : "Ready";
-  const runDuration = displayRunState ? formatDuration(displayRunState.startedAt, displayRunState.endedAt) : "0s";
+  const runStatus = dispatchRunState ? runStatusLabel(dispatchRunState.status) : displayRunState ? runStatusLabel(displayRunState.status) : "Ready";
+  const runDuration = dispatchRunState
+    ? formatDuration(dispatchRunState.startedAt, dispatchRunState.endedAt)
+    : displayRunState ? formatDuration(displayRunState.startedAt, displayRunState.endedAt) : "0s";
+  const runPrompt = dispatchRunState?.prompt || displayRunState?.prompt || "No active run";
+  const runStartedAt = dispatchRunState?.startedAt || displayRunState?.startedAt;
 
   const inspectorRows = inspectorTab === "activity"
     ? [
         { icon: Activity, label: "Run status", meta: runStatus },
+        { icon: Users, label: "Profile runs", meta: dispatchRunState ? `${dispatchRunState.profileRuns.length} targets` : "Single profile" },
         { icon: Wrench, label: "Tool events", meta: `${runToolEvents || activeToolCount} active` },
         { icon: Table2, label: "Token usage", meta: displayedUsage.totalTokens ? displayedUsage.totalTokens.toLocaleString() : "Pending" },
       ]
@@ -687,16 +1144,16 @@ export default function ChatView({
 
       {inspectorTab === "activity" && (
         <section className="ui-inspector-section">
-          <div className="ui-activity-run-card" data-status={displayRunState?.status || "idle"}>
+          <div className="ui-activity-run-card" data-status={dispatchRunState?.status || displayRunState?.status || "idle"}>
             <div className="ui-activity-run-card-head">
-              <span><StatusDot color={displayRunState?.status === "running" ? "var(--success)" : displayRunState?.status === "error" || displayRunState?.status === "aborted" ? "var(--error)" : "var(--accent-text)"} pulse={displayRunState?.status === "running"} /> {runStatus}</span>
+              <span><StatusDot color={(dispatchRunState?.status || displayRunState?.status) === "running" ? "var(--success)" : (dispatchRunState?.status || displayRunState?.status) === "error" || (dispatchRunState?.status || displayRunState?.status) === "aborted" ? "var(--error)" : "var(--accent-text)"} pulse={(dispatchRunState?.status || displayRunState?.status) === "running"} /> {runStatus}</span>
               <em>{runDuration}</em>
             </div>
-            <h3>{truncateText(displayRunState?.prompt || "No active run", 80)}</h3>
-            <p>{displayRunState ? `${providerLabel} · ${modelName} · ${formatClock(displayRunState.startedAt)}` : "Start a conversation to see live operation steps."}</p>
+            <h3>{truncateText(runPrompt, 80)}</h3>
+            <p>{runStartedAt ? `${providerLabel} · ${modelName} · ${formatClock(runStartedAt)}` : "Start a conversation to see live operation steps."}</p>
             <div className="ui-activity-run-metrics">
               <div><span>Steps</span><strong>{runEvents.length}</strong></div>
-              <div><span>Tools</span><strong>{runToolEvents || activeToolCount}</strong></div>
+              <div><span>{dispatchRunState ? "Profiles" : "Tools"}</span><strong>{dispatchRunState?.profileRuns.length || runToolEvents || activeToolCount}</strong></div>
               <div><span>Tokens</span><strong>{displayedUsage.totalTokens.toLocaleString()}</strong></div>
             </div>
           </div>
@@ -721,30 +1178,39 @@ export default function ChatView({
           <section className="ui-inspector-section">
             <div className="ui-inspector-heading">
               <span>Tools</span>
-              <button onClick={() => focusCommand("/tools ")}>Manage</button>
+              <button onClick={openToolsManagement}>Manage</button>
             </div>
             <div className="ui-inspector-list">
-              {INSPECTOR_TOOLS.map(tool => (
-                <div key={tool.id} className="ui-inspector-row">
-                  <tool.icon size={16} className="text-[var(--text-2)]" />
+              {!toolsetsLoaded && <div className="ui-inspector-row ui-inspector-row-muted">Loading tool settings…</div>}
+              {toolsetsLoaded && inspectorVisibleToolsets.length === 0 && <div className="ui-inspector-row ui-inspector-row-muted">No toolsets found.</div>}
+              {inspectorVisibleToolsets.map(tool => {
+                const ToolIcon = iconForToolset(tool.key);
+                return (
+                <div key={tool.key} className="ui-inspector-row" data-busy={toolBusyKey === tool.key}>
+                  <ToolIcon size={16} className="text-[var(--text-2)]" />
                   <span>{tool.label}</span>
                   <Toggle
-                    on={!!toolToggles[tool.id]}
-                    onChange={v => setToolToggles(prev => ({ ...prev, [tool.id]: v }))}
+                    on={tool.enabled}
+                    onChange={v => {
+                      if (toolBusyKey) return;
+                      void toggleInspectorToolset(tool.key, v);
+                    }}
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
+            {inspectorError && <p className="ui-inspector-message ui-inspector-message-error">{inspectorError}</p>}
           </section>
 
           <section className="ui-inspector-section">
             <div className="ui-inspector-heading">
               <span>Memory</span>
-              <button onClick={() => focusCommand("/memory ")}>View all</button>
+              <button onClick={openMemoryManagement}>View all</button>
             </div>
             <div className="ui-inspector-list">
               {MEMORY_ROWS.map(row => (
-                <button key={row.label} className="ui-inspector-row" onClick={() => focusCommand(`/memory ${row.label} `)}>
+                <button key={row.label} className="ui-inspector-row" onClick={openMemoryManagement}>
                   <row.icon size={16} className="text-[var(--text-2)]" />
                   <span>{row.label}</span>
                   <span className="ml-auto text-[11.5px] text-[var(--text-3)]">{row.meta}</span>
@@ -757,7 +1223,7 @@ export default function ChatView({
           <section className="ui-inspector-section">
             <div className="ui-inspector-heading">
               <span>Model</span>
-              <button onClick={() => focusCommand("/model ")}>Configure</button>
+              <button onClick={openModelManagement}>Configure</button>
             </div>
             <div className="ui-model-card">
               <div className="ui-model-card-head">
@@ -773,9 +1239,25 @@ export default function ChatView({
                 <div><span>Tools</span><strong>{activeToolCount} enabled</strong></div>
               </div>
               <label className="ui-model-range">
-                <span>Temperature <em>0.3</em></span>
-                <input className="ui-range" type="range" min="0" max="1" step="0.1" value="0.3" disabled />
+                <span>Temperature <em>{temperature.toFixed(1)}{temperatureSaving ? " · saving" : ""}</em></span>
+                <input
+                  className="ui-range"
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={temperature}
+                  onChange={event => setTemperature(Number(event.currentTarget.value))}
+                  onPointerUp={event => void commitTemperature(Number(event.currentTarget.value))}
+                  onBlur={event => void commitTemperature(Number(event.currentTarget.value))}
+                  onKeyUp={event => {
+                    if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "Home" || event.key === "End") {
+                      void commitTemperature(Number(event.currentTarget.value));
+                    }
+                  }}
+                />
               </label>
+              {temperatureError && <p className="ui-inspector-message ui-inspector-message-error">{temperatureError}</p>}
             </div>
           </section>
         </>
@@ -784,13 +1266,23 @@ export default function ChatView({
       <section className="ui-inspector-section">
         <div className="ui-inspector-heading">
           <span>{inspectorTab === "activity" ? "Activity" : inspectorTab === "pinned" ? "Pinned" : "Context"}</span>
-          <button onClick={() => focusCommand(inspectorTab === "activity" ? "/usage " : inspectorTab === "pinned" ? "/pin " : "/context ")}>
+          <button onClick={() => {
+            if (inspectorTab === "activity") {
+              setInspectorTab("activity");
+              return;
+            }
+            if (inspectorTab === "pinned") {
+              focusCommand("/pin ");
+              return;
+            }
+            openSettingsManagement();
+          }}>
             {inspectorTab === "activity" ? "Refresh" : inspectorTab === "pinned" ? "Add" : "Edit"}
           </button>
         </div>
         <div className="ui-inspector-list">
           {inspectorRows.map(row => (
-            <button key={row.label} className="ui-inspector-row" onClick={() => focusCommand(`/${row.label.toLowerCase().replace(/\s+/g, "-")} `)}>
+            <button key={row.label} className="ui-inspector-row" onClick={() => handleInspectorRowAction(row.label)}>
               <row.icon size={16} className="text-[var(--text-2)]" />
               <span>{row.label}</span>
               <span className="ml-auto text-[11.5px] text-[var(--text-3)] truncate">{row.meta}</span>
@@ -837,6 +1329,14 @@ export default function ChatView({
               <div className="ui-thread-canvas overflow-y-auto">
                 <div className="ui-transcript-rail">
                   {messages.map((msg, i) => <ChatMessageBubble key={i} message={msg} isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"} />)}
+                  {dispatchRunState && (
+                    <ProfileDispatchTimeline
+                      dispatchRun={dispatchRunState}
+                      tokenUsage={displayedUsage}
+                      onOpenActivity={() => toggleInspector("activity")}
+                      onAbortDispatch={abortDispatch}
+                    />
+                  )}
                   {displayRunState && (
                     <AgentRunTimeline
                       runState={displayRunState}
@@ -846,7 +1346,7 @@ export default function ChatView({
                       tokenUsage={displayedUsage}
                       activeToolCount={activeToolCount}
                       onOpenActivity={() => toggleInspector("activity")}
-                      onOpenTools={() => focusCommand("/tools ")}
+                      onOpenTools={openToolsManagement}
                     />
                   )}
                   <div className="ui-run-controls-card">

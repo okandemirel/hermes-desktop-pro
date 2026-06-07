@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Settings, Shield, Download, Upload, Moon, Sun, Laptop, Database, Terminal as TerminalIcon,
   Copy, Check, SlidersHorizontal, Globe, KeyRound, Palette,
+  CalendarClock, RefreshCw, Pencil, Pause, Play, Clock, Send, AlertCircle,
 } from "lucide-react";
+import type { CronJob, CronJobUpdateInput, ProfileInfo } from "@shared/types";
 import {
-  Screen, Card, Button, Input, Badge, Toggle, Segment, SegmentItem, IconButton, Field, StatusDot, cx,
+  Screen, Card, Button, Input, Textarea, Select, Badge, Toggle, Segment, SegmentItem,
+  IconButton, Field, StatusDot, Modal, cx,
 } from "../ui";
 
 type ConnMode = "local" | "remote" | "ssh";
@@ -33,9 +36,12 @@ interface PublicConnConfig {
   ssh: { host: string; port: number; username: string; keyPath: string; remotePort: number; localPort: number };
 }
 type LogTab = "gateway" | "agent" | "error";
-type SectionId = "general" | "network" | "providers" | "appearance" | "backup" | "diagnostics";
+type SectionId = "general" | "network" | "providers" | "cronJobs" | "appearance" | "backup" | "diagnostics";
 
-const SECTIONS: { id: SectionId; label: string; icon: typeof Settings; desc: string }[] = [
+const CRON_SECTION: { id: SectionId; label: string; icon: typeof Settings; desc: string } =
+  { id: "cronJobs", label: "Cron Jobs", icon: CalendarClock, desc: "Profile-scoped scheduled automations" };
+
+const SETTINGS_SECTIONS: { id: SectionId; label: string; icon: typeof Settings; desc: string }[] = [
   { id: "general", label: "General", icon: SlidersHorizontal, desc: "Connection mode and automatic updates" },
   { id: "network", label: "Network", icon: Globe, desc: "Local port, remote endpoint and authentication" },
   { id: "providers", label: "Providers", icon: KeyRound, desc: "Model provider API credentials" },
@@ -43,6 +49,7 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Settings; desc: str
   { id: "backup", label: "Backup", icon: Database, desc: "Export, restore and diagnostics bundle" },
   { id: "diagnostics", label: "Diagnostics", icon: TerminalIcon, desc: "Live gateway, agent and error logs" },
 ];
+const SECTIONS = [...SETTINGS_SECTIONS, CRON_SECTION];
 
 // Map the diagnostics tab to its on-disk log file name in ~/.hermes/logs.
 const LOG_FILE_FOR_TAB: Record<LogTab, string> = {
@@ -73,6 +80,70 @@ const LOG_TABS: { id: LogTab; label: string }[] = [
   { id: "error", label: "Error" },
 ];
 
+const CRON_DELIVERY_TARGETS = ["local", "telegram", "discord", "email", "slack"];
+
+interface CronProfileGroup {
+  profile: ProfileInfo;
+  jobs: CronJob[];
+  error?: string;
+}
+
+interface CronEditTarget {
+  profileName: string;
+  job: CronJob;
+}
+
+interface CronEditForm {
+  name: string;
+  schedule: string;
+  prompt: string;
+  deliver: string;
+}
+
+function humanizeTimestamp(iso: string | null): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function humanizeCron(expr: string): string {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) return expr;
+  const [min, hour, dom, mon, dow] = parts;
+
+  const everyN = (field: string): number | null => {
+    const match = field.match(/^\*\/(\d+)$/);
+    return match ? Number.parseInt(match[1], 10) : null;
+  };
+
+  const minuteCadence = everyN(min);
+  if (minuteCadence && hour === "*" && dom === "*" && mon === "*" && dow === "*") {
+    return `Every ${minuteCadence} minute${minuteCadence === 1 ? "" : "s"}`;
+  }
+  const hourCadence = everyN(hour);
+  if (min === "0" && hourCadence && dom === "*" && mon === "*" && dow === "*") {
+    return `Every ${hourCadence} hour${hourCadence === 1 ? "" : "s"}`;
+  }
+  if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === "*" && mon === "*" && dow === "*") {
+    const time = new Date();
+    time.setHours(Number.parseInt(hour, 10), Number.parseInt(min, 10), 0, 0);
+    return `Every day at ${time.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+  }
+  return expr;
+}
+
+function cronState(job: CronJob): "active" | "paused" | "completed" {
+  if (job.state === "completed") return "completed";
+  if (job.state === "active" && job.enabled) return "active";
+  return "paused";
+}
+
 /* Single row: label + description on the left, control on the right. */
 function Row({ title, desc, control, last }: { title: string; desc?: string; control: React.ReactNode; last?: boolean }) {
   return (
@@ -86,8 +157,14 @@ function Row({ title, desc, control, last }: { title: string; desc?: string; con
   );
 }
 
-export default function SettingsView() {
-  const [section, setSection] = useState<SectionId>("general");
+export default function SettingsView({
+  initialSection = "general",
+  standaloneSection = false,
+}: {
+  initialSection?: SectionId;
+  standaloneSection?: boolean;
+}) {
+  const [section, setSection] = useState<SectionId>(initialSection);
   const [theme, setTheme] = useState<"dark" | "light" | "system">("dark");
   const [accent, setAccent] = useState("#E7B84E");
   const [autoUpdate, setAutoUpdate] = useState(true);
@@ -104,6 +181,18 @@ export default function SettingsView() {
   const [copied, setCopied] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  const [cronGroups, setCronGroups] = useState<CronProfileGroup[]>([]);
+  const [cronLoading, setCronLoading] = useState(false);
+  const [cronError, setCronError] = useState<string | null>(null);
+  const [cronBusyKey, setCronBusyKey] = useState<string | null>(null);
+  const [cronEditTarget, setCronEditTarget] = useState<CronEditTarget | null>(null);
+  const [cronForm, setCronForm] = useState<CronEditForm>({
+    name: "",
+    schedule: "",
+    prompt: "",
+    deliver: "local",
+  });
+  const [cronSaving, setCronSaving] = useState(false);
 
   // Seed local state from the real connection config on mount. The API key is
   // never returned — we only surface whether one is set via `hasApiKey`.
@@ -148,6 +237,44 @@ export default function SettingsView() {
       .finally(() => { if (!cancelled) setLogLoading(false); });
     return () => { cancelled = true; };
   }, [section, logTab]);
+
+  const loadCronJobs = useCallback(async () => {
+    setCronLoading(true);
+    setCronError(null);
+    try {
+      const profileList: ProfileInfo[] = await window.hermes.listProfiles();
+      const groups: CronProfileGroup[] = await Promise.all(
+        profileList.map(async (profile: ProfileInfo) => {
+          try {
+            const jobs = await window.hermes.listCronJobs(true, profile.name);
+            return { profile, jobs } satisfies CronProfileGroup;
+          } catch (err: any) {
+            return {
+              profile,
+              jobs: [],
+              error: err?.message ? String(err.message) : "Cron jobs could not be loaded",
+            } satisfies CronProfileGroup;
+          }
+        }),
+      );
+      groups.sort((a: CronProfileGroup, b: CronProfileGroup) => {
+        if (a.profile.isActive !== b.profile.isActive) return a.profile.isActive ? -1 : 1;
+        if (a.profile.isDefault !== b.profile.isDefault) return a.profile.isDefault ? -1 : 1;
+        return a.profile.name.localeCompare(b.profile.name);
+      });
+      setCronGroups(groups);
+    } catch (err: any) {
+      setCronGroups([]);
+      setCronError(err?.message ? String(err.message) : "Cron jobs could not be loaded");
+    } finally {
+      setCronLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (section !== "cronJobs") return;
+    void loadCronJobs();
+  }, [section, loadCronJobs]);
 
   // Persist to the backend. Blank apiKey is omitted so a saved key is never
   // clobbered (the main process treats "" as "unchanged" too).
@@ -194,15 +321,102 @@ export default function SettingsView() {
     setTimeout(() => setCopied(null), 1500);
   };
 
-  const active = SECTIONS.find(s => s.id === section)!;
+  const cronStats = useMemo(() => {
+    const jobs = cronGroups.flatMap(group => group.jobs);
+    const activeCount = jobs.filter(job => cronState(job) === "active").length;
+    const pausedCount = jobs.filter(job => cronState(job) === "paused").length;
+    return {
+      profiles: cronGroups.length,
+      total: jobs.length,
+      active: activeCount,
+      paused: pausedCount,
+    };
+  }, [cronGroups]);
+
+  const openCronEditor = (profileName: string, job: CronJob) => {
+    setCronError(null);
+    setCronEditTarget({ profileName, job });
+    setCronForm({
+      name: job.name,
+      schedule: job.schedule,
+      prompt: job.prompt,
+      deliver: job.deliver[0] || "local",
+    });
+  };
+
+  const closeCronEditor = () => {
+    if (cronSaving) return;
+    setCronEditTarget(null);
+    setCronError(null);
+  };
+
+  const toggleCronJob = async (profileName: string, job: CronJob) => {
+    const state = cronState(job);
+    if (state === "completed") return;
+    const key = `${profileName}:${job.id}:toggle`;
+    setCronBusyKey(key);
+    setCronError(null);
+    try {
+      const result = state === "active"
+        ? await window.hermes.pauseCronJob(job.id, profileName)
+        : await window.hermes.resumeCronJob(job.id, profileName);
+      if (!result.success) {
+        setCronError(result.error || "Cron job could not be updated");
+        return;
+      }
+      await loadCronJobs();
+    } catch (err: any) {
+      setCronError(err?.message ? String(err.message) : "Cron job could not be updated");
+    } finally {
+      setCronBusyKey(null);
+    }
+  };
+
+  const saveCronJob = async () => {
+    if (!cronEditTarget) return;
+    const schedule = cronForm.schedule.trim();
+    if (!schedule) {
+      setCronError("Schedule is required");
+      return;
+    }
+    const payload: CronJobUpdateInput = {
+      name: cronForm.name.trim(),
+      schedule,
+      prompt: cronForm.prompt,
+      deliver: cronForm.deliver || "local",
+    };
+    setCronSaving(true);
+    setCronError(null);
+    try {
+      const result = await window.hermes.updateCronJob(
+        cronEditTarget.job.id,
+        payload,
+        cronEditTarget.profileName,
+      );
+      if (!result.success) {
+        setCronError(result.error || "Cron job could not be saved");
+        return;
+      }
+      setCronEditTarget(null);
+      await loadCronJobs();
+    } catch (err: any) {
+      setCronError(err?.message ? String(err.message) : "Cron job could not be saved");
+    } finally {
+      setCronSaving(false);
+    }
+  };
+
+  const visibleSections = standaloneSection ? [CRON_SECTION] : SETTINGS_SECTIONS;
+  const active = SECTIONS.find(s => s.id === section) || visibleSections[0];
+  const ActiveIcon = active.icon;
 
   return (
     <Screen
       className="ui-settings-console"
-      icon={<Settings size={19} />}
-      kicker="Preferences"
-      title="Settings"
-      sub="Connection, providers, appearance and diagnostics"
+      icon={<ActiveIcon size={19} />}
+      kicker={standaloneSection ? "Operations" : "Preferences"}
+      title={standaloneSection ? active.label : "Settings"}
+      sub={standaloneSection ? active.desc : "Connection, providers, appearance and diagnostics"}
     >
       <div className="ui-settings-shell">
         <div className="ui-settings-topline mint-in mint-in-1">
@@ -214,24 +428,33 @@ export default function SettingsView() {
           <div className="ui-settings-topline-meta">
             <span>Mode <strong>{mode.toUpperCase()}</strong></span>
             <span>API Key <strong>{hasApiKey ? "Set" : "Empty"}</strong></span>
-            <span>Section <strong>{SECTIONS.findIndex(s => s.id === section) + 1}/{SECTIONS.length}</strong></span>
+            <span>Section <strong>{visibleSections.findIndex(s => s.id === section) + 1}/{visibleSections.length}</strong></span>
           </div>
         </div>
 
-        <div className="ui-settings-layout">
+        <div className={cx("ui-settings-layout", standaloneSection && "ui-settings-layout-standalone")}>
         {/* ── Section rail (struck-gold active pill) ── */}
-        <nav className="ui-settings-rail">
-          {SECTIONS.map(s => (
-            <button key={s.id} type="button" className="ui-nav no-drag" data-active={s.id === section} onClick={() => setSection(s.id)}>
-              <s.icon size={16} className="shrink-0" strokeWidth={s.id === section ? 2.2 : 1.9} />
-              <span className="truncate">{s.label}</span>
-              <small>{s.desc}</small>
-            </button>
-          ))}
-        </nav>
+        {!standaloneSection && (
+          <nav className="ui-settings-rail">
+            {visibleSections.map(s => (
+              <button key={s.id} type="button" className="ui-nav no-drag" data-active={s.id === section} onClick={() => setSection(s.id)}>
+                <s.icon size={16} className="shrink-0" strokeWidth={s.id === section ? 2.2 : 1.9} />
+                <span className="truncate">{s.label}</span>
+                <small>{s.desc}</small>
+              </button>
+            ))}
+          </nav>
+        )}
 
         {/* ── Active panel (re-minted on section change) ── */}
-        <div key={section} className="ui-settings-panel mint-in">
+        <div
+          key={section}
+          className={cx(
+            "ui-settings-panel mint-in",
+            standaloneSection && "ui-settings-panel-standalone",
+            section === "cronJobs" && "ui-settings-panel-cron",
+          )}
+        >
           {section === "general" && (
             <Card className="ui-settings-card">
               <div className="ui-settings-row ui-settings-row-bordered">
@@ -347,6 +570,154 @@ export default function SettingsView() {
             </>
           )}
 
+          {section === "cronJobs" && (
+            <>
+              <Card className="ui-settings-cron-summary">
+                <div className="ui-settings-cron-summary-main">
+                  <span className="ui-settings-cron-summary-icon">
+                    <CalendarClock size={18} />
+                  </span>
+                  <div>
+                    <span>Cron Job Registry</span>
+                    <strong>{cronStats.total} scheduled jobs</strong>
+                    <p>Grouped by Hermes profile so each workspace keeps its own automation queue.</p>
+                  </div>
+                </div>
+                <div className="ui-settings-cron-summary-stats">
+                  <div>
+                    <span>Profiles</span>
+                    <strong>{cronStats.profiles}</strong>
+                  </div>
+                  <div>
+                    <span>Active</span>
+                    <strong>{cronStats.active}</strong>
+                  </div>
+                  <div>
+                    <span>Paused</span>
+                    <strong>{cronStats.paused}</strong>
+                  </div>
+                </div>
+              </Card>
+
+              <div className="ui-settings-cron-toolbar">
+                <div>
+                  <CalendarClock size={15} />
+                  <span>Profile cron lists</span>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<RefreshCw size={14} className={cx(cronLoading && "animate-spin")} />}
+                  onClick={loadCronJobs}
+                  disabled={cronLoading}
+                >
+                  Refresh
+                </Button>
+              </div>
+
+              {cronError && (
+                <div className="ui-settings-cron-alert" role="alert">
+                  <AlertCircle size={15} />
+                  <span>{cronError}</span>
+                </div>
+              )}
+
+              <div className="ui-settings-cron-groups">
+                {cronLoading && cronGroups.length === 0 ? (
+                  <Card className="ui-settings-cron-empty">
+                    <Clock size={18} />
+                    <span>Loading cron jobs…</span>
+                  </Card>
+                ) : cronGroups.length === 0 ? (
+                  <Card className="ui-settings-cron-empty">
+                    <Clock size={18} />
+                    <span>No profiles found.</span>
+                  </Card>
+                ) : (
+                  cronGroups.map(group => {
+                    const activeJobs = group.jobs.filter(job => cronState(job) === "active").length;
+                    return (
+                      <section key={group.profile.name} className="ui-settings-cron-profile">
+                        <div className="ui-settings-cron-profile-head">
+                          <div className="ui-settings-cron-profile-title">
+                            <strong title={group.profile.name}>{group.profile.name}</strong>
+                            <div>
+                              {group.profile.isActive && <Badge variant="success">Active profile</Badge>}
+                              {group.profile.isDefault && <Badge variant="neutral">Default</Badge>}
+                              <Badge variant="accent">{group.jobs.length} jobs</Badge>
+                            </div>
+                          </div>
+                          <span>{activeJobs} active</span>
+                        </div>
+
+                        {group.error ? (
+                          <div className="ui-settings-cron-profile-error">
+                            <AlertCircle size={15} />
+                            {group.error}
+                          </div>
+                        ) : group.jobs.length === 0 ? (
+                          <div className="ui-settings-cron-profile-empty">
+                            No cron jobs for this profile.
+                          </div>
+                        ) : (
+                          <div className="ui-settings-cron-list">
+                            {group.jobs.map(job => {
+                              const state = cronState(job);
+                              const busy = cronBusyKey === `${group.profile.name}:${job.id}:toggle`;
+                              return (
+                                <article key={job.id} className="ui-settings-cron-job" data-state={state}>
+                                  <div className="ui-settings-cron-job-state">
+                                    <StatusDot
+                                      color={state === "active" ? "var(--success)" : state === "completed" ? "var(--accent)" : "var(--text-3)"}
+                                      pulse={state === "active"}
+                                    />
+                                    <span>{state}</span>
+                                  </div>
+                                  <div className="ui-settings-cron-job-copy">
+                                    <div className="ui-settings-cron-job-title">
+                                      <h3 title={job.name}>{job.name}</h3>
+                                      <code title={job.schedule}>{job.schedule}</code>
+                                    </div>
+                                    <p title={job.prompt || "No prompt configured"}>
+                                      {job.prompt || "No prompt configured"}
+                                    </p>
+                                  </div>
+                                  <div className="ui-settings-cron-job-meta">
+                                    <span title={humanizeCron(job.schedule)}>
+                                      <Clock size={12} />
+                                      {humanizeCron(job.schedule)}
+                                    </span>
+                                    <span title={job.deliver.join(", ") || "local"}>
+                                      <Send size={12} />
+                                      {job.deliver.join(", ") || "local"}
+                                    </span>
+                                    <span>Next {humanizeTimestamp(job.next_run_at)}</span>
+                                  </div>
+                                  <div className="ui-settings-cron-job-actions">
+                                    <IconButton onClick={() => openCronEditor(group.profile.name, job)} title="Edit cron job">
+                                      <Pencil size={15} />
+                                    </IconButton>
+                                    <IconButton
+                                      disabled={busy || state === "completed"}
+                                      onClick={() => toggleCronJob(group.profile.name, job)}
+                                      title={state === "active" ? "Pause cron job" : "Resume cron job"}
+                                    >
+                                      {state === "active" ? <Pause size={15} /> : <Play size={15} />}
+                                    </IconButton>
+                                  </div>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })
+                )}
+              </div>
+            </>
+          )}
+
           {section === "appearance" && (
             <Card className="ui-settings-card">
               <Row
@@ -450,6 +821,81 @@ export default function SettingsView() {
         </div>
         </div>
       </div>
+      <Modal
+        open={!!cronEditTarget}
+        onClose={closeCronEditor}
+        title="Edit Cron Job"
+        kicker={cronEditTarget ? `Profile · ${cronEditTarget.profileName}` : "Cron Job"}
+        width={620}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeCronEditor} disabled={cronSaving}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={saveCronJob} disabled={cronSaving || !cronForm.schedule.trim()}>
+              {cronSaving ? "Saving…" : "Save Cron"}
+            </Button>
+          </>
+        }
+      >
+        <div className="ui-modal-form ui-settings-cron-modal">
+          {cronError && (
+            <div className="ui-modal-alert" role="alert">
+              {cronError}
+            </div>
+          )}
+
+          <div className="ui-settings-cron-modal-preview">
+            <span>
+              <Clock size={17} />
+            </span>
+            <div>
+              <strong>{humanizeCron(cronForm.schedule || "—")}</strong>
+              <code>{cronForm.schedule || "—"}</code>
+            </div>
+          </div>
+
+          <div className="ui-settings-cron-modal-grid">
+            <Field label="Job Name">
+              <Input
+                value={cronForm.name}
+                onChange={event => setCronForm(prev => ({ ...prev, name: event.target.value }))}
+                placeholder="Morning briefing"
+              />
+            </Field>
+            <Field label="Delivery Target">
+              <Select
+                value={cronForm.deliver}
+                onChange={event => setCronForm(prev => ({ ...prev, deliver: event.target.value }))}
+              >
+                {CRON_DELIVERY_TARGETS.map(target => (
+                  <option key={target} value={target}>
+                    {target}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+
+          <Field label="Cron Expression" hint="Standard 5-field cron expression: minute hour day month weekday">
+            <Input
+              value={cronForm.schedule}
+              onChange={event => setCronForm(prev => ({ ...prev, schedule: event.target.value }))}
+              placeholder="0 8 * * *"
+              className="font-mono"
+            />
+          </Field>
+
+          <Field label="Prompt">
+            <Textarea
+              value={cronForm.prompt}
+              onChange={event => setCronForm(prev => ({ ...prev, prompt: event.target.value }))}
+              placeholder="Tell Hermes what this cron job should do."
+              rows={5}
+            />
+          </Field>
+        </div>
+      </Modal>
     </Screen>
   );
 }

@@ -1,5 +1,22 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { AgentRunEvent, AgentRunEventKind, AgentRunEventStatus, AgentRunState, ChatMessage, ProviderId, TokenUsage } from "@shared/types";
+import type {
+  AgentRunEvent,
+  AgentRunEventKind,
+  AgentRunEventStatus,
+  AgentRunState,
+  ChatMessage,
+  DispatchMode,
+  DispatchRunState,
+  DispatchStreamEvent,
+  ProfileDispatchTarget,
+  ProviderId,
+  TokenUsage,
+} from "@shared/types";
+import {
+  applyDispatchEvent,
+  createDispatchRunState,
+  normalizeDispatchTargets,
+} from "../chatDispatch";
 
 interface UseChatStreamOptions {
   providerId: ProviderId;
@@ -7,6 +24,10 @@ interface UseChatStreamOptions {
   conversationKey?: string;
   sessionId?: string;
   initialMessages?: ChatMessage[];
+  temperature?: number;
+  dispatchMode?: DispatchMode;
+  dispatchTargets?: ProfileDispatchTarget[];
+  activeProfileName?: string;
   onTokenUsage?: (usage: TokenUsage) => void;
 }
 
@@ -14,8 +35,10 @@ interface UseChatStreamReturn {
   messages: ChatMessage[];
   isStreaming: boolean;
   runState: AgentRunState | null;
+  dispatchRunState: DispatchRunState | null;
   sendMessage: (text: string) => Promise<void>;
   abortStream: () => void;
+  abortDispatch: (runId?: string) => void;
 }
 
 interface ConversationState {
@@ -24,6 +47,7 @@ interface ConversationState {
   sessionId?: string;
   activeAssistantId: string | null;
   runState: AgentRunState | null;
+  dispatchRunState: DispatchRunState | null;
 }
 
 function createConversationState(options: UseChatStreamOptions): ConversationState {
@@ -33,6 +57,7 @@ function createConversationState(options: UseChatStreamOptions): ConversationSta
     sessionId: options.sessionId,
     activeAssistantId: null,
     runState: null,
+    dispatchRunState: null,
   };
 }
 
@@ -70,6 +95,11 @@ function cleanToolLabel(tool: string): string {
     .trim() || "Tool progress";
 }
 
+function createDispatchId(): string {
+  const random = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+  return `dispatch-${Date.now()}-${random}`;
+}
+
 export function useChatStream(options: UseChatStreamOptions): UseChatStreamReturn {
   const conversationKey = options.conversationKey || "__default";
   const [stateByKey, setStateByKey] = useState<Record<string, ConversationState>>(
@@ -91,12 +121,23 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     setStateByKey(prev => {
       const existing = prev[conversationKey];
       if (!existing) return { ...prev, [conversationKey]: createConversationState(options) };
-      if (options.sessionId && existing.sessionId !== options.sessionId) {
-        return { ...prev, [conversationKey]: { ...existing, sessionId: options.sessionId } };
+      const initialMessages = options.initialMessages || [];
+      if (
+        (options.sessionId && existing.sessionId !== options.sessionId) ||
+        (initialMessages.length > 0 && existing.messages.length === 0)
+      ) {
+        return {
+          ...prev,
+          [conversationKey]: {
+            ...existing,
+            sessionId: options.sessionId || existing.sessionId,
+            messages: initialMessages.length > 0 ? initialMessages : existing.messages,
+          },
+        };
       }
       return prev;
     });
-  }, [conversationKey, options.sessionId]);
+  }, [conversationKey, options.sessionId, options.initialMessages]);
 
   const patchActive = useCallback((key: string | null, patch: (m: ChatMessage) => ChatMessage) => {
     if (!key) return;
@@ -255,6 +296,29 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     };
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = window.hermes.onDispatchEvent((event: DispatchStreamEvent) => {
+      setStateByKey(prev => {
+        for (const [key, state] of Object.entries(prev)) {
+          if (state.dispatchRunState?.dispatchId !== event.dispatchId) continue;
+          const nextDispatch = applyDispatchEvent(state.dispatchRunState, event);
+          const stillStreaming = nextDispatch.status === "running" &&
+            nextDispatch.profileRuns.some(run => run.status === "idle" || run.status === "running");
+          return {
+            ...prev,
+            [key]: {
+              ...state,
+              dispatchRunState: nextDispatch,
+              isStreaming: stillStreaming,
+            },
+          };
+        }
+        return prev;
+      });
+    });
+    return unsubscribe;
+  }, []);
+
   const sendMessage = useCallback(async (text: string) => {
     const key = conversationKey;
     const currentState = stateByKeyRef.current[key] || createConversationState(options);
@@ -270,6 +334,67 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
       .filter(m => m.role === "user" || m.role === "assistant")
       .map(m => ({ role: m.role, content: m.content }));
 
+    const dispatchMode = options.dispatchMode || "single";
+    const targets = normalizeDispatchTargets(options.dispatchTargets || [], options.activeProfileName || "default");
+    const selectedProfileName = targets[0]?.profileName || options.activeProfileName || "default";
+    const shouldUseDispatch = dispatchMode !== "single" && targets.length > 1;
+
+    if (shouldUseDispatch) {
+      const dispatchId = createDispatchId();
+      const dispatchRunState = createDispatchRunState(dispatchId, dispatchMode, text, targets, userMsg.timestamp || Date.now());
+      setStateByKey(prev => {
+        const state = prev[key] || currentState;
+        return {
+          ...prev,
+          [key]: {
+            ...state,
+            messages: [...state.messages, userMsg],
+            activeAssistantId: null,
+            isStreaming: true,
+            runState: null,
+            dispatchRunState,
+          },
+        };
+      });
+
+      try {
+        await window.hermes.dispatchMessage(text, {
+          dispatchId,
+          mode: dispatchMode,
+          targets,
+          resumeSessionByProfile: currentState.sessionId ? { [selectedProfileName]: currentState.sessionId } : {},
+          history,
+          temperature: options.temperature,
+        });
+      } catch (err: any) {
+        const message = err?.message ? String(err.message) : "Failed to dispatch message.";
+        setStateByKey(prev => {
+          const state = prev[key];
+          if (!state?.dispatchRunState) return prev;
+          const endedAt = Date.now();
+          return {
+            ...prev,
+            [key]: {
+              ...state,
+              isStreaming: false,
+              dispatchRunState: {
+                ...state.dispatchRunState,
+                status: "error",
+                endedAt,
+                profileRuns: state.dispatchRunState.profileRuns.map(run => ({
+                  ...run,
+                  status: "error" as const,
+                  endedAt,
+                  error: message,
+                })),
+              },
+            },
+          };
+        });
+      }
+      return;
+    }
+
     setStateByKey(prev => {
       const state = prev[key] || currentState;
       return {
@@ -279,6 +404,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
           messages: [...state.messages, userMsg, assistantMsg],
           activeAssistantId: assistantId,
           isStreaming: true,
+          dispatchRunState: null,
           runState: {
             id: runId,
             assistantMessageId: assistantId,
@@ -298,8 +424,10 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
 
     try {
       const result = await window.hermes.sendMessage(text, {
+        profile: selectedProfileName,
         resumeSessionId: currentState.sessionId,
         history,
+        temperature: options.temperature,
       });
       if (result?.sessionId) {
         setStateByKey(prev => {
@@ -367,6 +495,21 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     });
   }, [conversationKey]);
 
+  const abortDispatch = useCallback((runId?: string) => {
+    const state = stateByKeyRef.current[conversationKey];
+    const dispatchId = state?.dispatchRunState?.dispatchId;
+    if (!dispatchId) return;
+    window.hermes.abortDispatch(dispatchId, runId);
+  }, [conversationKey]);
+
   const currentState = stateByKey[conversationKey] || createConversationState(options);
-  return { messages: currentState.messages, isStreaming: currentState.isStreaming, runState: currentState.runState, sendMessage, abortStream };
+  return {
+    messages: currentState.messages,
+    isStreaming: currentState.isStreaming,
+    runState: currentState.runState,
+    dispatchRunState: currentState.dispatchRunState,
+    sendMessage,
+    abortStream,
+    abortDispatch,
+  };
 }

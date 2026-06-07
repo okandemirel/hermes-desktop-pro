@@ -192,11 +192,14 @@ export function setToolsetEnabled(
   profile?: string,
 ): boolean {
   const configFile = join(profileHome(profile), "config.yaml");
-  if (!existsSync(configFile)) return false;
+  if (!TOOLSET_DEFS.some((toolDef) => toolDef.key === key)) return false;
 
   try {
-    const content = readFileSync(configFile, "utf-8");
-    const currentEnabled = parseEnabledToolsets(content);
+    const content = existsSync(configFile) ? readFileSync(configFile, "utf-8") : "";
+    const hasToolsetSection = content.includes("platform_toolsets");
+    const currentEnabled = hasToolsetSection
+      ? parseEnabledToolsets(content)
+      : new Set(TOOLSET_DEFS.map((toolDef) => toolDef.key));
 
     if (enabled) {
       currentEnabled.add(key);
@@ -213,7 +216,7 @@ export function setToolsetEnabled(
     const newSection = `  cli:\n${toolsetLines}`;
 
     // Check if platform_toolsets section exists
-    if (content.includes("platform_toolsets")) {
+    if (hasToolsetSection) {
       // Replace existing cli section within platform_toolsets
       const lines = content.split("\n");
       const result: string[] = [];
@@ -282,8 +285,9 @@ export function setToolsetEnabled(
       safeWriteFile(configFile, result.join("\n"));
     } else {
       // Append platform_toolsets section at end
+      const prefix = content.trimEnd();
       const newContent =
-        content.trimEnd() + "\n\nplatform_toolsets:\n" + newSection + "\n";
+        `${prefix ? `${prefix}\n\n` : ""}platform_toolsets:\n${newSection}\n`;
       safeWriteFile(configFile, newContent);
     }
 
