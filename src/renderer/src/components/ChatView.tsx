@@ -64,14 +64,6 @@ const MEMORY_ROWS = [
   { icon: Activity, label: "Conversation History", meta: "85 items", active: true },
 ];
 
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 5) return "Working late";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
-}
-
 function truncateText(value: string, max = 130): string {
   const compact = value.replace(/\s+/g, " ").trim();
   if (compact.length <= max) return compact;

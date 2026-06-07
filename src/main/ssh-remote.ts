@@ -13,7 +13,6 @@ import { buildSshControlOptions, assertSafeSshConfig } from "./ssh-options";
 import { isValidNamedProfileName } from "./utils";
 import {
   END_OF_OPTIONS,
-  isValidIdSlug,
   isValidSkillIdentifier,
 } from "./cli-safety";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";

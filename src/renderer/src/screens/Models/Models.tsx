@@ -383,7 +383,6 @@ export default function ModelsView() {
 
   const defaultModel = useMemo(
     () => models.find((m) => isDefault(m)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [models, active],
   );
 

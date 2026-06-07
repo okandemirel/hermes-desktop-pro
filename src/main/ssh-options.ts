@@ -13,10 +13,10 @@ export function assertSafeSshConfig(config: {
     !/[\0\n\r]/.test(s);
   if (!noFlag(config.username) || !/^[A-Za-z0-9._-]+$/.test(config.username))
     throw new Error("Invalid SSH username");
-  if (
-    !noFlag(config.host) ||
-    !/^[A-Za-z0-9._:\[\]-]+$/.test(config.host)
-  )
+	  if (
+	    !noFlag(config.host) ||
+	    !/^[\]A-Za-z0-9._:[-]+$/.test(config.host)
+	  )
     throw new Error("Invalid SSH host");
   if (!noFlag(config.keyPath)) throw new Error("Invalid SSH key path");
   for (const [name, p] of [

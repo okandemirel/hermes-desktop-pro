@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  User, Plus, Copy, Trash2, Check, X, Brain, Sparkles,
+  User, Plus, Copy, Trash2, Check, Brain, Sparkles,
   Database, FileText, Wrench, Power,
 } from "lucide-react";
 import {

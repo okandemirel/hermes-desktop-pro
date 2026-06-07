@@ -8,9 +8,7 @@ import {
 import type { Rectangle } from "electron";
 import { join } from "path";
 import { readFileSync, existsSync } from "fs";
-import { homedir } from "os";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import type { HermesAPI } from "../preload/index";
 
 import {
   loadConfigYaml,
@@ -173,8 +171,11 @@ import { OfficeViewManager } from "./office-view";
 
 import icon from "../../resources/icon.png?asset";
 
-// Type assertion for the preload API
-declare const HERMES_PRELOAD_API: HermesAPI;
+const APP_NAME = "Hermes Desktop Pro";
+const APP_ID = "com.hermes.desktop-pro";
+
+app.setName(APP_NAME);
+process.title = APP_NAME;
 
 let retainedMainWindow: BrowserWindow | null = null;
 const officeViewManager = new OfficeViewManager();
@@ -202,7 +203,7 @@ function createWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     show: true,
-    title: "Hermes Desktop Pro",
+    title: APP_NAME,
     icon,
     // ── Liquid glass: real macOS window vibrancy ──
     // The window itself is translucent; the desktop wallpaper shows through the
@@ -1002,7 +1003,18 @@ function registerIpcHandlers(): void {
 // ─── App lifecycle ────────────────────────────────────
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId("com.hermes.desktop-pro");
+  app.setName(APP_NAME);
+  electronApp.setAppUserModelId(APP_ID);
+
+  if (process.platform === "darwin") {
+    app.dock?.setIcon(icon);
+    app.setAboutPanelOptions({
+      applicationName: APP_NAME,
+      applicationVersion: app.getVersion(),
+      copyright: "Copyright Hermes Desktop Pro",
+      iconPath: icon,
+    });
+  }
 
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);
@@ -1012,7 +1024,7 @@ app.whenReady().then(() => {
   if (process.platform === "darwin") {
     const template: Electron.MenuItemConstructorOptions[] = [
       {
-        label: "Hermes Desktop Pro",
+        label: APP_NAME,
         submenu: [
           { role: "about" as const },
           { type: "separator" as const },
