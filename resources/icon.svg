@@ -1,32 +1,43 @@
-<svg width="1024" height="1024" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="chipBg" x1="4" y1="2" x2="29" y2="31" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2A2416"/>
-      <stop offset="0.48" stop-color="#111317"/>
-      <stop offset="1" stop-color="#07080A"/>
+    <linearGradient id="chipBg" x1="154" y1="86" x2="892" y2="946" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2B2617"/>
+      <stop offset="0.34" stop-color="#121419"/>
+      <stop offset="0.72" stop-color="#07080B"/>
+      <stop offset="1" stop-color="#030406"/>
     </linearGradient>
-    <linearGradient id="hermesGold" x1="4" y1="3" x2="28" y2="29" gradientUnits="userSpaceOnUse">
+    <radialGradient id="chipGlow" cx="49%" cy="32%" r="68%">
+      <stop offset="0" stop-color="#F1CC6E" stop-opacity="0.2"/>
+      <stop offset="0.38" stop-color="#E7B84E" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hermesGold" x1="210" y1="160" x2="782" y2="808" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#FCEFC2"/>
-      <stop offset="0.32" stop-color="#F1CC6E"/>
-      <stop offset="0.6" stop-color="#E7B84E"/>
+      <stop offset="0.26" stop-color="#F3D779"/>
+      <stop offset="0.62" stop-color="#E8B74D"/>
       <stop offset="1" stop-color="#C18B2C"/>
     </linearGradient>
-    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="1.4" stdDeviation="1.2" flood-color="#000000" flood-opacity="0.5"/>
-      <feDropShadow dx="0" dy="0" stdDeviation="1.1" flood-color="#E7B84E" flood-opacity="0.28"/>
+    <filter id="tileShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#000000" flood-opacity="0.5"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="16" flood-color="#F1CC6E" flood-opacity="0.08"/>
+    </filter>
+    <filter id="glyphShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="15" flood-color="#000000" flood-opacity="0.44"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#E7B84E" flood-opacity="0.22"/>
     </filter>
   </defs>
 
-  <rect x="1" y="1" width="30" height="30" rx="9.5" fill="url(#chipBg)"/>
-  <rect x="1.35" y="1.35" width="29.3" height="29.3" rx="9.15" fill="none" stroke="#E7B84E" stroke-opacity="0.24" stroke-width="0.7"/>
-  <rect x="2.25" y="2.25" width="27.5" height="27.5" rx="8.2" fill="none" stroke="#FFFFFF" stroke-opacity="0.055" stroke-width="0.35"/>
+  <rect x="56" y="56" width="912" height="912" rx="214" fill="url(#chipBg)" filter="url(#tileShadow)"/>
+  <rect x="56" y="56" width="912" height="912" rx="214" fill="url(#chipGlow)"/>
+  <rect x="72" y="72" width="880" height="880" rx="200" fill="none" stroke="#F1CC6E" stroke-opacity="0.3" stroke-width="6"/>
+  <rect x="92" y="92" width="840" height="840" rx="184" fill="none" stroke="#FFFFFF" stroke-opacity="0.07" stroke-width="3"/>
 
-  <g filter="url(#shadow)">
+  <g transform="translate(116 116) scale(24)" filter="url(#glyphShadow)">
     <rect x="15" y="6.5" width="2" height="20.5" rx="1" fill="#F1CC6E"/>
-    <circle cx="16" cy="6" r="2.7" fill="#FCEFC2"/>
-    <path d="M15 11.6 C 10.5 8.4, 6 9, 3.8 12.4 C 7.6 11.1, 11.1 12.7, 14 16.2 Z" fill="#E7B84E"/>
-    <path d="M17 11.6 C 21.5 8.4, 26 9, 28.2 12.4 C 24.4 11.1, 20.9 12.7, 18 16.2 Z" fill="#E7B84E"/>
-    <path d="M14.4 18.6 C 11.4 16.8, 8.6 17.2, 6.8 19" stroke="#F1CC6E" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.55"/>
-    <path d="M17.6 18.6 C 20.6 16.8, 23.4 17.2, 25.2 19" stroke="#F1CC6E" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.55"/>
+    <circle cx="16" cy="6" r="2.7" fill="#FFF0BA"/>
+    <path d="M15 11.6 C 10.5 8.4, 6 9, 3.8 12.4 C 7.6 11.1, 11.1 12.7, 14 16.2 Z" fill="#E9B94D"/>
+    <path d="M17 11.6 C 21.5 8.4, 26 9, 28.2 12.4 C 24.4 11.1, 20.9 12.7, 18 16.2 Z" fill="#E9B94D"/>
+    <path d="M14.4 18.6 C 11.4 16.8, 8.6 17.2, 6.8 19" stroke="#D4A43C" stroke-width="1.42" stroke-linecap="round" fill="none" opacity="0.72"/>
+    <path d="M17.6 18.6 C 20.6 16.8, 23.4 17.2, 25.2 19" stroke="#D4A43C" stroke-width="1.42" stroke-linecap="round" fill="none" opacity="0.72"/>
   </g>
 </svg>
