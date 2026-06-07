@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
-  Cpu, Plus, Trash2, Pencil, Check, Star, Zap, Eye, Wrench, Brain,
+  Cpu, Plus, Trash2, Pencil, Check, Star, Zap, Eye, Wrench, Brain, Copy,
 } from "lucide-react";
 import type { SavedModel, ProviderId } from "@shared/types";
 import { getAllProviders, getProvider } from "@shared/providers";
 import {
   Screen, Card, Button, IconButton, IconChip, Badge, Tag,
   Field, Input, Select, Modal, EmptyState, SearchInput,
-  Segment, SegmentItem, SectionLabel, StatusDot,
+  Segment, SegmentItem, SectionLabel, StatusDot, getFloatingRect,
 } from "../../ui";
 
 // ─── Provider catalog (real backend providers) ──────────────
@@ -57,6 +58,22 @@ function contextFor(m: SavedModel): number | null {
 const fmtCtx = (n: number) =>
   n >= 1000000 ? `${n / 1000000}M` : `${Math.round(n / 1000)}K`;
 
+const MODEL_LOAD_TIMEOUT_MS = 2500;
+const MODEL_DISCOVERY_TIMEOUT_MS = 2500;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const handle = window.setTimeout(() => {
+      reject(new Error(`${label} timed out`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => resolve(value))
+      .catch((error) => reject(error))
+      .finally(() => window.clearTimeout(handle));
+  });
+}
+
 // ─── Component ──────────────────────────────────────────────
 
 export default function ModelsView() {
@@ -66,18 +83,39 @@ export default function ModelsView() {
   // the active model config instead.
   const [active, setActive] = useState<{ model: string; provider: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [copiedValue, setCopiedValue] = useState<string | null>(null);
 
   // Form state
   const [formName, setFormName] = useState("");
   const [formProvider, setFormProvider] = useState<string>(ALL_PROVIDERS[0]?.id ?? "openrouter");
   const [formModel, setFormModel] = useState("");
   const [formBaseUrl, setFormBaseUrl] = useState("");
+  const [modelSuggestionsOpen, setModelSuggestionsOpen] = useState(false);
+  const [activeModelSuggestionIndex, setActiveModelSuggestionIndex] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const modelSuggestionListId = useId();
+  const nameInputId = useId();
+  const providerSelectId = useId();
+  const modelInputId = useId();
+  const baseUrlInputId = useId();
+  const modelDiscoveryRef = useRef<HTMLDivElement>(null);
+  const modelSuggestionMenuRef = useRef<HTMLDivElement>(null);
+  const [modelSuggestionRect, setModelSuggestionRect] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    maxHeight: number;
+    placement: "top" | "bottom";
+  } | null>(null);
 
   // Provider model-discovery autocomplete (optional, non-blocking). Offers the
   // provider's advertised model ids as a datalist; on any failure we silently
@@ -86,28 +124,41 @@ export default function ModelsView() {
   const [discoverLoading, setDiscoverLoading] = useState(false);
   const [discoverStatus, setDiscoverStatus] = useState<string | null>(null);
 
-  // Load the real model library + active model config on mount.
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const [list, cfg] = await Promise.all([
+  const loadModelLibrary = useCallback(async () => {
+    setLoading(true);
+    setLoaded(false);
+    setLoadError(null);
+
+    try {
+      if (!window.hermes?.listModels || !window.hermes?.getModelConfig) {
+        throw new Error("Hermes desktop bridge is not available");
+      }
+
+      const [list, cfg] = await withTimeout(
+        Promise.all([
           window.hermes.listModels(),
           window.hermes.getModelConfig(),
-        ]);
-        if (!alive) return;
-        setModels(list);
-        setActive({ model: cfg.model, provider: cfg.provider });
-      } catch {
-        // honest empty state — no mock fallback
-      } finally {
-        if (alive) setLoaded(true);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
+        ]),
+        MODEL_LOAD_TIMEOUT_MS,
+        "Model library",
+      );
+
+      setModels(Array.isArray(list) ? list : []);
+      setActive({ model: cfg.model, provider: cfg.provider });
+    } catch (error) {
+      setModels([]);
+      setActive(null);
+      setLoadError(error instanceof Error ? error.message : "Model library could not be loaded");
+    } finally {
+      setLoaded(true);
+      setLoading(false);
+    }
   }, []);
+
+  // Load the real model library + active model config on mount.
+  useEffect(() => {
+    void loadModelLibrary();
+  }, [loadModelLibrary]);
 
   // Discover provider models whenever the form is open and the provider /
   // base URL changes. Debounced so typing a base URL doesn't fire per
@@ -118,14 +169,28 @@ export default function ModelsView() {
       setDiscoveredModels([]);
       setDiscoverStatus(null);
       setDiscoverLoading(false);
+      setModelSuggestionsOpen(false);
       return;
     }
     let cancelled = false;
+    const requestProvider = formProvider;
+    const requestBaseUrl = formBaseUrl.trim();
+    setDiscoveredModels([]);
     setDiscoverLoading(true);
     setDiscoverStatus(null);
+    setActiveModelSuggestionIndex(0);
     const handle = setTimeout(() => {
-      window.hermes
-        .discoverProviderModels(formProvider, formBaseUrl.trim() || undefined)
+      if (!window.hermes?.discoverProviderModels) {
+        setDiscoveredModels([]);
+        setDiscoverStatus("unsupported");
+        setDiscoverLoading(false);
+        return;
+      }
+      withTimeout<{ models: string[]; status: string }>(
+        window.hermes.discoverProviderModels(requestProvider, requestBaseUrl || undefined),
+        MODEL_DISCOVERY_TIMEOUT_MS,
+        "Model discovery",
+      )
         .then((res: { models: string[]; status: string }) => {
           if (cancelled) return;
           setDiscoveredModels(res.status === "ok" ? res.models : []);
@@ -146,6 +211,38 @@ export default function ModelsView() {
     };
   }, [showForm, formProvider, formBaseUrl]);
 
+  useEffect(() => {
+    if (!showForm || !modelSuggestionsOpen) return undefined;
+    const updatePosition = () => {
+      if (!modelDiscoveryRef.current) return;
+      setModelSuggestionRect(getFloatingRect(modelDiscoveryRef.current));
+    };
+    updatePosition();
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (!target) return;
+      if (modelDiscoveryRef.current?.contains(target) || modelSuggestionMenuRef.current?.contains(target)) return;
+      setModelSuggestionsOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setModelSuggestionsOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [modelSuggestionsOpen, showForm]);
+
   const isDefault = (m: SavedModel) =>
     !!active && active.model === m.model && active.provider === m.provider;
 
@@ -157,45 +254,65 @@ export default function ModelsView() {
     setEditingId(null);
   };
 
-  const openAddForm = () => { resetForm(); setShowForm(true); };
+  const openAddForm = () => {
+    resetForm();
+    setSaveError(null);
+    setShowForm(true);
+  };
   const openEditForm = (m: SavedModel) => {
     setFormName(m.name);
     setFormProvider(m.provider);
     setFormModel(m.model);
     setFormBaseUrl(m.baseUrl);
     setEditingId(m.id);
+    setSaveError(null);
     setShowForm(true);
   };
-  const closeForm = () => { resetForm(); setShowForm(false); };
+  const closeForm = () => {
+    setModelSuggestionsOpen(false);
+    setSaveError(null);
+    setSaving(false);
+    resetForm();
+    setShowForm(false);
+  };
 
   const canSave = !!formName.trim() && !!formModel.trim();
 
   const handleSave = async () => {
-    if (!canSave) return;
+    if (!canSave || saving) return;
+    setSaving(true);
+    setSaveError(null);
     const name = formName.trim();
     const provider = formProvider;
     const model = formModel.trim();
     const baseUrl = formBaseUrl.trim();
 
-    if (editingId) {
-      const ok = await window.hermes.updateModel(editingId, {
-        name, provider, model, baseUrl,
-      });
-      if (ok) {
+    try {
+      if (editingId) {
+        const ok = await window.hermes.updateModel(editingId, {
+          name, provider, model, baseUrl,
+        });
+        if (!ok) throw new Error("Model could not be updated");
         setModels((prev) =>
           prev.map((m) =>
             m.id === editingId ? { ...m, name, provider, model, baseUrl } : m,
           ),
         );
+      } else {
+        const entry = await window.hermes.addModel(name, provider, model, baseUrl);
+        setModels((prev) =>
+          prev.some((m) => m.id === entry.id) ? prev : [...prev, entry],
+        );
       }
-    } else {
-      const entry = await window.hermes.addModel(name, provider, model, baseUrl);
-      setModels((prev) =>
-        prev.some((m) => m.id === entry.id) ? prev : [...prev, entry],
-      );
+      setLoaded(true);
+      setLoadError(null);
+      setShowForm(false);
+      resetForm();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Model could not be saved");
+    } finally {
+      setSaving(false);
     }
-    setShowForm(false);
-    resetForm();
   };
 
   const handleDelete = async (id: string) => {
@@ -210,6 +327,12 @@ export default function ModelsView() {
   const setDefault = async (m: SavedModel) => {
     const ok = await window.hermes.setModelConfig(m.model, m.provider, m.baseUrl);
     if (ok) setActive({ model: m.model, provider: m.provider });
+  };
+
+  const copyValue = (value: string) => {
+    navigator.clipboard.writeText(value).catch(() => {});
+    setCopiedValue(value);
+    window.setTimeout(() => setCopiedValue((current) => current === value ? null : current), 1400);
   };
 
   // ── Derived data ──
@@ -228,6 +351,14 @@ export default function ModelsView() {
 
   const filterTabs = useMemo(() => ["All", ...usedProviders], [usedProviders]);
 
+  const providerOptions = useMemo(() => {
+    if (!formProvider || ALL_PROVIDERS.some((p) => p.id === formProvider)) return ALL_PROVIDERS;
+    return [
+      { id: formProvider as ProviderId, label: `${formProvider} (custom)`, models: [], capabilities: {} },
+      ...ALL_PROVIDERS,
+    ];
+  }, [formProvider]);
+
   const filtered = useMemo(() => models.filter((m) => {
     const q = search.toLowerCase();
     const matchesSearch = !search.trim() ||
@@ -237,6 +368,18 @@ export default function ModelsView() {
     const matchesProvider = activeProvider === "All" || m.provider === activeProvider;
     return matchesSearch && matchesProvider;
   }), [models, search, activeProvider]);
+
+  const suggestedModels = useMemo(() => {
+    const q = formModel.trim().toLowerCase();
+    const list = q
+      ? discoveredModels.filter((id) => id.toLowerCase().includes(q))
+      : discoveredModels;
+    return list.slice(0, 8);
+  }, [discoveredModels, formModel]);
+
+  useEffect(() => {
+    setActiveModelSuggestionIndex(0);
+  }, [suggestedModels]);
 
   const defaultModel = useMemo(
     () => models.find((m) => isDefault(m)),
@@ -250,16 +393,15 @@ export default function ModelsView() {
     const caps = capabilitiesFor(m.provider);
     const ctx = contextFor(m);
     return (
-      <Card key={m.id} pad interactive active={def} className="group flex flex-col gap-3.5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
+      <Card key={m.id} pad interactive active={def} className="ui-models-card">
+        <div className="ui-models-card-head">
+          <div className="ui-models-card-title">
             <IconChip><Cpu size={17} /></IconChip>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[14px] font-semibold text-[var(--text)] truncate">{m.name}</span>
-                {def && <Star size={13} className="shrink-0 text-[var(--accent-text)] fill-[var(--accent)]" />}
+            <div>
+              <div>
+                <span>{m.name}</span>
               </div>
-              <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">{providerLabel(m.provider)}</div>
+              <small>{providerLabel(m.provider)}</small>
             </div>
           </div>
           <Badge variant={def ? "accent" : "neutral"}>
@@ -267,10 +409,20 @@ export default function ModelsView() {
           </Badge>
         </div>
 
-        <code className="block text-[12px] font-mono text-[var(--text-2)] truncate">{m.model}</code>
+        <button
+          type="button"
+          className="ui-models-code-row"
+          onClick={() => copyValue(m.model)}
+          title={`Copy ${m.model}`}
+        >
+          <code className="ui-models-model-id">{m.model}</code>
+          <span className="ui-models-code-copy">
+            {copiedValue === m.model ? <Check size={13} /> : <Copy size={13} />}
+          </span>
+        </button>
 
         {caps.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="ui-models-cap-list">
             {caps.map((c) => {
               const CapIcon = CAPABILITY_META[c].icon;
               return (
@@ -281,21 +433,31 @@ export default function ModelsView() {
         )}
 
         {m.baseUrl && (
-          <div className="text-[11.5px] text-[var(--text-3)] truncate">{m.baseUrl}</div>
+          <button
+            type="button"
+            className="ui-models-code-row ui-models-code-row-muted"
+            onClick={() => copyValue(m.baseUrl)}
+            title={`Copy ${m.baseUrl}`}
+          >
+            <code className="ui-models-base-url">{m.baseUrl}</code>
+            <span className="ui-models-code-copy">
+              {copiedValue === m.baseUrl ? <Check size={13} /> : <Copy size={13} />}
+            </span>
+          </button>
         )}
 
-        <div className="mt-auto pt-3.5 border-t border-[var(--border)] flex items-center justify-between gap-2">
+        <div className="ui-models-card-foot">
           {ctx !== null ? (
             <Tag>ctx&nbsp;<span className="font-mono">{fmtCtx(ctx)}</span></Tag>
           ) : (
             <span />
           )}
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="ui-models-card-actions">
             {!def && (
               <IconButton onClick={() => setDefault(m)} title="Set as default"><Star size={15} /></IconButton>
             )}
             {def && (
-              <span className="flex items-center justify-center w-[30px] h-[30px] text-[var(--accent-text)]" title="Current default"><Check size={15} /></span>
+              <span className="ui-models-default-check" title="Current default"><Check size={15} /></span>
             )}
             <IconButton onClick={() => openEditForm(m)} title="Edit"><Pencil size={15} /></IconButton>
             <IconButton danger onClick={() => setDeleteConfirm(m.id)} title="Delete"><Trash2 size={15} /></IconButton>
@@ -306,140 +468,293 @@ export default function ModelsView() {
   };
 
   const defaultCtx = defaultModel ? contextFor(defaultModel) : null;
+  const defaultCaps = defaultModel ? capabilitiesFor(defaultModel.provider) : [];
+  const heroTitle = defaultModel
+    ? defaultModel.name
+    : loadError
+      ? "Model catalog unavailable"
+      : loaded
+        ? "No default model configured"
+        : "Loading model library";
+  const heroSub = defaultModel
+    ? `${providerLabel(defaultModel.provider)} is active for new chat runs.`
+    : loadError
+      ? "The local model catalog did not respond. You can retry or add a model manually."
+      : "Add a saved model and mark it as default to make it available in the chat selector.";
+  const emptyTitle = loading
+    ? "Loading models..."
+    : loadError
+      ? "Model catalog unavailable"
+      : models.length === 0
+        ? "No models configured"
+        : "No models found";
+  const emptySub = loading
+    ? "Reading your local Hermes model catalog."
+    : loadError
+      ? loadError
+      : models.length === 0
+        ? "Add your first model to get started."
+        : `No models match "${search || providerLabel(activeProvider)}".`;
+  const emptyAction = loadError ? (
+    <Button leftIcon={<Zap size={15} />} onClick={loadModelLibrary}>Retry</Button>
+  ) : loaded && models.length === 0 ? (
+    <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openAddForm}>Add Model</Button>
+  ) : undefined;
 
   return (
     <Screen
+      className="ui-models-console"
       icon={<Cpu size={19} />}
       kicker="Model Catalog"
       title="Models"
       sub="Manage your model library — these appear in the chat model selector."
-      actions={<Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={openAddForm}>Add Model</Button>}
+      actions={<Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={openAddForm} disabled={loading}>Add Model</Button>}
     >
-      <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />
-
-      {/* ── Signature: the current default model, struck as the focal hero ── */}
-      {defaultModel && (
-        <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
-          <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
-            <Cpu size={24} />
-          </span>
-          <div className="min-w-0 flex-1">
+      <div className="ui-models-shell">
+        <Card pad className="ui-models-hero mint-in mint-in-1">
+          <div className="ui-models-hero-mark">
+            <Cpu size={26} />
+          </div>
+          <div className="ui-models-hero-copy">
             <div className="ui-eyebrow">Default Model</div>
-            <h2 className="serif text-[var(--text)] leading-none" style={{ fontSize: "clamp(24px, 2.6vw, 31px)", letterSpacing: "-0.012em" }}>
-              {defaultModel.name}
-            </h2>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[12.5px]">
-              <span className="text-[var(--text-2)]">{providerLabel(defaultModel.provider)}</span>
-              <code className="font-mono text-[var(--text-3)]">{defaultModel.model}</code>
-              {defaultCtx !== null && (
-                <span className="text-[var(--text-3)]">Context <span className="font-mono text-[var(--text-2)]">{fmtCtx(defaultCtx)}</span></span>
-              )}
+            <h2>{heroTitle}</h2>
+            <p>{heroSub}</p>
+            {defaultModel && (
+              <div className="ui-models-hero-meta">
+                <code>{defaultModel.model}</code>
+                <span>{providerLabel(defaultModel.provider)}</span>
+                {defaultCtx !== null && <span>Context <strong>{fmtCtx(defaultCtx)}</strong></span>}
+              </div>
+            )}
+            {defaultCaps.length > 0 && (
+              <div className="ui-models-cap-list">
+                {defaultCaps.map((c) => {
+                  const CapIcon = CAPABILITY_META[c].icon;
+                  return <Badge key={c} variant="neutral"><CapIcon size={11} /> {c}</Badge>;
+                })}
+              </div>
+            )}
+          </div>
+          <div className="ui-models-metrics">
+            <div>
+              <span>Saved</span>
+              <strong>{models.length}</strong>
+            </div>
+            <div>
+              <span>Providers</span>
+              <strong>{usedProviders.length}</strong>
+            </div>
+            <div>
+              <span>Visible</span>
+              <strong>{filtered.length}</strong>
             </div>
           </div>
-          <Badge variant="accent" className="self-start shrink-0"><StatusDot color="var(--accent)" /> Active</Badge>
         </Card>
-      )}
 
-      {/* ── Search + provider filter ── */}
-      <div className="flex flex-wrap items-center gap-3 mb-6 mint-in mint-in-2">
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          placeholder="Search models, IDs, providers…"
-          className="flex-1 min-w-[240px] max-w-[400px]"
-        />
-        <Segment className="flex-wrap">
-          {filterTabs.map((p) => (
-            <SegmentItem key={p} active={p === activeProvider} onClick={() => setActiveProvider(p)}>
-              {p === "All" ? "All" : providerLabel(p)}
-              {p !== "All" && <span className="ml-0.5 text-[var(--text-3)] font-mono">{providerCounts[p]}</span>}
-            </SegmentItem>
-          ))}
-        </Segment>
+        <div className="ui-models-toolbar mint-in mint-in-2">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search models, IDs, providers..."
+            className="ui-models-search"
+          />
+          <Segment className="ui-models-segment">
+            {filterTabs.map((p) => (
+              <SegmentItem key={p} active={p === activeProvider} onClick={() => setActiveProvider(p)}>
+                {p === "All" ? "All" : providerLabel(p)}
+                {p !== "All" && <span className="ui-models-filter-count">{providerCounts[p]}</span>}
+              </SegmentItem>
+            ))}
+          </Segment>
+        </div>
+
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon={<Cpu size={24} />}
+            title={emptyTitle}
+            sub={emptySub}
+            action={emptyAction}
+          />
+        ) : (
+          <section className="ui-models-catalog mint-in mint-in-3">
+            <div className="ui-models-catalog-head">
+              <SectionLabel>{activeProvider === "All" ? "Catalog" : providerLabel(activeProvider)}</SectionLabel>
+              <Badge variant="neutral">{filtered.length}</Badge>
+            </div>
+            <div className="ui-models-grid">
+              {filtered.map(renderCard)}
+            </div>
+          </section>
+        )}
       </div>
-
-      {filtered.length === 0 ? (
-        <EmptyState
-          icon={<Cpu size={24} />}
-          title={
-            !loaded
-              ? "Loading models…"
-              : models.length === 0
-                ? "No models configured"
-                : "No models found"
-          }
-          sub={
-            !loaded
-              ? undefined
-              : models.length === 0
-                ? "Add your first model to get started."
-                : `No models match "${search || providerLabel(activeProvider)}".`
-          }
-          action={loaded && models.length === 0 ? <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openAddForm}>Add Model</Button> : undefined}
-        />
-      ) : (
-        <section className="mint-in mint-in-3">
-          <div className="flex items-center gap-2 mb-3">
-            <SectionLabel>{activeProvider === "All" ? "Catalog" : providerLabel(activeProvider)}</SectionLabel>
-            <Badge variant="neutral">{filtered.length}</Badge>
-          </div>
-          <div className="ui-grid">
-            {filtered.map(renderCard)}
-          </div>
-        </section>
-      )}
 
       {/* Add / Edit modal */}
       <Modal
         open={showForm}
         onClose={closeForm}
         title={editingId ? "Edit Model" : "New Model"}
+        kicker="Model Catalog"
         footer={
           <>
-            <Button variant="ghost" onClick={closeForm}>Cancel</Button>
-            <Button variant="primary" disabled={!canSave} onClick={handleSave}>Save Model</Button>
+            <Button variant="ghost" onClick={closeForm} disabled={saving}>Cancel</Button>
+            <Button variant="primary" disabled={!canSave || saving} onClick={handleSave}>
+              {saving ? "Saving..." : "Save Model"}
+            </Button>
           </>
         }
       >
-        <div className="flex flex-col gap-4">
-          <Field label="Display Name">
-            <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. My DeepSeek" />
+        <div className="ui-modal-form ui-models-modal-form">
+          <div className="ui-modal-form-note">
+            <Cpu size={16} />
+            <div>
+              <strong>{editingId ? "Update saved model" : "Register a model"}</strong>
+              <span>Provider credentials stay in your Hermes environment. This only changes the selector catalog.</span>
+            </div>
+          </div>
+          {saveError && <div className="ui-modal-alert">{saveError}</div>}
+
+          <Field label="Display Name" hint="Shown in the model catalog and chat selector.">
+            <Input id={nameInputId} value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. My DeepSeek" />
           </Field>
 
-          <Field label="Provider">
-            <Select value={formProvider} onChange={(e) => setFormProvider(e.target.value)}>
-              {ALL_PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-            </Select>
-          </Field>
+          <div className="ui-modal-grid-2">
+            <Field label="Provider" hint="Routes requests through this provider.">
+              <Select
+                id={providerSelectId}
+                value={formProvider}
+                onChange={(e) => {
+                  setFormProvider(e.target.value);
+                  setModelSuggestionsOpen(false);
+                  setDiscoveredModels([]);
+                  setDiscoverStatus(null);
+                  setActiveModelSuggestionIndex(0);
+                }}
+                aria-label="Provider"
+              >
+                {providerOptions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </Select>
+            </Field>
 
-          <Field
-            label="Model ID"
-            hint={
-              discoverLoading
-                ? "Discovering available models…"
-                : discoveredModels.length > 0
-                  ? `${discoveredModels.length} model${discoveredModels.length === 1 ? "" : "s"} found — pick one or type your own`
-                  : discoverStatus === "no-key"
-                    ? "Set this provider's API key to autocomplete model IDs"
-                    : undefined
-            }
-          >
+            <Field
+              label="Model ID"
+              hint={
+                discoverLoading
+                  ? "Discovering available models..."
+                  : discoveredModels.length > 0
+                    ? `${discoveredModels.length} model${discoveredModels.length === 1 ? "" : "s"} found`
+                    : discoverStatus === "no-key"
+                      ? "Add this provider's API key for autocomplete."
+                      : "Type an exact provider model id."
+              }
+            >
+              <div className="ui-model-discovery" ref={modelDiscoveryRef}>
+                <Input
+                  id={modelInputId}
+                  value={formModel}
+                  onChange={(e) => {
+                    setFormModel(e.target.value);
+                    setModelSuggestionsOpen(true);
+                  }}
+                  onFocus={() => setModelSuggestionsOpen(true)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      if (modelSuggestionsOpen) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setModelSuggestionsOpen(false);
+                      }
+                      return;
+                    }
+                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
+                    if (suggestedModels.length === 0) return;
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setModelSuggestionsOpen(true);
+                      setActiveModelSuggestionIndex((current) => Math.min(current + 1, suggestedModels.length - 1));
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setModelSuggestionsOpen(true);
+                      setActiveModelSuggestionIndex((current) => Math.max(current - 1, 0));
+                    } else if (event.key === "Enter" && modelSuggestionsOpen) {
+                      event.preventDefault();
+                      const selected = suggestedModels[activeModelSuggestionIndex] || suggestedModels[0];
+                      setFormModel(selected);
+                      setModelSuggestionsOpen(false);
+                    }
+                  }}
+                  placeholder="e.g. gpt-4o"
+                  className="font-mono"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={modelSuggestionsOpen && suggestedModels.length > 0}
+                  aria-controls={modelSuggestionsOpen && suggestedModels.length > 0 ? modelSuggestionListId : undefined}
+                  aria-activedescendant={
+                    modelSuggestionsOpen && suggestedModels.length > 0
+                      ? `${modelSuggestionListId}-${activeModelSuggestionIndex}`
+                      : undefined
+                  }
+                />
+                {modelSuggestionsOpen && suggestedModels.length > 0 && modelSuggestionRect && (
+                  createPortal(<div
+                    id={modelSuggestionListId}
+                    ref={modelSuggestionMenuRef}
+                    className="ui-model-discovery-menu ui-model-discovery-menu-portal slide-up"
+                    role="listbox"
+                    aria-label="Model suggestions"
+                    data-placement={modelSuggestionRect?.placement}
+                    style={{
+                      left: modelSuggestionRect.left,
+                      top: modelSuggestionRect.top,
+                      width: modelSuggestionRect.width,
+                      maxHeight: Math.min(modelSuggestionRect.maxHeight, 240),
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Tab") return;
+                      event.preventDefault();
+                      setModelSuggestionsOpen(false);
+                      requestAnimationFrame(() => {
+                        document.getElementById(modelInputId)?.focus();
+                      });
+                    }}
+                  >
+                    {suggestedModels.map((id, index) => (
+                      <button
+                        key={id}
+                        id={`${modelSuggestionListId}-${index}`}
+                        type="button"
+                        role="option"
+                        aria-selected={index === activeModelSuggestionIndex}
+                        className={index === activeModelSuggestionIndex ? "ui-model-discovery-item is-active" : "ui-model-discovery-item"}
+                        onMouseEnter={() => setActiveModelSuggestionIndex(index)}
+                        onClick={() => {
+                          setFormModel(id);
+                          setModelSuggestionsOpen(false);
+                        }}
+                      >
+                        <code>{id}</code>
+                      </button>
+                    ))}
+                  </div>, document.body)
+                )}
+              </div>
+            </Field>
+          </div>
+
+          <Field label="Base URL" hint="Optional. Use only for custom or local OpenAI-compatible endpoints.">
             <Input
-              value={formModel}
-              onChange={(e) => setFormModel(e.target.value)}
-              placeholder="e.g. gpt-4o"
+              id={baseUrlInputId}
+              value={formBaseUrl}
+              onChange={(e) => {
+                setFormBaseUrl(e.target.value);
+                setDiscoveredModels([]);
+                setDiscoverStatus(null);
+                setActiveModelSuggestionIndex(0);
+              }}
+              placeholder="Optional — for custom / local endpoints"
               className="font-mono"
-              list="model-discovery-options"
             />
-            <datalist id="model-discovery-options">
-              {discoveredModels.map((id) => (
-                <option key={id} value={id} />
-              ))}
-            </datalist>
-          </Field>
-
-          <Field label="Base URL">
-            <Input value={formBaseUrl} onChange={(e) => setFormBaseUrl(e.target.value)} placeholder="Optional — for custom / local endpoints" className="font-mono" />
           </Field>
         </div>
       </Modal>
@@ -449,6 +764,7 @@ export default function ModelsView() {
         open={!!deleteConfirm}
         onClose={() => setDeleteConfirm(null)}
         title="Delete Model?"
+        kicker="Confirmation"
         width={400}
         footer={
           <>
@@ -457,11 +773,16 @@ export default function ModelsView() {
           </>
         }
       >
-        <p className="text-[13px] text-[var(--text-2)]">
-          This removes the model from your library (~/.hermes/models.json). It will no
-          longer appear in the chat model selector. This does not delete any provider
-          API keys.
-        </p>
+        <div className="ui-confirm-panel ui-confirm-danger">
+          <span className="ui-confirm-icon"><Trash2 size={18} /></span>
+          <div className="ui-confirm-copy">
+            <strong>Delete model?</strong>
+            <p>
+              This removes the model from your library (~/.hermes/models.json). It will no longer appear
+              in the chat model selector. Provider API keys stay untouched.
+            </p>
+          </div>
+        </div>
       </Modal>
     </Screen>
   );

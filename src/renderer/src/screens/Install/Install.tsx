@@ -1,107 +1,71 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Check, LoaderCircle, XCircle, ArrowRight, RotateCcw,
-  Terminal, Monitor, Download, Package, Key
+  Terminal, Monitor, Download, Package, Cog, ShieldCheck,
 } from "lucide-react";
-import { Button } from "../../ui";
+import { Badge, Button, Card, Screen, cx } from "../../ui";
 
 // ─── Step definitions ───────────────────────────────────────────────────
+//
+// The backend (installer.ts:runInstall) emits a 1..7 step model parsed from
+// the official install.sh / install.ps1 output. We collapse those 7 stages
+// into 4 visual buckets so the indicator stays legible.
 
 interface Step {
   id: string;
   label: string;
   icon: typeof Monitor;
+  /** Backend steps that map onto this visual bucket. */
+  backendSteps: number[];
 }
 
 const STEPS: Step[] = [
-  { id: "deps", label: "Checking dependencies", icon: Monitor },
-  { id: "python", label: "Installing Python", icon: Download },
-  { id: "hermes", label: "Setting up Hermes", icon: Package },
-  { id: "providers", label: "Configuring providers", icon: Key },
+  { id: "deps", label: "Checking prerequisites", icon: Monitor, backendSteps: [1, 2] },
+  { id: "python", label: "Setting up Python", icon: Download, backendSteps: [3] },
+  { id: "hermes", label: "Downloading Hermes Desktop Pro", icon: Package, backendSteps: [4, 5] },
+  { id: "finish", label: "Installing dependencies", icon: Cog, backendSteps: [6, 7] },
 ];
 
 type StepStatus = "pending" | "running" | "done" | "error";
+type Phase = "checking" | "idle" | "installing" | "error" | "done";
 
-// ─── Simulated install log lines ────────────────────────────────────────
+interface InstallProgressPayload {
+  step: number;
+  log: string;
+}
 
-const SIM_LOGS: Record<string, string[]> = {
-  deps: [
-    "\x1b[90m[system]\x1b[0m Checking system dependencies...",
-    "\x1b[90m[system]\x1b[0m ✓ Node.js v22.14.0 detected",
-    "\x1b[90m[system]\x1b[0m ✓ Git 2.48.1 detected",
-    "\x1b[90m[system]\x1b[0m ✓ curl 8.14.0 detected",
-    "\x1b[90m[system]\x1b[0m ✓ build-essential installed",
-  ],
-  python: [
-    "\x1b[90m[python]\x1b[0m Checking Python installation...",
-    "\x1b[90m[python]\x1b[0m Python 3.11.15 found",
-    "\x1b[90m[python]\x1b[0m Installing pip packages...",
-    "\x1b[90m[python]\x1b[0m ✓ aiohttp 3.9.5 installed",
-    "\x1b[90m[python]\x1b[0m ✓ cryptography 42.0.8 installed",
-    "\x1b[90m[python]\x1b[0m ✓ pydantic 2.8.2 installed",
-  ],
-  hermes: [
-    "\x1b[90m[hermes]\x1b[0m Cloning Hermes core...",
-    "\x1b[90m[hermes]\x1b[0m ✓ Repository cloned (3.2 MB)",
-    "\x1b[90m[hermes]\x1b[0m Installing core dependencies...",
-    "\x1b[90m[hermes]\x1b[0m ✓ 48 packages installed",
-    "\x1b[90m[hermes]\x1b[0m Initializing Hermes config...",
-    "\x1b[90m[hermes]\x1b[0m ✓ Config written to ~/.hermes/config.yaml",
-    "\x1b[90m[hermes]\x1b[0m ✓ Agent service registered",
-  ],
-  providers: [
-    "\x1b[90m[providers]\x1b[0m Scanning available providers...",
-    "\x1b[90m[providers]\x1b[0m ✓ opencode-go detected",
-    "\x1b[90m[providers]\x1b[0m ✓ opencode-zen detected",
-    "\x1b[90m[providers]\x1b[0m ✓ anthropic detected",
-    "\x1b[90m[providers]\x1b[0m ✓ openai detected",
-    "\x1b[90m[providers]\x1b[0m ✓ google detected",
-    "\x1b[90m[providers]\x1b[0m → Set API keys in ~/.hermes/.env",
-  ],
-};
+/** Map the backend step (1..7) onto the visual bucket index (0..3). */
+function bucketForBackendStep(step: number): number {
+  for (let i = STEPS.length - 1; i >= 0; i--) {
+    if (STEPS[i].backendSteps.includes(step)) return i;
+  }
+  return 0;
+}
 
 // ─── Terminal log component ─────────────────────────────────────────────
 
-function TerminalLog({ lines, maxLines = 12 }: { lines: string[]; maxLines?: number }) {
+function TerminalLog({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [lines]);
+  }, [text]);
 
-  const visible = lines.slice(-maxLines);
+  const lines = text ? text.split("\n") : [];
+  const visible = lines.slice(-200);
 
   return (
     <div
       ref={ref}
-      className="font-mono text-xs leading-relaxed rounded-lg p-4 overflow-y-auto border border-[var(--border)]"
-      style={{ background: "var(--surface)", height: "220px" }}
+      className="ui-install-log"
     >
       {visible.length === 0 && (
-        <span className="text-[var(--text-3)]">Waiting for installation to begin...</span>
+        <span className="ui-install-log-empty">Waiting for installation to begin...</span>
       )}
-      {visible.map((line, i) => {
-        // Simple ANSI color code parsing for the simulated logs
-        const text = line.replace(/\x1b\[\d+m/g, "");
-        const grayMatch = line.match(/\x1b\[90m/);
-        if (grayMatch) {
-          // Extract labeled parts
-          const bracketMatch = text.match(/^\[([^\]]+)\]\s/);
-          if (bracketMatch) {
-            const label = bracketMatch[0];
-            const rest = text.slice(label.length);
-            return (
-              <div key={i} className="flex">
-                <span className="text-[var(--text-3)] flex-shrink-0">{label}</span>
-                <span className="text-[var(--text-2)]">{rest}</span>
-              </div>
-            );
-          }
-        }
-        return <div key={i} className="text-[var(--text-2)]">{text}</div>;
-      })}
-      {/* Blinking cursor when running */}
-      {lines.length > 0 && (
-        <span className="inline-block w-2 h-4 ml-0.5 bg-[var(--accent)] animate-pulse align-middle" />
+      {visible.map((line, i) => (
+        <div key={i}>{line || " "}</div>
+      ))}
+      {text.length > 0 && (
+        <span className="ui-install-log-caret" />
       )}
     </div>
   );
@@ -112,46 +76,24 @@ function TerminalLog({ lines, maxLines = 12 }: { lines: string[]; maxLines?: num
 function StepIndicator({ step, status, isLast }: { step: Step; status: StepStatus; isLast: boolean }) {
   const Icon = step.icon;
   return (
-    <div className="flex items-start gap-3">
-      <div className="flex flex-col items-center">
-        <div
-          className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 border-2 transition-all duration-300 ${
-            status === "done"
-              ? "border-[var(--success)] bg-[var(--success-weak)]"
-              : status === "running"
-                ? "border-[var(--accent)] bg-[var(--accent-weak)]"
-                : status === "error"
-                  ? "border-[var(--error)] bg-[var(--error-weak)]"
-                  : "border-[var(--border)] bg-transparent"
-          }`}
-        >
+    <div className="ui-install-step" data-status={status}>
+      <div className="ui-install-step-rail">
+        <div className="ui-install-step-icon">
           {status === "done" ? (
-            <Check size={14} className="text-[var(--success)]" />
+            <Check size={14} />
           ) : status === "running" ? (
-            <LoaderCircle size={14} className="text-[var(--accent-text)] animate-spin" />
+            <LoaderCircle size={14} className="animate-spin" />
           ) : status === "error" ? (
-            <XCircle size={14} className="text-[var(--error)]" />
+            <XCircle size={14} />
           ) : (
-            <Icon size={14} className="text-[var(--text-3)]" />
+            <Icon size={14} />
           )}
         </div>
-        {!isLast && (
-          <div
-            className={`w-0.5 h-6 mt-1 transition-colors duration-300 ${
-              status === "done" ? "bg-[var(--success-weak)]" : "bg-[var(--border)]"
-            }`}
-          />
-        )}
+        {!isLast && <div className="ui-install-step-line" />}
       </div>
-      <div className="flex-1 pb-6">
-        <p className={`text-sm font-medium transition-colors duration-300 ${
-          status === "done" ? "text-[var(--success)]" :
-          status === "running" ? "text-[var(--accent-text)]" :
-          status === "error" ? "text-[var(--error)]" :
-          "text-[var(--text-3)]"
-        }`}>
-          {step.label}
-        </p>
+      <div className="ui-install-step-copy">
+        <strong>{step.label}</strong>
+        <span>{status === "done" ? "Complete" : status === "running" ? "In progress" : status === "error" ? "Needs attention" : "Waiting"}</span>
       </div>
     </div>
   );
@@ -159,170 +101,233 @@ function StepIndicator({ step, status, isLast }: { step: Step; status: StepStatu
 
 // ─── InstallView ────────────────────────────────────────────────────────
 
-export default function InstallView() {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [stepStatuses, setStepStatuses] = useState<StepStatus[]>(["pending", "pending", "pending", "pending"]);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [phase, setPhase] = useState<"idle" | "installing" | "error" | "done">("idle");
-  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+interface InstallViewProps {
+  /** Called when the agent is installed/verified and the user continues. */
+  onComplete?: () => void;
+}
 
-  const clearTimers = useCallback(() => {
-    timersRef.current.forEach(clearTimeout);
-    timersRef.current = [];
+export default function InstallView({ onComplete }: InstallViewProps) {
+  const [phase, setPhase] = useState<Phase>("checking");
+  const [activeBucket, setActiveBucket] = useState(0);
+  const [log, setLog] = useState("");
+  const [error, setError] = useState("");
+  const [version, setVersion] = useState<string | null>(null);
+
+  // Derive per-step status from the active bucket + phase.
+  const statusFor = useCallback((index: number): StepStatus => {
+    if (phase === "done") return "done";
+    if (phase === "error") {
+      if (index < activeBucket) return "done";
+      if (index === activeBucket) return "error";
+      return "pending";
+    }
+    if (phase === "installing") {
+      if (index < activeBucket) return "done";
+      if (index === activeBucket) return "running";
+      return "pending";
+    }
+    return "pending";
+  }, [phase, activeBucket]);
+
+  // On mount: check whether the agent is already installed.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await window.hermes.checkHermesInstalled();
+        if (cancelled) return;
+        if (status.installed) {
+          const v = await window.hermes.getHermesVersion().catch(() => null);
+          if (cancelled) return;
+          setVersion(v);
+          setPhase("done");
+        } else {
+          setPhase("idle");
+        }
+      } catch {
+        if (!cancelled) setPhase("idle");
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  const startInstall = useCallback(() => {
+  const startInstall = useCallback(async () => {
     setPhase("installing");
-    setCurrentStep(0);
-    setStepStatuses(["pending", "pending", "pending", "pending"]);
-    setLogs([]);
+    setActiveBucket(0);
+    setLog("");
+    setError("");
 
-    clearTimers();
+    const cleanup = window.hermes.onInstallProgress((p: InstallProgressPayload) => {
+      setActiveBucket(bucketForBackendStep(p.step));
+      setLog(p.log);
+    });
 
-    const runStep = (index: number) => {
-      if (index >= STEPS.length) {
-        // All done
+    try {
+      const result = await window.hermes.installHermes();
+      cleanup();
+      if (result.success) {
+        const v = await window.hermes.getHermesVersion().catch(() => null);
+        setVersion(v);
         setPhase("done");
-        return;
+      } else {
+        setError(result.error || "Installation failed.");
+        setPhase("error");
       }
-
-      setCurrentStep(index);
-      setStepStatuses(prev => prev.map((s, i) => i === index ? "running" : s));
-
-      const stepLogs = SIM_LOGS[STEPS[index].id] || [];
-      const delay = 600; // ms between log lines
-
-      stepLogs.forEach((line, lineIndex) => {
-        const t = setTimeout(() => {
-          setLogs(prev => [...prev, line]);
-        }, delay * (lineIndex + 1));
-        timersRef.current.push(t);
-      });
-
-      // Mark step done after all logs
-      const doneTime = delay * (stepLogs.length + 1);
-      const t = setTimeout(() => {
-        setStepStatuses(prev => prev.map((s, i) => i === index ? "done" : s));
-        runStep(index + 1);
-      }, doneTime);
-      timersRef.current.push(t);
-    };
-
-    runStep(0);
-  }, [clearTimers]);
+    } catch (err) {
+      cleanup();
+      setError((err as Error).message || "Installation failed.");
+      setPhase("error");
+    }
+  }, []);
 
   const handleRetry = useCallback(() => {
-    clearTimers();
     setPhase("idle");
-    setCurrentStep(0);
-    setStepStatuses(["pending", "pending", "pending", "pending"]);
-    setLogs([]);
-  }, [clearTimers]);
+    setActiveBucket(0);
+    setLog("");
+    setError("");
+  }, []);
 
-  // Cleanup timers on unmount
-  useEffect(() => {
-    return () => clearTimers();
-  }, [clearTimers]);
+  const doneCount = STEPS.filter((_, i) => statusFor(i) === "done").length;
+  const progressPercent = phase === "done"
+    ? 100
+    : Math.round((doneCount / STEPS.length) * 100);
 
-  const progressPercent = Math.round(
-    (stepStatuses.filter(s => s === "done").length / STEPS.length) * 100
-  );
+  const phaseCopy = phase === "checking"
+    ? "Checking installation..."
+    : phase === "idle"
+      ? "Ready to install Hermes Desktop Pro locally"
+      : phase === "installing"
+        ? `Installing... ${STEPS[activeBucket].label}`
+        : phase === "done"
+          ? (version ? `Hermes Desktop Pro is ready - ${version}` : "Hermes Desktop Pro is ready")
+          : "Installation encountered an error";
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden" style={{ background: "var(--surface)" }}>
-      {/* ── Header ── */}
-      <div className="flex-shrink-0 px-6 py-6 border-b border-[var(--border)]" style={{ background: "var(--surface-2)" }}>
-        <div className="flex items-center gap-3 mb-1">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[var(--accent-weak)] border border-[var(--accent-line)]">
-            <Download size={18} className="text-[var(--accent-text)]" />
+    <Screen
+      className="ui-install-console"
+      icon={<Download size={19} />}
+      kicker="Local Runtime"
+      title="Install Hermes"
+      sub={phaseCopy}
+      actions={
+        <Badge variant={phase === "done" ? "success" : phase === "error" ? "error" : phase === "installing" ? "accent" : "neutral"}>
+          {phase === "done" ? "Ready" : phase === "error" ? "Error" : phase === "installing" ? "Installing" : phase === "checking" ? "Checking" : "Idle"}
+        </Badge>
+      }
+    >
+      <div className="ui-install-shell">
+        <Card pad className="ui-install-hero mint-in mint-in-1">
+          <div className="ui-install-hero-mark">
+            <ShieldCheck size={28} />
           </div>
-          <div>
-            <h1 className="text-lg font-bold text-[var(--text)]">Install Hermes</h1>
-            <p className="text-xs text-[var(--text-3)] mt-0.5">
-              {phase === "idle" && "Ready to install Hermes Agent locally"}
-              {phase === "installing" && `Installing... Step ${currentStep + 1} of ${STEPS.length}`}
-              {phase === "done" && "Installation complete!"}
-              {phase === "error" && "Installation encountered an error"}
+          <div className="ui-install-hero-copy">
+            <div className="ui-eyebrow">Hermes Setup</div>
+            <h2>{phase === "done" ? "Runtime is ready" : "Prepare the local command center"}</h2>
+            <p>
+              Install the local Hermes runtime that powers sessions, tools, memory and automation.
+              Existing backend install behavior is preserved.
             </p>
+          </div>
+          <div className="ui-install-metrics">
+            <div><span>Progress</span><strong>{progressPercent}%</strong></div>
+            <div><span>Steps</span><strong>{doneCount}/{STEPS.length}</strong></div>
+            <div><span>Version</span><strong>{version || "Local"}</strong></div>
+          </div>
+        </Card>
+
+        <div className="ui-install-progress-card mint-in mint-in-2">
+          <div className="ui-install-progress-head">
+            <span>Setup Progress</span>
+            <strong>{progressPercent}%</strong>
+          </div>
+          <div className="ui-install-progress-track" data-phase={phase}>
+            <span style={{ width: `${progressPercent}%` }} />
           </div>
         </div>
 
-        {/* Progress bar */}
-        {(phase === "installing" || phase === "done" || phase === "error") && (
-          <div className="mt-4">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] text-[var(--text-3)]">Progress</span>
-              <span className="text-[11px] font-mono text-[var(--text-2)]">{progressPercent}%</span>
+        <div className={cx("ui-install-layout", (phase === "installing" || phase === "error") && "has-log")}>
+          <Card pad className="ui-install-steps-card mint-in mint-in-3">
+            <div className="ui-install-card-head">
+              <div>
+                <span>Runtime Checklist</span>
+                <strong>{phaseCopy}</strong>
+              </div>
+              {phase === "installing" && <LoaderCircle size={16} className="animate-spin" />}
             </div>
-            <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "var(--surface-3)" }}>
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  phase === "error" ? "bg-[var(--error)]" : "bg-[var(--accent)]"
-                }`}
-                style={{ width: `${progressPercent}%` }}
-              />
+            <div className="ui-install-steps">
+              {STEPS.map((step, i) => (
+                <StepIndicator
+                  key={step.id}
+                  step={step}
+                  status={statusFor(i)}
+                  isLast={i === STEPS.length - 1}
+                />
+              ))}
             </div>
-          </div>
-        )}
-      </div>
+          </Card>
 
-      {/* ── Content area ── */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto p-6">
-          {/* Step indicators */}
-          <div className="mb-6">
-            {STEPS.map((step, i) => (
-              <StepIndicator
-                key={step.id}
-                step={step}
-                status={stepStatuses[i]}
-                isLast={i === STEPS.length - 1}
-              />
-            ))}
-          </div>
-
-          {/* Terminal log */}
-          <div className="mb-6">
-            <div className="flex items-center gap-2 mb-2">
-              <Terminal size={14} className="text-[var(--text-3)]" />
-              <span className="text-[11px] font-medium text-[var(--text-3)] uppercase tracking-wide">Install Log</span>
+          <Card pad className="ui-install-action-card mint-in mint-in-4">
+            <div className="ui-install-card-head">
+              <div>
+                <span>Action</span>
+                <strong>{phase === "done" ? "Continue to Hermes" : phase === "error" ? "Retry setup" : "Start when ready"}</strong>
+              </div>
             </div>
-            <TerminalLog lines={logs} />
-          </div>
 
-          {/* Action buttons */}
-          <div className="flex items-center gap-3">
-            {phase === "idle" && (
-              <Button variant="primary" onClick={startInstall} leftIcon={<Download size={15} />}>
-                Install Hermes
-              </Button>
+            {phase === "error" && error && (
+              <div className="ui-modal-alert" role="alert">
+                {error}
+              </div>
             )}
 
-            {phase === "installing" && (
-              <Button variant="secondary" disabled leftIcon={<LoaderCircle size={15} className="animate-spin" />}>
-                Installing...
-              </Button>
-            )}
+            <div className="ui-install-actions">
+              {phase === "checking" && (
+                <Button variant="secondary" disabled leftIcon={<LoaderCircle size={15} className="animate-spin" />}>
+                  Checking...
+                </Button>
+              )}
 
-            {phase === "error" && (
-              <>
+              {phase === "idle" && (
+                <Button variant="primary" onClick={startInstall} leftIcon={<Download size={15} />}>
+                  Install Hermes
+                </Button>
+              )}
+
+              {phase === "installing" && (
+                <Button variant="secondary" disabled leftIcon={<LoaderCircle size={15} className="animate-spin" />}>
+                  Installing...
+                </Button>
+              )}
+
+              {phase === "error" && (
                 <Button variant="primary" onClick={handleRetry} leftIcon={<RotateCcw size={15} />}>
                   Retry Installation
                 </Button>
-                <Button variant="secondary" onClick={() => setPhase("idle")}>
-                  Cancel
-                </Button>
-              </>
-            )}
+              )}
 
-            {phase === "done" && (
-              <Button variant="primary" leftIcon={<ArrowRight size={15} />}>
-                Continue to Setup
-              </Button>
-            )}
-          </div>
+              {phase === "done" && onComplete && (
+                <Button variant="primary" onClick={onComplete} leftIcon={<ArrowRight size={15} />}>
+                  Continue
+                </Button>
+              )}
+            </div>
+            <p className="ui-install-action-note">
+              Installation logs remain local. Hermes Desktop Pro keeps your runtime configuration on this machine.
+            </p>
+          </Card>
+
+          {(phase === "installing" || phase === "error") && (
+            <Card pad className="ui-install-log-card mint-in mint-in-5">
+              <div className="ui-install-log-head">
+                <Terminal size={14} />
+                <span>Install Log</span>
+                <small>Last 200 lines</small>
+              </div>
+              <TerminalLog text={log} />
+            </Card>
+          )}
         </div>
       </div>
-    </div>
+    </Screen>
   );
 }

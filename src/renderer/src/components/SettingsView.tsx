@@ -4,7 +4,7 @@ import {
   Copy, Check, SlidersHorizontal, Globe, KeyRound, Palette,
 } from "lucide-react";
 import {
-  Screen, Card, Button, Input, Badge, Toggle, Segment, SegmentItem, IconButton, Field, Eyebrow, StatusDot, cx,
+  Screen, Card, Button, Input, Badge, Toggle, Segment, SegmentItem, IconButton, Field, StatusDot, cx,
 } from "../ui";
 
 type ConnMode = "local" | "remote" | "ssh";
@@ -51,12 +51,12 @@ const LOG_FILE_FOR_TAB: Record<LogTab, string> = {
   error: "errors.log",
 };
 
-const PROVIDER_KEYS: [string, string, string][] = [
-  ["OpenRouter", "OPENROUTER_API_KEY", "●●●●●●●●●●●●●●ab12"],
-  ["Anthropic", "ANTHROPIC_API_KEY", "●●●●●●●●●●●●●●cd34"],
-  ["OpenCode Zen", "OPENCODE_ZEN_API_KEY", "●●●●●●●●●●●●●●ef56"],
-  ["OpenCode Go", "OPENCODE_GO_API_KEY", "●●●●●●●●●●●●●●gh78"],
-  ["DeepSeek", "DEEPSEEK_API_KEY", "●●●●●●●●●●●●●●ij90"],
+const PROVIDER_KEYS: [string, string][] = [
+  ["OpenRouter", "OPENROUTER_API_KEY"],
+  ["Anthropic", "ANTHROPIC_API_KEY"],
+  ["OpenCode Zen", "OPENCODE_ZEN_API_KEY"],
+  ["OpenCode Go", "OPENCODE_GO_API_KEY"],
+  ["DeepSeek", "DEEPSEEK_API_KEY"],
 ];
 
 const ACCENTS = ["#E7B84E", "#FF453A", "#30D158", "#0A84FF", "#BF5AF2", "#FF9F0A"];
@@ -76,24 +76,12 @@ const LOG_TABS: { id: LogTab; label: string }[] = [
 /* Single row: label + description on the left, control on the right. */
 function Row({ title, desc, control, last }: { title: string; desc?: string; control: React.ReactNode; last?: boolean }) {
   return (
-    <div className={cx("flex items-center justify-between gap-4 px-[18px] py-4", !last && "border-b border-[var(--border)]")}>
-      <div className="min-w-0">
-        <div className="text-[14px] font-semibold text-[var(--text)]">{title}</div>
-        {desc && <div className="text-[12.5px] text-[var(--text-2)] mt-0.5">{desc}</div>}
+    <div className={cx("ui-settings-row", !last && "ui-settings-row-bordered")}>
+      <div className="ui-settings-row-copy">
+        <div>{title}</div>
+        {desc && <p>{desc}</p>}
       </div>
-      <div className="shrink-0">{control}</div>
-    </div>
-  );
-}
-
-/* Panel header — the struck editorial heading for the active section. */
-function PanelHead({ kicker, title, desc }: { kicker: string; title: string; desc: string }) {
-  return (
-    <div className="mb-1">
-      <Eyebrow>{kicker}</Eyebrow>
-      <h2 className="serif text-[24px] leading-tight text-[var(--text)]">{title}</h2>
-      <p className="text-[13px] text-[var(--text-2)] mt-1.5">{desc}</p>
-      <hr className="ui-divider-gold mt-4" />
+      <div className="ui-settings-row-control">{control}</div>
     </div>
   );
 }
@@ -209,32 +197,51 @@ export default function SettingsView() {
   const active = SECTIONS.find(s => s.id === section)!;
 
   return (
-    <Screen icon={<Settings size={19} />} kicker="Preferences" title="Settings" sub="Connection, providers, appearance and diagnostics">
-      <div className="flex gap-8 items-start">
+    <Screen
+      className="ui-settings-console"
+      icon={<Settings size={19} />}
+      kicker="Preferences"
+      title="Settings"
+      sub="Connection, providers, appearance and diagnostics"
+    >
+      <div className="ui-settings-shell">
+        <div className="ui-settings-topline mint-in mint-in-1">
+          <div className="ui-settings-topline-main">
+            <Settings size={16} />
+            <span>{active.label}</span>
+            <small>{active.desc}</small>
+          </div>
+          <div className="ui-settings-topline-meta">
+            <span>Mode <strong>{mode.toUpperCase()}</strong></span>
+            <span>API Key <strong>{hasApiKey ? "Set" : "Empty"}</strong></span>
+            <span>Section <strong>{SECTIONS.findIndex(s => s.id === section) + 1}/{SECTIONS.length}</strong></span>
+          </div>
+        </div>
+
+        <div className="ui-settings-layout">
         {/* ── Section rail (struck-gold active pill) ── */}
-        <nav className="ui-settings-rail shrink-0 w-[210px] sticky top-1 flex flex-col gap-0.5">
+        <nav className="ui-settings-rail">
           {SECTIONS.map(s => (
             <button key={s.id} type="button" className="ui-nav no-drag" data-active={s.id === section} onClick={() => setSection(s.id)}>
               <s.icon size={16} className="shrink-0" strokeWidth={s.id === section ? 2.2 : 1.9} />
               <span className="truncate">{s.label}</span>
+              <small>{s.desc}</small>
             </button>
           ))}
         </nav>
 
         {/* ── Active panel (re-minted on section change) ── */}
-        <div key={section} className="flex-1 min-w-0 max-w-[680px] flex flex-col gap-5 mint-in">
-          <PanelHead kicker="Settings" title={active.label} desc={active.desc} />
-
+        <div key={section} className="ui-settings-panel mint-in">
           {section === "general" && (
-            <Card>
-              <div className="px-[18px] py-4 border-b border-[var(--border)]">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-[14px] font-semibold text-[var(--text)]">Connection Mode</div>
-                    <div className="text-[12.5px] text-[var(--text-2)] mt-0.5">
+            <Card className="ui-settings-card">
+              <div className="ui-settings-row ui-settings-row-bordered">
+                <div className="ui-settings-row-copy">
+                    <div>Connection Mode</div>
+                    <p>
                       {mode === "local" ? `Run Hermes on 127.0.0.1:${localPort}` : mode === "ssh" ? "Tunnel to a remote Hermes server over SSH" : "Connect to a remote Hermes server"}
-                    </div>
-                  </div>
+                    </p>
+                </div>
+                <div className="ui-settings-row-control">
                   <Segment>
                     <SegmentItem active={mode === "local"} onClick={() => changeMode("local")}>Local</SegmentItem>
                     <SegmentItem active={mode === "remote"} onClick={() => changeMode("remote")}>Remote</SegmentItem>
@@ -253,8 +260,8 @@ export default function SettingsView() {
 
           {section === "network" && (
             <>
-              <Card pad>
-                <div className="flex flex-col gap-4">
+              <Card pad className="ui-settings-card">
+                <div className="ui-settings-field-grid">
                   <Field label="Local Port">
                     <Input value={localPort} onChange={e => setLocalPort(e.target.value)} className="font-mono" />
                   </Field>
@@ -266,7 +273,7 @@ export default function SettingsView() {
                   </Field>
 
                   {mode === "ssh" && (
-                    <div className="flex flex-col gap-4 pt-1 mt-1 border-t border-[var(--border)]">
+                    <div className="ui-settings-ssh-grid">
                       <Field label="Host">
                         <Input value={ssh.host} onChange={e => setSsh(p => ({ ...p, host: e.target.value }))} onBlur={() => updateSsh({})} placeholder="server.example.com" />
                       </Field>
@@ -290,7 +297,7 @@ export default function SettingsView() {
                 </div>
               </Card>
 
-              <Card>
+              <Card className="ui-settings-card">
                 <Row
                   title="Test Connection"
                   desc="Verify the current connection settings reach Hermes"
@@ -313,24 +320,24 @@ export default function SettingsView() {
 
           {section === "providers" && (
             <>
-              <div className="text-[12.5px] text-[var(--text-2)] -mt-1">
+              <div className="ui-settings-note">
                 Keys live in <code className="ui-kbd">~/.hermes/.env</code> — never committed.
               </div>
-              <Card>
-                {PROVIDER_KEYS.map(([name, env, masked], i) => (
+              <Card className="ui-settings-card">
+                {PROVIDER_KEYS.map(([name, env], i) => (
                   <div
                     key={name}
-                    className={cx("flex items-center gap-3 px-[18px] py-3.5", i < PROVIDER_KEYS.length - 1 && "border-b border-[var(--border)]")}
+                    className={cx("ui-settings-provider-row", i < PROVIDER_KEYS.length - 1 && "ui-settings-row-bordered")}
                   >
-                    <span className="flex items-center justify-center shrink-0 w-9 h-9 rounded-[10px] bg-[var(--accent-weak)] text-[var(--accent-text)] border border-[var(--accent-line)]">
+                    <span className="ui-settings-provider-icon">
                       <Shield size={16} />
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-semibold text-[var(--text)] truncate">{name}</div>
-                      <div className="text-[11.5px] font-mono text-[var(--text-3)] truncate">{env}</div>
+                    <div className="ui-settings-provider-copy">
+                      <div>{name}</div>
+                      <span>{env}</span>
                     </div>
-                    <code className="text-[12px] font-mono text-[var(--text-2)] truncate hidden sm:block max-w-[160px]">{masked}</code>
-                    <Badge variant="success">Set</Badge>
+                    <code>~/.hermes/.env</code>
+                    <Badge variant="neutral">Env var</Badge>
                     <IconButton onClick={() => copy(env)} title="Copy env var" className={cx(copied === env && "text-[var(--success)]")}>
                       {copied === env ? <Check size={14} /> : <Copy size={14} />}
                     </IconButton>
@@ -341,7 +348,7 @@ export default function SettingsView() {
           )}
 
           {section === "appearance" && (
-            <Card>
+            <Card className="ui-settings-card">
               <Row
                 title="Theme"
                 desc="Match the system or pick a fixed appearance"
@@ -360,7 +367,7 @@ export default function SettingsView() {
                 title="Accent Color"
                 desc="Used across buttons, highlights and status"
                 control={
-                  <div className="flex gap-2">
+                  <div className="ui-settings-swatches">
                     {ACCENTS.map(c => (
                       <button
                         key={c}
@@ -382,7 +389,7 @@ export default function SettingsView() {
           )}
 
           {section === "backup" && (
-            <Card>
+            <Card className="ui-settings-card">
               <Row
                 title="Create Backup"
                 desc="Export config, sessions, skills and memory"
@@ -404,20 +411,20 @@ export default function SettingsView() {
 
           {section === "diagnostics" && (
             <>
-              <div className="flex items-center justify-end -mt-1">
+              <div className="ui-settings-diagnostics-tabs">
                 <Segment>
                   {LOG_TABS.map(t => (
                     <SegmentItem key={t.id} active={logTab === t.id} onClick={() => setLogTab(t.id)}>{t.label}</SegmentItem>
                   ))}
                 </Segment>
               </div>
-              <Card className="overflow-hidden">
-                <div className="flex items-center gap-2.5 px-4 h-11 border-b border-[var(--border)] bg-[var(--surface-2)]">
+              <Card className="ui-settings-log-card">
+                <div className="ui-settings-log-head">
                   <TerminalIcon size={14} className="text-[var(--accent-text)]" />
-                  <span className="text-[12px] font-mono text-[var(--text-2)]">{logPath || `~/.hermes/logs/${LOG_FILE_FOR_TAB[logTab]}`}</span>
-                  <span className="text-[11.5px] text-[var(--text-3)] ml-auto">{logLoading ? "Loading…" : "Last 50 lines"}</span>
+                  <span>{logPath || `~/.hermes/logs/${LOG_FILE_FOR_TAB[logTab]}`}</span>
+                  <small>{logLoading ? "Loading…" : "Last 50 lines"}</small>
                 </div>
-                <div className="p-4 text-[12.5px] leading-relaxed font-mono overflow-x-auto bg-[var(--bg)]">
+                <div className="ui-settings-log-body">
                   {logLoading ? (
                     <div className="text-[var(--text-3)]">Reading log…</div>
                   ) : logLines.length === 0 ? (
@@ -440,6 +447,7 @@ export default function SettingsView() {
               </Card>
             </>
           )}
+        </div>
         </div>
       </div>
     </Screen>

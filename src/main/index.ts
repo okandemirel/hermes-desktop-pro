@@ -5,7 +5,7 @@ import {
   shell,
   Menu,
 } from "electron";
-import type { WebContents } from "electron";
+import type { Rectangle } from "electron";
 import { join } from "path";
 import { readFileSync, existsSync } from "fs";
 import { homedir } from "os";
@@ -82,7 +82,15 @@ import {
   sshReadLogs,
 } from "./ssh-remote";
 
-import { readLogs } from "./installer";
+import {
+  readLogs,
+  checkInstallStatus,
+  isHermesInstalled,
+  runInstall,
+  getHermesVersion,
+  runHermesDoctor,
+  type InstallProgress,
+} from "./installer";
 
 import { discoverProviderModels } from "./model-discovery";
 
@@ -161,40 +169,28 @@ import {
   type CreateTaskInput,
 } from "./kanban";
 
+import { OfficeViewManager } from "./office-view";
+
 import icon from "../../resources/icon.png?asset";
 
 // Type assertion for the preload API
 declare const HERMES_PRELOAD_API: HermesAPI;
 
-// ─── Webview hardening ────────────────────────────────
-// The Office screen embeds the external Claw3D app in a <webview> pointed at
-// http://localhost:<port>. We only ever allow local HTTP origins and strip
-// every privileged preference off the guest contents.
+let retainedMainWindow: BrowserWindow | null = null;
+const officeViewManager = new OfficeViewManager();
 
-const LOCAL_WEBVIEW_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-
-function isAllowedWebviewUrl(rawUrl: unknown): rawUrl is string {
-  if (typeof rawUrl !== "string") return false;
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return false;
+function revealMainWindow(mainWindow: BrowserWindow): void {
+  if (mainWindow.isDestroyed()) return;
+  if (process.platform === "darwin") {
+    app.setActivationPolicy("regular");
+    app.dock?.show();
   }
-  if (url.protocol !== "http:") return false;
-  if (!LOCAL_WEBVIEW_HOSTS.has(url.hostname)) return false;
-  const port = Number(url.port);
-  return Number.isInteger(port) && port >= 1024 && port <= 65535;
-}
-
-function hardenAttachedWebContents(contents: WebContents): void {
-  contents.setWindowOpenHandler(() => ({ action: "deny" }));
-  contents.on("will-navigate", (event, url) => {
-    if (!isAllowedWebviewUrl(url)) event.preventDefault();
-  });
-  contents.on("will-redirect", (event, url) => {
-    if (!isAllowedWebviewUrl(url)) event.preventDefault();
-  });
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.center();
+  mainWindow.moveTop();
+  mainWindow.focus();
+  if (process.platform === "darwin") app.focus({ steal: true });
 }
 
 function createWindow(): BrowserWindow {
@@ -205,7 +201,7 @@ function createWindow(): BrowserWindow {
     height: 860,
     minWidth: 900,
     minHeight: 600,
-    show: false,
+    show: true,
     title: "Hermes Desktop Pro",
     icon,
     // ── Liquid glass: real macOS window vibrancy ──
@@ -227,38 +223,24 @@ function createWindow(): BrowserWindow {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
-      // Office embeds the Claw3D app in a <webview>.
-      webviewTag: true,
+      webviewTag: false,
     },
   });
+  retainedMainWindow = mainWindow;
 
-  mainWindow.on("ready-to-show", () => {
-    mainWindow.show();
+  mainWindow.once("ready-to-show", () => revealMainWindow(mainWindow));
+  mainWindow.webContents.once("did-finish-load", () => revealMainWindow(mainWindow));
+  setTimeout(() => revealMainWindow(mainWindow), 1200);
+
+  mainWindow.on("closed", () => {
+    if (retainedMainWindow === mainWindow) retainedMainWindow = null;
+    officeViewManager.destroy(mainWindow);
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url);
     return { action: "deny" };
   });
-
-  // Block untrusted webview attachments and strip privileged preferences off
-  // the Claw3D guest contents before it loads.
-  mainWindow.webContents.on(
-    "will-attach-webview",
-    (event, webPreferences, params) => {
-      if (!isAllowedWebviewUrl(params.src)) {
-        event.preventDefault();
-        console.warn("[SECURITY] Blocked webview attachment for untrusted URL");
-        return;
-      }
-      delete webPreferences.preload;
-      webPreferences.nodeIntegration = false;
-      webPreferences.contextIsolation = true;
-      webPreferences.sandbox = true;
-      webPreferences.webSecurity = true;
-      webPreferences.allowRunningInsecureContent = false;
-    },
-  );
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
@@ -275,6 +257,10 @@ function createWindow(): BrowserWindow {
 // idle. Set after sendMessage() resolves its handle; cleared on done/error or
 // when the renderer goes away mid-stream.
 let currentChatAbort: (() => void) | null = null;
+
+// Guards the install-hermes IPC against concurrent runs (a double-click would
+// otherwise double-spawn the install script).
+let installInProgress = false;
 
 function registerIpcHandlers(): void {
   // Config
@@ -822,7 +808,7 @@ function registerIpcHandlers(): void {
     return true;
   });
 
-  // Claw3D (local mode only) ───────────────────────────
+  // Office 3D runtime (local mode only) ────────────────
   ipcMain.handle("claw3d-status", () => getClaw3dStatus());
 
   ipcMain.handle("claw3d-setup", async (event) => {
@@ -855,6 +841,58 @@ function registerIpcHandlers(): void {
     return true;
   });
   ipcMain.handle("claw3d-get-logs", () => getClaw3dLogs());
+
+  // Native Office view: a Hermes-owned local workspace surface.
+  ipcMain.handle("office-view-show", (event, url: string, bounds: Rectangle) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner) return { success: false, error: "Office window is not available." };
+    return officeViewManager.show(owner, url, bounds);
+  });
+  ipcMain.handle("office-view-set-bounds", (event, bounds: Rectangle) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner) return { success: false, error: "Office window is not available." };
+    return officeViewManager.setBounds(owner, bounds);
+  });
+  ipcMain.handle("office-view-hide", () => {
+    officeViewManager.hide();
+    return { success: true };
+  });
+  ipcMain.handle("office-view-reload", () => {
+    officeViewManager.reload();
+    return { success: true };
+  });
+
+  // ── Install wizard (first-run, local mode) ──────────────
+  ipcMain.handle("check-hermes-installed", () => checkInstallStatus());
+  ipcMain.handle("get-hermes-version", () => getHermesVersion());
+  ipcMain.handle("run-doctor", () => runHermesDoctor());
+
+  ipcMain.handle("install-hermes", async (event) => {
+    // Refuse concurrent installs — a second click would double-run the script.
+    if (installInProgress) {
+      return { success: false, error: "Install already in progress." };
+    }
+    if (isHermesInstalled()) {
+      return { success: true };
+    }
+    installInProgress = true;
+    const safeSend = (progress: InstallProgress): void => {
+      if (event.sender.isDestroyed()) return;
+      try {
+        event.sender.send("install-progress", progress);
+      } catch {
+        /* renderer went away mid-install */
+      }
+    };
+    try {
+      await runInstall(safeSend);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    } finally {
+      installInProgress = false;
+    }
+  });
 
   // ── Schedules / Cron (cron/jobs.json + hermes cron CLI / gateway API) ──
   // The cronjobs module branches internally between local file/CLI and the
@@ -968,13 +1006,6 @@ app.whenReady().then(() => {
 
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);
-  });
-
-  // Harden any webview guest contents the moment it's created (Office/Claw3D).
-  app.on("web-contents-created", (_event, contents) => {
-    if (contents.getType() === "webview") {
-      hardenAttachedWebContents(contents);
-    }
   });
 
   // macOS app menu

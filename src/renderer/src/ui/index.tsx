@@ -3,10 +3,12 @@
  * Screens compose ONLY these primitives + .ui-* classes — no inline styling.
  */
 import {
-  forwardRef, type ReactNode, type ButtonHTMLAttributes,
-  type InputHTMLAttributes, type TextareaHTMLAttributes, type SelectHTMLAttributes,
+  Children, cloneElement, forwardRef, isValidElement, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type ButtonHTMLAttributes,
+  type HTMLAttributes,
+  type InputHTMLAttributes, type TextareaHTMLAttributes,
 } from "react";
-import { Search, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown, Search, X } from "lucide-react";
 
 export const cx = (...a: (string | false | null | undefined)[]) => a.filter(Boolean).join(" ");
 
@@ -58,15 +60,16 @@ export const Divider = ({ className }: { className?: string }) => <hr className=
 
 /* ── Card ── */
 export function Card({
-  interactive, active, pad, onClick, className, children,
+  interactive, active, pad, onClick, className, children, ...rest
 }: {
-  interactive?: boolean; active?: boolean; pad?: boolean; onClick?: () => void;
+  interactive?: boolean; active?: boolean; pad?: boolean;
   className?: string; children: ReactNode;
-}) {
+} & HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       onClick={onClick}
       className={cx("ui-card", pad && "ui-card-pad", interactive && "ui-card-hover", active && "ui-card-active", onClick && "cursor-pointer", className)}
+      {...rest}
     >
       {children}
     </div>
@@ -76,18 +79,18 @@ export function Card({
 /* ── Buttons ── */
 type BtnVariant = "primary" | "secondary" | "ghost" | "danger";
 export function Button({
-  variant = "secondary", size, leftIcon, className, children, ...rest
+  variant = "secondary", size, leftIcon, className, children, type = "button", ...rest
 }: { variant?: BtnVariant; size?: "sm"; leftIcon?: ReactNode } & ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button className={cx("ui-btn", `ui-btn-${variant}`, size === "sm" && "ui-btn-sm", className)} {...rest}>
+    <button type={type} className={cx("ui-btn", `ui-btn-${variant}`, size === "sm" && "ui-btn-sm", className)} {...rest}>
       {leftIcon}{children}
     </button>
   );
 }
 export function IconButton({
-  danger, className, children, ...rest
+  danger, className, children, type = "button", ...rest
 }: { danger?: boolean } & ButtonHTMLAttributes<HTMLButtonElement>) {
-  return <button className={cx("ui-iconbtn", danger && "ui-iconbtn-danger", className)} {...rest}>{children}</button>;
+  return <button type={type} className={cx("ui-iconbtn", danger && "ui-iconbtn-danger", className)} {...rest}>{children}</button>;
 }
 
 /* ── Inputs ── */
@@ -95,16 +98,321 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
   function Input({ className, ...rest }, ref) { return <input ref={ref} className={cx("ui-input", className)} {...rest} />; });
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
   function Textarea({ className, ...rest }, ref) { return <textarea ref={ref} className={cx("ui-textarea", className)} {...rest} />; });
-export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement> & { children: ReactNode }) {
-  return <select className={cx("ui-select", className)} {...rest}>{children}</select>;
+
+type SelectOption = {
+  key: string;
+  value: string;
+  label: ReactNode;
+  labelText: string;
+  disabled: boolean;
+};
+
+type SelectProps = {
+  className?: string;
+  children: ReactNode;
+  value?: string | number;
+  defaultValue?: string | number;
+  disabled?: boolean;
+  onChange?: (event: ChangeEvent<HTMLSelectElement>) => void;
+  onBlur?: ButtonHTMLAttributes<HTMLButtonElement>["onBlur"];
+  onFocus?: ButtonHTMLAttributes<HTMLButtonElement>["onFocus"];
+  id?: string;
+  name?: string;
+  title?: string;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
+  "aria-describedby"?: string;
+};
+
+type FloatingRect = {
+  left: number;
+  top: number;
+  width: number;
+  maxHeight: number;
+  placement: "top" | "bottom";
+};
+
+export function getFloatingRect(anchor: HTMLElement, preferredWidth = anchor.getBoundingClientRect().width, estimatedHeight = 260): FloatingRect {
+  const rect = anchor.getBoundingClientRect();
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const gap = 7;
+  const margin = 16;
+  const below = Math.max(0, viewportHeight - rect.bottom - margin);
+  const above = Math.max(0, rect.top - margin);
+  const placement: "top" | "bottom" = below >= 178 || below >= above ? "bottom" : "top";
+  const availableHeight = Math.max(96, placement === "bottom" ? below - gap : above - gap);
+  const menuHeight = Math.min(Math.max(96, estimatedHeight), availableHeight);
+  const width = Math.min(Math.max(preferredWidth, rect.width), Math.max(120, viewportWidth - margin * 2));
+  const left = Math.min(Math.max(margin, rect.left), Math.max(margin, viewportWidth - width - margin));
+  const top = placement === "bottom"
+    ? Math.min(rect.bottom + gap, viewportHeight - margin - menuHeight)
+    : Math.max(margin, rect.top - gap - menuHeight);
+  return {
+    left: Math.round(left),
+    top: Math.round(top),
+    width: Math.round(width),
+    maxHeight: Math.round(menuHeight),
+    placement,
+  };
 }
-export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+
+function textFromNode(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textFromNode).join(" ").trim();
+  if (isValidElement<{ children?: ReactNode }>(node)) return textFromNode(node.props.children);
+  return "";
+}
+
+export function Select({
+  className,
+  children,
+  value,
+  defaultValue,
+  disabled,
+  onChange,
+  onBlur,
+  onFocus,
+  id,
+  name,
+  title,
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
+}: SelectProps) {
+  const listId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [internalValue, setInternalValue] = useState(() => {
+    if (defaultValue !== undefined) return String(defaultValue);
+    return "";
+  });
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [menuRect, setMenuRect] = useState<FloatingRect | null>(null);
+
+  const options = useMemo<SelectOption[]>(() => (
+    Children.toArray(children)
+      .filter(isValidElement)
+      .map((child, index) => {
+        const props = child.props as { value?: string | number; disabled?: boolean; children?: ReactNode };
+        const labelText = textFromNode(props.children).trim();
+        const optionValue = props.value !== undefined ? String(props.value) : labelText;
+        return {
+          key: `${optionValue || "option"}-${index}`,
+          value: optionValue,
+          label: props.children,
+          labelText,
+          disabled: !!props.disabled,
+        };
+      })
+  ), [children]);
+
+  const selectedValue = value !== undefined ? String(value) : internalValue || options[0]?.value || "";
+  const selectedIndex = Math.max(0, options.findIndex(option => option.value === selectedValue));
+  const selected = options[selectedIndex] || options[0];
+
+  const updatePosition = () => {
+    if (!triggerRef.current) return;
+    const estimatedHeight = Math.min(260, options.length * 36 + 12);
+    setMenuRect(getFloatingRect(triggerRef.current, undefined, estimatedHeight));
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    setActiveIndex(selectedIndex);
+    updatePosition();
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      const menu = document.getElementById(listId);
+      if (rootRef.current?.contains(target) || menu?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [listId, open, selectedIndex]);
+
+  const commitValue = (nextValue: string) => {
+    const next = options.find(option => option.value === nextValue);
+    if (!next || next.disabled) return;
+    if (value === undefined) setInternalValue(next.value);
+    onChange?.({
+      target: { value: next.value, name },
+      currentTarget: { value: next.value, name },
+    } as unknown as ChangeEvent<HTMLSelectElement>);
+    setOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  const moveActive = (direction: 1 | -1) => {
+    if (options.length === 0) return;
+    setActiveIndex(current => {
+      let next = current;
+      for (let step = 0; step < options.length; step += 1) {
+        next = (next + direction + options.length) % options.length;
+        if (!options[next]?.disabled) return next;
+      }
+      return current;
+    });
+  };
+
+  const menuInModal = !!triggerRef.current?.closest(".ui-modal");
+  const menu = open && menuRect ? createPortal((
+    <div
+      id={listId}
+      className={cx("ui-select-menu ui-select-menu-portal slide-up", menuInModal && "ui-select-menu-modal")}
+      role="listbox"
+      aria-label={ariaLabel || title || name || "Select option"}
+      data-placement={menuRect.placement}
+      style={{ left: menuRect.left, top: menuRect.top, width: menuRect.width, maxHeight: menuRect.maxHeight }}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        event.preventDefault();
+        setOpen(false);
+        requestAnimationFrame(() => triggerRef.current?.focus());
+      }}
+    >
+      {options.map((option, index) => {
+        const active = option.value === selectedValue;
+        const highlighted = index === activeIndex;
+        return (
+          <button
+            key={option.key}
+            type="button"
+            className={cx("ui-select-option", (active || highlighted) && "is-active")}
+            role="option"
+            aria-selected={active}
+            disabled={option.disabled}
+            onMouseEnter={() => setActiveIndex(index)}
+            onClick={() => commitValue(option.value)}
+          >
+            <span className="ui-select-option-copy"><strong>{option.label}</strong></span>
+            {active && <Check size={15} className="ui-select-option-check" />}
+          </button>
+        );
+      })}
+    </div>
+  ), document.body) : null;
+
   return (
-    <label className="block">
-      <span className="block text-[12.5px] font-medium text-[var(--text-2)] mb-1.5">{label}</span>
-      {children}
-      {hint && <span className="block text-[11.5px] text-[var(--text-3)] mt-1.5">{hint}</span>}
-    </label>
+    <div className={cx("ui-select-popover ui-select-custom", className)} ref={rootRef}>
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        className="ui-select-trigger ui-select-trigger-compact"
+        disabled={disabled}
+        title={title}
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
+        aria-describedby={ariaDescribedBy}
+        aria-haspopup="listbox"
+        aria-controls={open ? listId : undefined}
+        aria-expanded={open}
+        onBlur={onBlur as never}
+        onFocus={onFocus as never}
+        onClick={() => {
+          if (disabled) return;
+          setOpen(current => !current);
+        }}
+        onKeyDown={(event) => {
+          if (disabled) return;
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setOpen(true);
+            moveActive(1);
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setOpen(true);
+            moveActive(-1);
+          } else if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            if (open) commitValue(options[activeIndex]?.value || selectedValue);
+            else setOpen(true);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(false);
+          } else if (event.key === "Tab") {
+            setOpen(false);
+          }
+        }}
+      >
+        <span className="ui-select-trigger-main">{selected?.label || "Select"}</span>
+        <ChevronDown size={15} className="ui-select-trigger-chevron" />
+      </button>
+      {menu}
+    </div>
+  );
+}
+function findControlId(node: ReactNode): string | undefined {
+  if (isValidElement<{ id?: string }>(node) && typeof node.props.id === "string") return node.props.id;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const id = findControlId(child);
+      if (id) return id;
+    }
+  }
+  if (isValidElement<{ children?: ReactNode }>(node)) return findControlId(node.props.children);
+  return undefined;
+}
+
+function shouldReceiveFieldId(node: ReactNode): boolean {
+  if (!isValidElement(node)) return false;
+  if (node.type === Input || node.type === Textarea || node.type === Select) return true;
+  if (typeof node.type !== "string") return false;
+  return ["input", "select", "textarea"].includes(node.type);
+}
+
+function withControlId(node: ReactNode, id: string): ReactNode {
+  if (Array.isArray(node)) {
+    let assigned = false;
+    return node.map((child) => {
+      if (assigned) return child;
+      const next = withControlId(child, id);
+      if (next !== child) assigned = true;
+      return next;
+    });
+  }
+  if (!isValidElement<{ id?: string; children?: ReactNode }>(node)) return node;
+  if (!node.props.id && shouldReceiveFieldId(node)) {
+    return cloneElement(node, { id });
+  }
+  if (node.props.children) {
+    const nextChildren = withControlId(node.props.children, id);
+    if (nextChildren !== node.props.children) {
+      return cloneElement(node, { children: nextChildren });
+    }
+  }
+  return node;
+}
+
+export function Field({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
+  const fallbackId = useId();
+  const foundControlId = findControlId(children);
+  const controlId = foundControlId || fallbackId;
+  const labelledChildren = foundControlId ? children : withControlId(children, fallbackId);
+  return (
+    <div className="ui-field">
+      <label className="ui-field-label" htmlFor={controlId}>{label}</label>
+      {labelledChildren}
+      {hint && <span className="ui-field-hint">{hint}</span>}
+    </div>
   );
 }
 export function SearchInput({ value, onChange, placeholder, className }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
@@ -156,24 +464,92 @@ export function EmptyState({ icon, title, sub, action }: { icon?: ReactNode; tit
 }
 
 /* ── Modal ── */
-export function Modal({ open, onClose, title, children, footer, width = 460 }: {
-  open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; footer?: ReactNode; width?: number;
+export function Modal({ open, onClose, title, kicker, children, footer, width = 560 }: {
+  open: boolean; onClose: () => void; title?: ReactNode; kicker?: ReactNode; children: ReactNode; footer?: ReactNode; width?: number;
 }) {
+  const titleId = useId();
+  const modalRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusables = () => Array.from(
+      modalRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) || [],
+    ).filter(node => !node.hasAttribute("aria-hidden"));
+    requestAnimationFrame(() => {
+      const preferred = modalRef.current?.querySelector<HTMLElement>(
+        '[autofocus], [data-initial-focus="true"], .ui-modal-body input:not([disabled]), .ui-modal-body select:not([disabled]), .ui-modal-body textarea:not([disabled]), .ui-modal-body button:not([disabled])',
+      );
+      (preferred || focusables()[0] || modalRef.current)?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (document.querySelector(".ui-select-menu-portal, .ui-model-discovery-menu-portal")) return;
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const nodes = focusables();
+      if (nodes.length === 0) {
+        event.preventDefault();
+        modalRef.current?.focus();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      restoreFocusRef.current?.focus?.();
+    };
+  }, [open]);
+
   if (!open) return null;
-  return (
+  return createPortal((
     <div className="ui-overlay fade-in" onClick={onClose}>
-      <div className="ui-modal slide-up" style={{ maxWidth: width }} onClick={e => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="ui-modal slide-up"
+        style={{ maxWidth: width }}
+        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : "Dialog"}
+        tabIndex={-1}
+      >
         {title && (
-          <div className="flex items-center justify-between px-5 h-[52px] border-b border-[var(--border)]">
-            <h2 className="text-[15px] font-semibold text-[var(--text)]">{title}</h2>
-            <IconButton onClick={onClose}><X size={16} /></IconButton>
+          <div className="ui-modal-head">
+            <div className="ui-modal-title-wrap">
+              {kicker && <span className="ui-modal-kicker">{kicker}</span>}
+              <h2 className="ui-modal-title" id={titleId}>{title}</h2>
+            </div>
+            <IconButton className="ui-modal-close" onClick={onClose} title="Close dialog" aria-label="Close dialog">
+              <X size={16} />
+            </IconButton>
           </div>
         )}
-        <div className="p-5">{children}</div>
-        {footer && <div className="flex items-center justify-end gap-2 px-5 h-[58px] border-t border-[var(--border)]">{footer}</div>}
+        <div className="ui-modal-body">{children}</div>
+        {footer && <div className="ui-modal-footer">{footer}</div>}
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 /* ── Stat / KPI (21st.dev KpiCard pattern: label · value · trend delta · sparkline) ── */

@@ -1,7 +1,7 @@
 export default {
   title: "Ayarlar",
   sections: {
-    hermesAgent: "Hermes Agent",
+    hermesAgent: "Hermes Desktop Pro",
     appearance: "Görünüm",
     privacy: "Gizlilik",
     credentialPool: "Kimlik Bilgisi Havuzu",
@@ -90,9 +90,9 @@ export default {
   runDiagnosis: "Tanı Çalıştır",
   running: "Çalışıyor...",
   debugDump: "Hata Ayıklama Dökümü",
-  migrationDetected: "OpenClaw Kurulumu Bulundu",
+  migrationDetected: "Eski Kurulum Bulundu",
   migrationDesc:
-    "<code>{{path}}</code> adresinde OpenClaw bulundu. Yapılandırmanızı, API anahtarlarınızı, oturumlarınızı ve yeteneklerinizi Hermes'e taşıyabilirsiniz.",
+    "<code>{{path}}</code> adresinde uyumlu eski bir kurulum bulundu. Yapılandırmanızı, API anahtarlarınızı, oturumlarınızı ve yeteneklerinizi Hermes'e taşıyabilirsiniz.",
   migrationDismiss: "Tekrar gösterme",
   migrating: "Taşınıyor...",
   migrateToHermes: "Hermes'e Taşı",

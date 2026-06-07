@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   MessageSquare, Clock, User, Brain, Cpu, HardDrive,
-  Heart, Wrench, Calendar, Radio, Layout, Settings, Box, Package,
-  PanelLeftClose, PanelLeft, Plus,
+  Heart, Wrench, Calendar, Radio, Layout, Box, Package,
+  PanelLeftClose, PanelLeft, Plus, FileText, Bell, HelpCircle, SlidersHorizontal, Settings,
 } from "lucide-react";
 import ChatView from "./components/ChatView";
 import SessionsView from "./components/SessionsView";
@@ -24,34 +24,66 @@ import type { ChatTab, ProviderId, ProviderInfo } from "@shared/types";
 import { getAllProviders } from "@shared/providers";
 
 type NavScreen = "chat" | "sessions" | "profiles" | "providers" | "skills" | "models" | "memory" | "soul" | "tools" | "schedules" | "gateway" | "kanban" | "office" | "settings";
-type NavItem = { id: NavScreen; label: string; icon: typeof MessageSquare };
+type NavItem = { id: NavScreen; label: string; icon: typeof MessageSquare; shortcut?: string };
+type SidebarSession = {
+  id: string;
+  title: string;
+  startedAt: number;
+};
+type SidebarSessionSource = {
+  id: string;
+  title: string | null;
+  startedAt: number;
+};
 
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
-  { label: "Workspace", items: [
-    { id: "chat", label: "Chat", icon: MessageSquare },
-    { id: "sessions", label: "Sessions", icon: Clock },
-    { id: "profiles", label: "Profiles", icon: User },
+  { label: "Navigation", items: [
+    { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "⌘1" },
+    { id: "sessions", label: "Sessions", icon: Clock, shortcut: "⌘2" },
+    { id: "tools", label: "Tools", icon: Wrench, shortcut: "⌘3" },
   ] },
-  { label: "Intelligence", items: [
-    { id: "providers", label: "Providers", icon: Cpu },
-    { id: "models", label: "Models", icon: Box },
+  { label: "Agents", items: [
+    { id: "profiles", label: "Profiles", icon: User },
     { id: "skills", label: "Skills", icon: Package },
-    { id: "memory", label: "Memory", icon: HardDrive },
     { id: "soul", label: "Soul", icon: Heart },
   ] },
-  { label: "Automation", items: [
-    { id: "tools", label: "Tools", icon: Wrench },
-    { id: "schedules", label: "Schedules", icon: Calendar },
+  { label: "Knowledge", items: [
+    { id: "memory", label: "Memory", icon: HardDrive },
+    { id: "models", label: "Models", icon: Box },
+  ] },
+  { label: "Integrations", items: [
+    { id: "providers", label: "Providers", icon: Cpu },
     { id: "gateway", label: "Gateway", icon: Radio },
-    { id: "kanban", label: "Kanban", icon: Layout },
     { id: "office", label: "Office", icon: Brain },
   ] },
+  { label: "Operations", items: [
+    { id: "schedules", label: "Schedules", icon: Calendar },
+    { id: "kanban", label: "Kanban", icon: Layout },
+    { id: "settings", label: "Settings", icon: Settings },
+  ] },
 ];
-const SETTINGS_ITEM: NavItem = { id: "settings", label: "Settings", icon: Settings };
 
 let tabCounter = 1;
 function createTab(providerId: ProviderId = "opencode-zen"): ChatTab {
   return { id: `tab-${tabCounter++}`, name: `Chat ${tabCounter - 1}`, providerId, modelId: "" };
+}
+
+function sidebarSessionTitle(id: string, title: string | null): string {
+  const trimmed = (title || "").trim();
+  return trimmed || `Session ${id.slice(-6)}`;
+}
+
+function sidebarSessionMeta(startedAt: number): string {
+  if (!startedAt) return "";
+  const date = new Date(startedAt * 1000);
+  const today = new Date();
+  const yesterday = new Date(Date.now() - 86400000);
+  const key = date.toISOString().slice(0, 10);
+  if (key === today.toISOString().slice(0, 10)) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  if (key === yesterday.toISOString().slice(0, 10)) return "Yesterday";
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 export default function App() {
@@ -61,6 +93,8 @@ export default function App() {
   const [providers] = useState<ProviderInfo[]>(getAllProviders);
   const [collapsed, setCollapsed] = useState(false);
   const [connStatus, setConnStatus] = useState<{ ok: boolean; mode: string }>({ ok: false, mode: "local" });
+  const [recentSessions, setRecentSessions] = useState<SidebarSession[]>([]);
+  const navRefs = useRef<Record<NavScreen, HTMLButtonElement | null>>({} as Record<NavScreen, HTMLButtonElement | null>);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
@@ -80,6 +114,35 @@ export default function App() {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
+  useEffect(() => {
+    if (collapsed) return;
+    const node = navRefs.current[activeScreen];
+    const scroller = node?.closest(".ui-sidebar-nav");
+    if (!node || !scroller) return;
+    const itemRect = node.getBoundingClientRect();
+    const scrollRect = scroller.getBoundingClientRect();
+    if (itemRect.top < scrollRect.top || itemRect.bottom > scrollRect.bottom) {
+      node.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeScreen, collapsed]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.hermes.listSessions(5, 0)
+      .then((rows: SidebarSessionSource[]) => {
+        if (cancelled) return;
+        setRecentSessions((rows || []).map(row => ({
+          id: row.id,
+          title: sidebarSessionTitle(row.id, row.title),
+          startedAt: row.startedAt,
+        })));
+      })
+      .catch(() => {
+        if (!cancelled) setRecentSessions([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const connLabel = connStatus.mode.charAt(0).toUpperCase() + connStatus.mode.slice(1);
 
   const handleNewTab = useCallback(() => {
@@ -91,9 +154,13 @@ export default function App() {
 
   const handleCloseTab = useCallback((id: string) => {
     setTabs(prev => {
+      if (prev.length <= 1) return prev;
+      const closingIndex = prev.findIndex(t => t.id === id);
       const next = prev.filter(t => t.id !== id);
-      if (next.length === 0) { const fresh = createTab(); setActiveTabId(fresh.id); return [fresh]; }
-      if (activeTabId === id) setActiveTabId(next[next.length - 1].id);
+      if (activeTabId === id) {
+        const fallbackIndex = Math.max(0, Math.min(closingIndex, next.length - 1));
+        setActiveTabId(next[fallbackIndex].id);
+      }
       return next;
     });
   }, [activeTabId]);
@@ -142,64 +209,98 @@ export default function App() {
     const active = activeScreen === item.id;
     return (
       <button key={item.id} className={cx("ui-nav no-drag", collapsed && "justify-center px-0")} data-active={active}
+        ref={node => { navRefs.current[item.id] = node; }}
         onClick={() => setActiveScreen(item.id)} title={collapsed ? item.label : undefined}>
         <item.icon size={17} className="shrink-0" strokeWidth={active ? 2.2 : 1.9} />
         {!collapsed && <span className="truncate">{item.label}</span>}
+        {!collapsed && item.shortcut && <span className="ui-nav-shortcut">{item.shortcut}</span>}
       </button>
     );
   };
 
+  const renderCompactSectionDivider = (index: number) => (
+    collapsed && index > 0 ? <div className="mx-auto my-1 h-px w-5 bg-[var(--border)]" /> : null
+  );
+
   return (
     <div className="ui-shell flex overflow-hidden">
-      <aside className={cx("ui-sidebar flex flex-col shrink-0 transition-[width] duration-200", collapsed ? "w-[58px]" : "w-[232px]")}>
-        <div className="h-[38px] shrink-0 drag" />
-        <div className={cx("flex items-center h-12 drag", collapsed ? "justify-center px-0" : "gap-2.5 px-4")}>
+      <div className="ui-window-title drag">Hermes Desktop Pro</div>
+      <aside className={cx("ui-sidebar flex flex-col shrink-0 transition-[width] duration-200", collapsed ? "w-[68px]" : "w-[276px]")}>
+        <div className="h-[30px] shrink-0 drag" />
+        <div className={cx("ui-sidebar-brand drag", collapsed ? "justify-center px-0" : "gap-3 px-6")}>
           <BrandMark size={collapsed ? 22 : 25} />
-          {!collapsed && <HermesWordmark />}
+          {!collapsed && <HermesWordmark size={22} />}
           {!collapsed && <span className="ml-auto ui-tag ui-tag-gold no-drag">PRO</span>}
-        </div>
-        {!collapsed && <hr className="ui-divider-gold mx-4 mt-1 mb-0.5" />}
-
-        <div className={cx("no-drag", collapsed ? "px-2 pt-2 pb-1 flex justify-center" : "px-3 pt-2 pb-1")}>
-          {collapsed ? (
-            <button className="ui-iconbtn" title="New chat" onClick={handleNewTab}><Plus size={18} /></button>
-          ) : (
-            <button className="ui-btn ui-btn-primary ui-btn-sm w-full" onClick={handleNewTab}>
-              <Plus size={15} strokeWidth={2.4} /> New chat
+          {!collapsed && (
+            <button className="ui-sidebar-collapse no-drag" onClick={() => setCollapsed(true)} title="Collapse">
+              <PanelLeftClose size={17} />
             </button>
           )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-2.5 py-2 flex flex-col gap-2.5">
+        <div className={cx("no-drag ui-sidebar-new-wrap", collapsed ? "px-2 flex justify-center" : "px-6")}>
+          {collapsed ? (
+            <button className="ui-iconbtn" title="New chat" onClick={handleNewTab}><Plus size={18} /></button>
+          ) : (
+            <button className="ui-sidebar-new ui-btn ui-btn-secondary ui-btn-sm w-full" onClick={handleNewTab}>
+              <Plus size={17} strokeWidth={2.2} /> New chat <span className="ml-auto ui-nav-shortcut">⌘N</span>
+            </button>
+          )}
+        </div>
+
+        <nav className="ui-sidebar-nav flex-1 min-h-0 overflow-y-auto flex flex-col">
           {NAV_GROUPS.map((g, gi) => (
             <div key={g.label} className="flex flex-col gap-0.5">
-              {!collapsed
-                ? <div className="ui-navgroup-label">{g.label}</div>
-                : gi > 0 && <div className="mx-auto my-1 h-px w-5 bg-[var(--border)]" />}
+              {!collapsed ? <div className="ui-navgroup-label">{g.label}</div> : renderCompactSectionDivider(gi)}
               {g.items.map(renderNav)}
             </div>
           ))}
-        </nav>
 
-        <div className="px-2.5 py-2 border-t border-[var(--border)] flex flex-col gap-0.5">
           {!collapsed && (
-            <div className="flex items-center gap-2.5 px-2 py-1.5 mb-1 no-drag">
-              <BrandMark size={22} glow={false} />
-              <div className="min-w-0 flex-1">
-                <div className="text-[12.5px] font-medium text-[var(--text)] truncate leading-tight">Hermes Agent</div>
-                <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-3)] mt-0.5"><StatusDot color={connStatus.ok ? "var(--success)" : "var(--error)"} /> {connLabel} · {connStatus.ok ? "Connected" : "Disconnected"}</div>
-              </div>
+            <div className="ui-sidebar-recents flex flex-col gap-0.5">
+              <div className="ui-navgroup-label">Recent Sessions</div>
+              {recentSessions.map(session => (
+                <button
+                  key={session.id}
+                  className="ui-recent-session no-drag"
+                  onClick={() => {
+                    handleResumeSession(session.id, session.title);
+                  }}
+                >
+                  <FileText size={14} className="shrink-0" />
+                  <span className="truncate">{session.title}</span>
+                  <span className="ml-auto shrink-0 text-[11px] text-[var(--text-3)]">{sidebarSessionMeta(session.startedAt)}</span>
+                </button>
+              ))}
+              <button className="ui-recent-session no-drag" onClick={() => setActiveScreen("sessions")}>
+                <span className="truncate">View all sessions</span>
+              </button>
             </div>
           )}
-          {renderNav(SETTINGS_ITEM)}
-          <button className={cx("ui-nav no-drag", collapsed && "justify-center px-0")} onClick={() => setCollapsed(c => !c)} title={collapsed ? "Expand" : "Collapse"}>
-            {collapsed ? <PanelLeft size={17} className="shrink-0" /> : <PanelLeftClose size={17} className="shrink-0" />}
-            {!collapsed && <span className="truncate">Collapse</span>}
-          </button>
+        </nav>
+
+        <div className="ui-sidebar-footer">
+          {!collapsed && (
+            <button className="ui-connection-card no-drag" onClick={() => setActiveScreen("gateway")}>
+              <span className="ui-connection-orb"><StatusDot color={connStatus.ok ? "var(--success)" : "var(--warning)"} pulse={connStatus.ok} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-semibold text-[var(--text)] truncate leading-tight">{connStatus.ok ? "Connected" : "Disconnected"}</div>
+                <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">{connStatus.ok ? "All systems operational" : `${connLabel} unavailable`}</div>
+              </div>
+              <StatusDot color={connStatus.ok ? "var(--success)" : "var(--error)"} />
+            </button>
+          )}
+          <div className="ui-sidebar-footer-actions no-drag">
+            <button onClick={() => setActiveScreen("settings")} title="Settings"><SlidersHorizontal size={17} /></button>
+            <button onClick={() => setActiveScreen("schedules")} title="Activity"><Bell size={17} /></button>
+            <button onClick={() => setActiveScreen("tools")} title="Help"><HelpCircle size={17} /></button>
+            <button className="ui-footer-identity" onClick={() => setActiveScreen("chat")} title="Hermes">H</button>
+            {collapsed && <button onClick={() => setCollapsed(false)} title="Expand"><PanelLeft size={17} /></button>}
+          </div>
         </div>
       </aside>
 
-      <main className="ui-main flex-1 min-w-0 overflow-hidden">
+      <main className="ui-main flex-1 min-w-0 overflow-hidden" data-screen={activeScreen}>
         <div key={activeScreen} className="pane-swap">{renderScreen()}</div>
       </main>
     </div>

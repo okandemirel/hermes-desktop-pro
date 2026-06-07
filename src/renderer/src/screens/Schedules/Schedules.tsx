@@ -8,6 +8,12 @@ import {
   Pause,
   Bell,
   Timer,
+  Activity,
+  Send,
+  Inbox,
+  AlertTriangle,
+  RefreshCw,
+  X,
 } from "lucide-react";
 import type { CronJob } from "@shared/types";
 import {
@@ -24,7 +30,8 @@ import {
   Segment,
   SegmentItem,
   Modal,
-  EmptyState,
+  SearchInput,
+  Badge,
 } from "../../ui";
 
 interface ScheduleJob {
@@ -119,6 +126,10 @@ export default function SchedulesView() {
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [formError, setFormError] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "paused">("all");
 
   // Form state
   const [formName, setFormName] = useState("");
@@ -171,6 +182,7 @@ export default function SchedulesView() {
     const schedule = buildCron();
     if (!formName.trim() || !formPrompt.trim() || !schedule) return;
     setBusy(true);
+    setFormError("");
     try {
       const result = await window.hermes.createCronJob(
         schedule,
@@ -179,7 +191,7 @@ export default function SchedulesView() {
         formTarget,
       );
       if (!result.success) {
-        setError(result.error || "Failed to create schedule.");
+        setFormError(result.error || "Failed to create schedule.");
         return;
       }
       setShowForm(false);
@@ -192,12 +204,14 @@ export default function SchedulesView() {
 
   const openCreate = () => {
     setError("");
+    setFormError("");
     resetForm();
     setShowForm(true);
   };
 
   const closeForm = () => {
     setShowForm(false);
+    setFormError("");
     resetForm();
   };
 
@@ -234,10 +248,11 @@ export default function SchedulesView() {
 
   const deleteJob = async (id: string) => {
     setBusy(true);
+    setDeleteError("");
     try {
       const result = await window.hermes.removeCronJob(id);
       if (!result.success) {
-        setError(result.error || "Failed to delete schedule.");
+        setDeleteError(result.error || "Failed to delete schedule.");
         return;
       }
       setDeleteConfirmId(null);
@@ -251,194 +266,389 @@ export default function SchedulesView() {
     () => jobs.filter((j) => j.status === "active").length,
     [jobs],
   );
-  const canSubmit = !!formName.trim() && !!formPrompt.trim() && !busy;
+  const pausedCount = jobs.length - activeCount;
+  const deliveryCount = useMemo(
+    () => new Set(jobs.map((j) => j.deliveryTarget)).size,
+    [jobs],
+  );
+  const schedulePreview = buildCron();
+  const schedulePreviewLabel = schedulePreview ? humanizeCron(schedulePreview) : "Not configured";
+  const canSubmit = !!formName.trim() && !!formPrompt.trim() && !!schedulePreview && !busy;
+  const deleteTarget = useMemo(
+    () => jobs.find((job) => job.id === deleteConfirmId) ?? null,
+    [deleteConfirmId, jobs],
+  );
 
-  // Signature hero: the soonest next-to-run active job (first active in order),
-  // promoted to a struck-gold focal moment. The rest fall into the calm list.
-  const heroJob = jobs.find((j) => j.status === "active") ?? null;
-  const restJobs = jobs.filter((j) => j.id !== heroJob?.id);
+  const filteredJobs = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return jobs.filter((job) => {
+      const matchesStatus = statusFilter === "all" || job.status === statusFilter;
+      const matchesSearch =
+        !q ||
+        job.name.toLowerCase().includes(q) ||
+        job.prompt.toLowerCase().includes(q) ||
+        job.deliveryTarget.toLowerCase().includes(q) ||
+        job.schedule.toLowerCase().includes(q);
+      return matchesStatus && matchesSearch;
+    });
+  }, [jobs, search, statusFilter]);
+
+  // Signature hero: the first filtered active job, promoted to the operational focal card.
+  const heroJob = filteredJobs.find((j) => j.status === "active") ?? null;
+  const hasFilter = !!search.trim() || statusFilter !== "all";
 
   return (
     <Screen
+      className="ui-schedules-console"
       icon={<Clock size={19} />}
       kicker={jobs.length > 0 ? `Automation · ${activeCount} running` : "Automation"}
       title="Schedules"
       sub="Automate agent tasks with cron jobs — they run on the Hermes engine and deliver where you choose."
       actions={
-        <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openCreate}>
-          Add Schedule
-        </Button>
+        <>
+          <Button
+            variant="secondary"
+            size="sm"
+            leftIcon={<RefreshCw size={14} />}
+            onClick={() => { void load(); }}
+            disabled={loading || busy}
+          >
+            Refresh
+          </Button>
+          <Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={openCreate}>
+            Add Schedule
+          </Button>
+        </>
       }
     >
-      {/* Gold filament — the Hallmark section rhythm */}
-      {jobs.length > 0 && <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />}
-
-      {error && (
-        <div className="mb-5 text-[12.5px] text-[var(--danger)] mint-in mint-in-1">
-          {error}
-        </div>
-      )}
-
-      {/* Jobs list — one struck hero + a calm list */}
-      {loading ? (
-        <div className="text-[13px] text-[var(--text-3)] py-8">Loading schedules…</div>
-      ) : jobs.length === 0 ? (
-        <EmptyState
-          icon={<Clock size={24} />}
-          title="No schedules yet"
-          sub="Create your first cron job to automate agent tasks."
-          action={
-            <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openCreate}>
-              Create Schedule
-            </Button>
-          }
-        />
-      ) : (
-        <>
-          {/* ── Signature: the soonest active job, struck as the focal hero ── */}
-          {heroJob && (
-            <Card pad className="mb-7 mint-in mint-in-1">
-              <div className="flex items-start gap-5">
-                <span className="ui-stamp shrink-0 w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
-                  <Timer size={24} />
-                </span>
-
-                <div className="min-w-0 flex-1">
-                  <div className="ui-eyebrow">Next to run</div>
-                  <h2
-                    className="serif text-[var(--text)] leading-none truncate"
-                    style={{ fontSize: "clamp(22px, 2.4vw, 29px)", letterSpacing: "-0.012em" }}
+      <div className="ui-schedules-shell">
+        <Card pad className="ui-schedules-hero mint-in mint-in-1">
+          <div className="ui-schedules-hero-mark">
+            <Timer size={26} />
+          </div>
+          <div className="ui-schedules-hero-copy">
+            <div className="ui-schedules-hero-kicker">
+              <div className="ui-eyebrow">Automation Control</div>
+              <Badge variant={heroJob ? "success" : jobs.length > 0 ? "warning" : "neutral"}>
+                {heroJob ? "Live queue" : jobs.length > 0 ? "Paused only" : "Not configured"}
+              </Badge>
+            </div>
+            <h2 title={heroJob?.name}>
+              {heroJob ? heroJob.name : "No active schedule selected"}
+            </h2>
+            <p>
+              {heroJob
+                ? heroJob.prompt
+                : jobs.length > 0
+                  ? "Paused automations are preserved. Filter or resume a job to bring it back into the live queue."
+                  : "Create a schedule to let Hermes run recurring work without opening a chat thread."}
+            </p>
+            {heroJob ? (
+              <div className="ui-schedules-hero-meta">
+                <span><Clock size={13} /> {heroJob.scheduleHuman}</span>
+                <span><Send size={13} /> {heroJob.deliveryTarget}</span>
+                <span><Bell size={13} /> Next {heroJob.nextRun}</span>
+                <code>{heroJob.schedule}</code>
+              </div>
+            ) : (
+              <div className="ui-schedules-hero-meta">
+                <span><Clock size={13} /> Waiting for first cadence</span>
+                <span><Send size={13} /> No delivery target yet</span>
+              </div>
+            )}
+            <div className="ui-schedules-hero-actions">
+              {heroJob ? (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<Play size={14} />}
+                    onClick={() => triggerJob(heroJob)}
+                    disabled={busy}
                   >
-                    {heroJob.name}
-                  </h2>
-
-                  <p className="text-[13.5px] leading-relaxed text-[var(--text-2)] mt-3 line-clamp-2 max-w-[58ch]">
-                    {heroJob.prompt}
-                  </p>
-
-                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 mt-4 text-[12.5px]">
-                    <span className="text-[var(--text-3)]">
-                      Runs{" "}
-                      <span className="serif text-[var(--accent-text)] text-[15px] align-baseline">
-                        {heroJob.nextRun}
-                      </span>
-                    </span>
-                    <code className="font-mono text-[var(--text-3)]">{heroJob.schedule}</code>
-                    <span className="text-[var(--text-3)]">
-                      <Bell size={12} className="inline mr-1 -mt-0.5" />
-                      {heroJob.deliveryTarget}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <IconButton onClick={() => triggerJob(heroJob)} title="Run now">
-                    <Play size={15} />
-                  </IconButton>
-                  <IconButton onClick={() => toggleStatus(heroJob)} title="Pause">
-                    <Pause size={15} />
-                  </IconButton>
-                  <IconButton danger onClick={() => setDeleteConfirmId(heroJob.id)} title="Delete">
+                    Run now
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<Pause size={14} />}
+                    onClick={() => toggleStatus(heroJob)}
+                    disabled={busy}
+                  >
+                    Pause
+                  </Button>
+                  <IconButton
+                    danger
+                    disabled={busy}
+                    onClick={() => setDeleteConfirmId(heroJob.id)}
+                    title="Delete schedule"
+                    aria-label="Delete schedule"
+                  >
                     <Trash2 size={15} />
                   </IconButton>
-                </div>
-              </div>
-            </Card>
-          )}
+                </>
+              ) : (
+                <Button variant="secondary" size="sm" leftIcon={<Plus size={14} />} onClick={openCreate}>
+                  Create schedule
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="ui-schedules-metrics">
+            <div>
+              <span>Active</span>
+              <strong>{activeCount}</strong>
+            </div>
+            <div>
+              <span>Paused</span>
+              <strong>{pausedCount}</strong>
+            </div>
+            <div>
+              <span>Targets</span>
+              <strong>{deliveryCount}</strong>
+            </div>
+          </div>
+        </Card>
 
-          {/* ── The calm list — quieter, near-monochrome rows ── */}
-          {restJobs.length > 0 && (
-            <>
-              {heroJob && <SectionLabel className="mb-3 mint-in mint-in-2">Other schedules</SectionLabel>}
-              <div className="flex flex-col gap-2 stagger">
-                {restJobs.map((job) => {
-                  const isActive = job.status === "active";
-                  return (
-                    <Card
-                      key={job.id}
-                      pad
-                      interactive
-                      className="group flex items-center gap-3.5"
-                    >
+        {error && jobs.length > 0 && (
+          <div className="ui-schedules-alert mint-in mint-in-1" role="alert">
+            <AlertTriangle size={16} />
+            <div>
+              <strong>Schedule update failed</strong>
+              <span>{error}</span>
+            </div>
+            <IconButton onClick={() => setError("")} title="Dismiss error" aria-label="Dismiss error">
+              <X size={14} />
+            </IconButton>
+          </div>
+        )}
+
+        <div className="ui-schedules-toolbar mint-in mint-in-2">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search schedules, prompts, cron, targets..."
+            className="ui-schedules-search"
+          />
+          <Segment className="ui-schedules-segment">
+            <SegmentItem active={statusFilter === "all"} onClick={() => setStatusFilter("all")}>
+              All <span className="ui-schedules-filter-count">{jobs.length}</span>
+            </SegmentItem>
+            <SegmentItem active={statusFilter === "active"} onClick={() => setStatusFilter("active")}>
+              Active <span className="ui-schedules-filter-count">{activeCount}</span>
+            </SegmentItem>
+            <SegmentItem active={statusFilter === "paused"} onClick={() => setStatusFilter("paused")}>
+              Paused <span className="ui-schedules-filter-count">{pausedCount}</span>
+            </SegmentItem>
+          </Segment>
+        </div>
+
+        {loading ? (
+          <div className="ui-schedules-loading mint-in mint-in-3" role="status" aria-live="polite">
+            <div className="ui-schedules-loading-head">
+              <Activity size={17} />
+              <div>
+                <span className="ui-section-label">Schedule Registry</span>
+                <strong>Loading automations</strong>
+              </div>
+            </div>
+            <i />
+            <i />
+            <i />
+            <span className="sr-only">Loading schedules</span>
+          </div>
+        ) : error && jobs.length === 0 ? (
+          <Card pad className="ui-schedules-empty ui-schedules-empty-error mint-in mint-in-3">
+            <div className="ui-schedules-empty-icon">
+              <AlertTriangle size={24} />
+            </div>
+            <div>
+              <div className="ui-eyebrow">Schedule Registry</div>
+              <h3>Schedules unavailable</h3>
+              <p>{error}</p>
+              <div className="ui-schedules-empty-actions">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<RefreshCw size={14} />}
+                  onClick={() => { void load(); }}
+                >
+                  Retry
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ) : jobs.length === 0 ? (
+          <Card pad className="ui-schedules-empty mint-in mint-in-3">
+            <div className="ui-schedules-empty-icon">
+              <Clock size={24} />
+            </div>
+            <div>
+              <div className="ui-eyebrow">Schedule Registry</div>
+              <h3>No schedules yet</h3>
+              <p>Create a cadence once, then Hermes can run it without keeping a chat thread open.</p>
+              <div className="ui-schedules-empty-actions">
+                <Button variant="primary" size="sm" leftIcon={<Plus size={14} />} onClick={openCreate}>
+                  Create schedule
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ) : filteredJobs.length === 0 ? (
+          <Card pad className="ui-schedules-empty ui-schedules-empty-filtered mint-in mint-in-3">
+            <div className="ui-schedules-empty-icon">
+              <Inbox size={24} />
+            </div>
+            <div>
+              <div className="ui-eyebrow">Filtered View</div>
+              <h3>No matching schedules</h3>
+              <p>Adjust the query or clear filters to return to the full schedule registry.</p>
+              {hasFilter && (
+                <div className="ui-schedules-empty-actions">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setSearch("");
+                      setStatusFilter("all");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Card>
+        ) : (
+          <div className="ui-schedules-list mint-in mint-in-3">
+            <div className="ui-schedules-table">
+              <div className="ui-schedules-table-head">
+                <SectionLabel>{hasFilter ? "Filtered Registry" : "Schedule Registry"}</SectionLabel>
+                <Badge variant="neutral">{filteredJobs.length}</Badge>
+              </div>
+              {filteredJobs.map((job) => {
+                const isActive = job.status === "active";
+                return (
+                  <Card
+                    key={job.id}
+                    pad
+                    interactive
+                    className="ui-schedules-row"
+                    data-state={job.status}
+                  >
+                    <div className="ui-schedules-row-state">
                       <StatusDot
                         color={isActive ? "var(--success)" : "var(--text-3)"}
                         pulse={isActive}
                       />
+                      <span>{isActive ? "Live" : "Paused"}</span>
+                    </div>
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-2.5 min-w-0">
-                          <h3 className="text-[13.5px] font-medium text-[var(--text)] truncate">
-                            {job.name}
-                          </h3>
-                          <code className="font-mono text-[11.5px] text-[var(--text-3)] shrink-0">
-                            {job.schedule}
-                          </code>
-                          {!isActive && (
-                            <span className="text-[11px] text-[var(--text-3)] uppercase tracking-wide shrink-0">
-                              Paused
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-x-4 gap-y-0.5 mt-1 text-[12px] text-[var(--text-3)] min-w-0">
-                          <span className="truncate">
-                            Next <span className="text-[var(--text-2)]">{job.nextRun}</span>
-                          </span>
-                          <span className="shrink-0">{job.deliveryTarget}</span>
-                          <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                            Last <span className="text-[var(--text-2)]">{job.lastRun}</span>
-                          </span>
-                        </div>
+                    <div className="ui-schedules-row-copy">
+                      <div className="ui-schedules-row-titleline">
+                        <h3 title={job.name}>{job.name}</h3>
+                        <span title={job.scheduleHuman}>
+                          <Clock size={12} />
+                          {job.scheduleHuman}
+                        </span>
+                        <code title={job.schedule}>{job.schedule}</code>
                       </div>
+                      <p title={job.prompt}>{job.prompt}</p>
+                    </div>
 
-                      <div className="flex items-center gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
-                        <IconButton onClick={() => triggerJob(job)} title="Run now">
-                          <Play size={15} />
-                        </IconButton>
-                        <IconButton onClick={() => toggleStatus(job)} title={isActive ? "Pause" : "Resume"}>
-                          {isActive ? <Pause size={15} /> : <Play size={15} />}
-                        </IconButton>
-                        <IconButton danger onClick={() => setDeleteConfirmId(job.id)} title="Delete">
-                          <Trash2 size={15} />
-                        </IconButton>
+                    <div className="ui-schedules-row-meta">
+                      <div>
+                        <span>Next</span>
+                        <strong>{job.nextRun}</strong>
                       </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </>
-      )}
+                      <div>
+                        <span>Last</span>
+                        <strong>{job.lastRun}</strong>
+                      </div>
+                      <div>
+                        <span>Target</span>
+                        <strong>{job.deliveryTarget}</strong>
+                      </div>
+                    </div>
+
+                    <div className="ui-schedules-row-actions">
+                      <IconButton disabled={busy} onClick={() => triggerJob(job)} title="Run now">
+                        <Play size={15} />
+                      </IconButton>
+                      <IconButton disabled={busy} onClick={() => toggleStatus(job)} title={isActive ? "Pause" : "Resume"}>
+                        {isActive ? <Pause size={15} /> : <Play size={15} />}
+                      </IconButton>
+                      <IconButton danger disabled={busy} onClick={() => setDeleteConfirmId(job.id)} title="Delete">
+                        <Trash2 size={15} />
+                      </IconButton>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* New schedule modal */}
       <Modal
         open={showForm}
         onClose={closeForm}
         title="New Schedule"
-        width={520}
+        kicker="Automation Setup"
+        width={600}
         footer={
           <>
             <Button variant="secondary" onClick={closeForm}>
               Cancel
             </Button>
             <Button variant="primary" onClick={handleAdd} disabled={!canSubmit}>
-              Add Schedule
+              {busy ? "Creating..." : "Add Schedule"}
             </Button>
           </>
         }
       >
-        <div className="flex flex-col gap-4">
-          <Field label="Schedule Name">
-            <Input
-              type="text"
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder="e.g. Morning Briefing"
-            />
-          </Field>
+        <div className="ui-modal-form ui-schedules-modal-form">
+          {formError && (
+            <div className="ui-modal-alert" role="alert">
+              {formError}
+            </div>
+          )}
+
+          <div className="ui-schedules-modal-preview">
+            <span className="ui-schedules-modal-preview-icon">
+              <Clock size={18} />
+            </span>
+            <div>
+              <span>Cadence Preview</span>
+              <strong>{schedulePreviewLabel}</strong>
+              <code>{schedulePreview || "—"}</code>
+            </div>
+          </div>
+
+          <div className="ui-schedules-modal-grid">
+            <Field label="Schedule Name" hint="Use a short operational label for the registry.">
+              <Input
+                type="text"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="e.g. Morning Briefing"
+              />
+            </Field>
+
+            <Field label="Delivery Target" hint="Where Hermes sends the scheduled result.">
+              <Select value={formTarget} onChange={(e) => setFormTarget(e.target.value)}>
+                {DELIVERY_TARGETS.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
 
           <Field label="Schedule Type">
-            <Segment className="w-full">
+            <Segment className="ui-schedules-modal-segment">
               <SegmentItem active={formScheduleType === "every"} onClick={() => setFormScheduleType("every")}>
                 <Timer size={14} /> Recurring
               </SegmentItem>
@@ -449,25 +659,27 @@ export default function SchedulesView() {
           </Field>
 
           {formScheduleType === "every" && (
-            <div className="flex items-center gap-2.5">
-              <span className="text-[13px] text-[var(--text-3)]">Every</span>
-              <Input
-                type="number"
-                value={formEveryValue}
-                onChange={(e) => setFormEveryValue(Math.max(1, parseInt(e.target.value) || 1))}
-                min={1}
-                className="text-center !w-24"
-              />
-              <Select
-                value={formEveryUnit}
-                onChange={(e) => setFormEveryUnit(e.target.value as "min" | "hour" | "day")}
-                className="!w-auto"
-              >
-                <option value="min">Minutes</option>
-                <option value="hour">Hours</option>
-                <option value="day">Days</option>
-              </Select>
-            </div>
+            <Field label="Cadence" hint="Hermes converts this to a standard 5-field cron expression.">
+              <div className="ui-schedules-cadence-row">
+                <span>Every</span>
+                <Input
+                  type="number"
+                  value={formEveryValue}
+                  onChange={(e) => setFormEveryValue(Math.max(1, parseInt(e.target.value) || 1))}
+                  min={1}
+                  className="ui-schedules-cadence-number"
+                />
+                <Select
+                  value={formEveryUnit}
+                  onChange={(e) => setFormEveryUnit(e.target.value as "min" | "hour" | "day")}
+                  className="ui-schedules-cadence-unit"
+                >
+                  <option value="min">Minutes</option>
+                  <option value="hour">Hours</option>
+                  <option value="day">Days</option>
+                </Select>
+              </div>
+            </Field>
           )}
 
           {formScheduleType === "custom" && (
@@ -477,7 +689,7 @@ export default function SchedulesView() {
                 value={formCustomCron}
                 onChange={(e) => setFormCustomCron(e.target.value)}
                 placeholder="e.g. 0 8 * * *"
-                className="font-mono"
+                className="ui-schedules-cron-input"
               />
             </Field>
           )}
@@ -490,28 +702,28 @@ export default function SchedulesView() {
               rows={4}
             />
           </Field>
-
-          <Field label="Delivery Target">
-            <Select value={formTarget} onChange={(e) => setFormTarget(e.target.value)}>
-              {DELIVERY_TARGETS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </Select>
-          </Field>
         </div>
       </Modal>
 
       {/* Delete confirmation modal */}
       <Modal
         open={deleteConfirmId !== null}
-        onClose={() => setDeleteConfirmId(null)}
+        onClose={() => {
+          setDeleteConfirmId(null);
+          setDeleteError("");
+        }}
         title="Delete schedule?"
+        kicker="Schedule Removal"
         width={420}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeleteConfirmId(null)}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setDeleteConfirmId(null);
+                setDeleteError("");
+              }}
+            >
               Cancel
             </Button>
             <Button
@@ -525,9 +737,27 @@ export default function SchedulesView() {
           </>
         }
       >
-        <p className="text-[13px] text-[var(--text-2)]">
-          This will permanently remove the schedule. This action cannot be undone.
-        </p>
+        <div className="ui-confirm-panel ui-confirm-danger">
+          <span className="ui-confirm-icon"><Trash2 size={18} /></span>
+          <div className="ui-confirm-copy">
+            <strong>{deleteTarget ? deleteTarget.name : "Delete schedule?"}</strong>
+            <p>
+              This will permanently remove the schedule
+              {deleteTarget ? ` (${deleteTarget.schedule})` : ""}. This action cannot be undone.
+            </p>
+            {deleteTarget && (
+              <div className="ui-schedules-delete-meta">
+                <span>Next <strong>{deleteTarget.nextRun}</strong></span>
+                <span>Target <strong>{deleteTarget.deliveryTarget}</strong></span>
+              </div>
+            )}
+          </div>
+        </div>
+        {deleteError && (
+          <div className="ui-modal-alert" role="alert">
+            {deleteError}
+          </div>
+        )}
       </Modal>
     </Screen>
   );

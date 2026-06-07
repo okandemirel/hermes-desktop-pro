@@ -1,7 +1,7 @@
 {
   "name": "hermes-desktop-pro",
   "version": "2.0.0",
-  "description": "Premium desktop app for Hermes Agent — all features, OpenCode, multi-provider, visual innovation",
+  "description": "Premium desktop app for Hermes Desktop Pro — all features, OpenCode, multi-provider, visual innovation",
   "main": "./out/main/index.js",
   "author": "Hermes Desktop Pro",
   "license": "MIT",
@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/jest-dom": "^6.9.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",

@@ -1,18 +1,18 @@
 export default {
   title: "Biuro",
-  checkingStatus: "Sprawdzanie statusu Claw3D...",
-  setupTitle: "Skonfiguruj Claw3D",
-  installTitle: "Konfigurowanie Claw3D",
+  checkingStatus: "Sprawdzanie statusu runtime Office...",
+  setupTitle: "Skonfiguruj runtime Office",
+  installTitle: "Konfigurowanie runtime Office",
   processLogs: "Logi procesu",
   noLogs: "Brak logów. Uruchom usługi, aby zobaczyć wyjście.",
-  loadingClaw3d: "Ładowanie Claw3D...",
-  installClaw3d: "Zainstaluj Claw3D",
+  loadingClaw3d: "Ładowanie przestrzeni Office...",
+  installClaw3d: "Zainstaluj runtime Office",
   setupFailed: "Konfiguracja nie powiodła się",
-  startFailed: "Nie udało się uruchomić Claw3D",
+  startFailed: "Nie udało się uruchomić runtime Office",
   portInUse:
     "Port {{port}} jest zajęty. Zmień go w ustawieniach, aby uruchomić.",
   websocketUrl: "URL WebSocket",
-  viewOnGithub: "Zobacz na GitHubie",
+  viewOnGithub: "Diagnostics",
   waitingToStart: "Oczekiwanie na start...",
   starting: "Uruchamianie...",
   openInBrowser: "Otwórz w przeglądarce",
@@ -20,11 +20,11 @@ export default {
   portInUseWarning:
     "Port {{port}} jest zajęty. Zmień port w ustawieniach albo zatrzymaj inne procesy.",
   close: "Zamknij",
-  cannotLoadClaw3d: "Nie można wczytać Claw3D",
-  startingClaw3dService: "Uruchamianie usługi Claw3D...",
-  clickToStart: 'Kliknij "Uruchom", aby uruchomić Claw3D',
+  cannotLoadClaw3d: "Nie można wczytać przestrzeni Office",
+  startingClaw3dService: "Uruchamianie runtime Office...",
+  clickToStart: 'Kliknij "Uruchom", aby uruchomić Office',
   setupDesc1:
-    "Claw3D to środowisko wizualizacji 3D dla agentów Hermes. Pozwala obserwować pracę agentów w interaktywnej przestrzeni biurowej.",
+    "Office to osadzona przestrzeń robocza 3D dla agentów Hermes. Pozwala obserwować pracę agentów w interaktywnej przestrzeni biurowej.",
   setupDesc2:
-    "Kliknij poniżej, aby automatycznie pobrać i skonfigurować Claw3D. Repozytorium zostanie sklonowane, a zależności zainstalowane.",
+    "Kliknij poniżej, aby automatycznie pobrać i skonfigurować runtime Office. Wymagane lokalne zależności zostaną zainstalowane.",
 } as const;

@@ -1,7 +1,7 @@
 export default {
   title: "設定",
   sections: {
-    hermesAgent: "Hermes Agent",
+    hermesAgent: "Hermes Desktop Pro",
     appearance: "外観",
     privacy: "プライバシー",
     credentialPool: "認証情報プール",
@@ -86,9 +86,9 @@ export default {
   runDiagnosis: "診断を実行",
   running: "実行中...",
   debugDump: "デバッグダンプ",
-  migrationDetected: "OpenClaw インストールを検出",
+  migrationDetected: "旧インストールを検出",
   migrationDesc:
-    "<code>{{path}}</code> に OpenClaw が見つかりました。設定・API キー・セッション・スキルを Hermes に移行できます。",
+    "<code>{{path}}</code> に互換性のある旧インストールが見つかりました。設定・API キー・セッション・スキルを Hermes に移行できます。",
   migrationDismiss: "再表示しない",
   migrating: "移行中...",
   migrateToHermes: "Hermes に移行",

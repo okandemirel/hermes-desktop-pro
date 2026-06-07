@@ -3,7 +3,7 @@ export default {
   startingInstall: "Kurulum başlatılıyor",
   installationComplete: "Kurulum Tamamlandı",
   installationFailed: "Kurulum Başarısız",
-  installingHermes: "Hermes Agent Kuruluyor",
+  installingHermes: "Hermes Desktop Pro Kuruluyor",
   installationFailedHint:
     "Kurulum başarısız oldu. Lütfen tekrar deneyin veya terminal üzerinden kurun.",
   retryInstallation: "Kurulumu Tekrar Dene",

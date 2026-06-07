@@ -1,7 +1,7 @@
 export default {
   title: "設定",
   sections: {
-    hermesAgent: "Hermes Agent",
+    hermesAgent: "Hermes Desktop Pro",
     appearance: "外觀",
     privacy: "隱私",
     credentialPool: "憑證池",
@@ -76,9 +76,9 @@ export default {
   runDiagnosis: "執行診斷",
   running: "執行中...",
   debugDump: "偵錯傾印",
-  migrationDetected: "偵測到 OpenClaw 安裝",
+  migrationDetected: "偵測到舊版安裝",
   migrationDesc:
-    "在 <code>{{path}}</code> 發現 OpenClaw。你可以將設定、API Key、工作階段和技能遷移到 Hermes。",
+    "在 <code>{{path}}</code> 發現相容的舊版安裝。你可以將設定、API Key、工作階段和技能遷移到 Hermes。",
   migrationDismiss: "不再顯示",
   migrating: "遷移中...",
   migrateToHermes: "遷移到 Hermes",

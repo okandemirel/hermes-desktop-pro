@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
-import { BookOpen, Pencil, RotateCcw, Check, X } from "lucide-react";
-import { Screen, Button, Modal, cx } from "../../ui";
+import {
+  BookOpen, Pencil, RotateCcw, Check, X, Brain, ShieldCheck,
+  MessageSquare, Sparkles, FileText, Target,
+} from "lucide-react";
+import {
+  Screen, Button, Modal, cx, Card, Badge, StatusDot, SectionLabel, IconChip,
+} from "../../ui";
 
 const DEFAULT_SOUL = `# Hermes Agent — SOUL.md
 
@@ -24,12 +29,17 @@ You are **Hermes Agent**, a helpful, knowledgeable AI assistant. You communicate
 - Refuse harmful or unethical requests
 `;
 
+function stripMarkdownComments(md: string): string {
+  return md.replace(/<!--[\s\S]*?-->/g, "").trim();
+}
+
 /* Parse the SOUL markdown into title + well-spaced ## sections for a calm reading column. */
 function parseSoul(md: string) {
   const lines = md.split("\n");
   let title = "";
   const sections: { heading: string; body: string[] }[] = [];
   let current: { heading: string; body: string[] } | null = null;
+  const loose: string[] = [];
 
   for (const line of lines) {
     if (line.startsWith("# ")) {
@@ -39,7 +49,12 @@ function parseSoul(md: string) {
       sections.push(current);
     } else if (current) {
       current.body.push(line);
+    } else if (line.trim()) {
+      loose.push(line);
     }
+  }
+  if (sections.length === 0 && loose.length > 0) {
+    sections.push({ heading: "Persona", body: loose });
   }
   return { title, sections };
 }
@@ -47,8 +62,14 @@ function parseSoul(md: string) {
 /* Render the lightweight inline markdown we use (**bold**) + bullet/paragraph blocks
    as a calm, well-spaced reading document. */
 function renderBody(body: string[]) {
-  const text = body.join("\n").trim();
-  if (!text) return null;
+  const text = stripMarkdownComments(body.join("\n"));
+  if (!text) {
+    return (
+      <p className="ui-soul-muted">
+        No written guidance yet. Use Edit to define tone, boundaries, and operating principles.
+      </p>
+    );
+  }
   const blocks = text.split(/\n{2,}/);
 
   return (
@@ -121,7 +142,12 @@ export default function SoulEditor() {
   }, []);
 
   const { title, sections } = parseSoul(content);
-  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+  const visibleContent = stripMarkdownComments(content);
+  const wordCount = visibleContent ? visibleContent.split(/\s+/).length : 0;
+  const bulletCount = visibleContent.split("\n").filter((line) => line.trim().startsWith("- ")).length;
+  const characterCount = visibleContent.length;
+  const hasBoundaries = /boundar|privacy|harm|refuse|uncertain|fabricate/i.test(visibleContent);
+  const primaryPrinciples = sections.slice(0, 4);
 
   const startEdit = () => {
     setDraft(content);
@@ -180,61 +206,147 @@ export default function SoulEditor() {
         )
       }
     >
-      {/* Comfortable reading / editing column */}
-      <div className="mx-auto" style={{ maxWidth: 720 }}>
-        {/* Quiet meta strip — source · length · last edited */}
-        <div className="flex items-center gap-2.5 text-[11.5px] text-[var(--text-3)] mb-7">
-          <code className="ui-kbd font-mono">SOUL.md</code>
-          <span className="text-[var(--border-2)]">·</span>
-          <span>
-            <span className="font-mono text-[var(--text-2)]">{wordCount.toLocaleString()}</span> words
-          </span>
-          <span className="text-[var(--border-2)]">·</span>
-          <span>Loaded fresh for every conversation</span>
-        </div>
-
-        {isEditing ? (
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            className="ui-textarea w-full min-h-[520px] !rounded-[14px] font-mono !text-[13.5px] !leading-[1.7] p-5 ui-card-active"
-            placeholder="Write your agent's personality here…"
-            spellCheck={false}
-            autoFocus
-          />
-        ) : (
-          <article className="fade-in">
-            {title && (
-              <h1 className="serif !text-[27px] !font-normal !mt-0 !mb-9 text-[var(--text)] leading-tight">
-                {title}
-              </h1>
-            )}
-            <div className="flex flex-col gap-9">
-              {sections.map((sec, i) => (
-                <section key={i}>
-                  <h2 className="ui-section-label !text-[var(--accent-text)] !text-[11.5px] !mb-3.5 !mt-0">
-                    {sec.heading}
-                  </h2>
-                  <div className="text-[14px] text-[var(--text-2)]">{renderBody(sec.body)}</div>
-                </section>
-              ))}
+      <div className="ui-soul-shell">
+        <Card className="ui-soul-hero">
+          <div className="ui-soul-mark">
+            <Brain size={30} />
+            <span />
+          </div>
+          <div className="ui-soul-hero-copy">
+            <div className="ui-eyebrow">Operational Persona</div>
+            <h2>{title || "Hermes Agent Persona"}</h2>
+            <p>
+              The active behavior contract loaded into every conversation. Keep it concise,
+              opinionated, and explicit enough for repeatable agent decisions.
+            </p>
+          </div>
+          <div className="ui-soul-hero-metrics">
+            <div>
+              <span>Words</span>
+              <strong>{wordCount.toLocaleString()}</strong>
             </div>
-          </article>
-        )}
+            <div>
+              <span>Sections</span>
+              <strong>{sections.length}</strong>
+            </div>
+            <div>
+              <span>Guards</span>
+              <strong>{hasBoundaries ? "On" : "Review"}</strong>
+            </div>
+          </div>
+        </Card>
 
-        {/* Reset — quiet, only while editing */}
-        {isEditing && (
-          <button
-            onClick={() => setShowResetConfirm(true)}
-            className={cx(
-              "flex items-center gap-1.5 mt-4 text-[12px] text-[var(--text-3)]",
-              "hover:text-[var(--text-2)] transition-colors no-drag"
+        <div className="ui-soul-layout">
+          <aside className="ui-soul-rail">
+            <Card pad className="ui-soul-status-card">
+              <div className="ui-soul-status-head">
+                <IconChip><FileText size={17} /></IconChip>
+                <div>
+                  <SectionLabel>Source</SectionLabel>
+                  <strong>SOUL.md</strong>
+                </div>
+                <Badge variant="success" className="ml-auto">
+                  <StatusDot color="var(--success)" pulse />
+                  Live
+                </Badge>
+              </div>
+              <div className="ui-soul-facts">
+                <div><span>Characters</span><strong>{characterCount.toLocaleString()}</strong></div>
+                <div><span>Bullets</span><strong>{bulletCount}</strong></div>
+              </div>
+              <p>Loaded fresh for every conversation and editable without changing provider or model setup.</p>
+            </Card>
+
+            <Card pad className="ui-soul-principles">
+              <SectionLabel>Principle Map</SectionLabel>
+              <div className="ui-soul-principle-list">
+                {primaryPrinciples.map((sec, index) => (
+                  <div key={sec.heading}>
+                    <span>{index + 1}</span>
+                    <strong>{sec.heading}</strong>
+                  </div>
+                ))}
+                {primaryPrinciples.length === 0 && (
+                  <div>
+                    <span>1</span>
+                    <strong>Add sections to define behavior</strong>
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            <Card pad className="ui-soul-guard-card">
+              <div className="ui-soul-guard-row">
+                <ShieldCheck size={17} />
+                <span>Privacy and uncertainty boundaries</span>
+                <StatusDot color={hasBoundaries ? "var(--success)" : "var(--warning)"} pulse={hasBoundaries} />
+              </div>
+              <div className="ui-soul-guard-row">
+                <MessageSquare size={17} />
+                <span>Conversation tone contract</span>
+                <StatusDot color="var(--accent)" />
+              </div>
+              <div className="ui-soul-guard-row">
+                <Target size={17} />
+                <span>Task execution posture</span>
+                <StatusDot color="var(--accent)" />
+              </div>
+            </Card>
+          </aside>
+
+          <main className="ui-soul-document">
+            {isEditing ? (
+              <div className="ui-soul-editor-card">
+                <div className="ui-soul-editor-head">
+                  <SectionLabel>Edit Contract</SectionLabel>
+                  <Badge variant="accent">
+                    <Sparkles size={13} />
+                    Draft mode
+                  </Badge>
+                </div>
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  className="ui-soul-textarea"
+                  placeholder="Write your agent's personality here..."
+                  spellCheck={false}
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <article className="ui-soul-paper fade-in">
+                <div className="ui-soul-paper-head">
+                  <div>
+                    <code className="ui-kbd font-mono">SOUL.md</code>
+                    <span>Loaded fresh for every conversation</span>
+                  </div>
+                  <Badge variant={hasBoundaries ? "success" : "warning"}>
+                    {hasBoundaries ? "Guarded" : "Needs guardrails"}
+                  </Badge>
+                </div>
+                {title && <h1>{title}</h1>}
+                <div className="ui-soul-section-stack">
+                  {sections.map((sec, i) => (
+                    <section key={i} className="ui-soul-section">
+                      <h2>{sec.heading}</h2>
+                      <div>{renderBody(sec.body)}</div>
+                    </section>
+                  ))}
+                </div>
+              </article>
             )}
-          >
-            <RotateCcw size={13} />
-            Reset to default personality
-          </button>
-        )}
+
+            {isEditing && (
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                className={cx("ui-soul-reset no-drag")}
+              >
+                <RotateCcw size={13} />
+                Reset to default personality
+              </button>
+            )}
+          </main>
+        </div>
       </div>
 
       {/* Reset confirmation */}
@@ -253,10 +365,15 @@ export default function SoulEditor() {
           </>
         }
       >
-        <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
-          This immediately resets SOUL.md to the default and overwrites your saved persona. This
-          cannot be undone.
-        </p>
+        <div className="ui-confirm-panel ui-confirm-danger">
+          <span className="ui-confirm-icon"><RotateCcw size={18} /></span>
+          <div className="ui-confirm-copy">
+            <strong>Reset persona?</strong>
+            <p>
+              This immediately resets SOUL.md to the default and overwrites your saved persona. This cannot be undone.
+            </p>
+          </div>
+        </div>
       </Modal>
     </Screen>
   );

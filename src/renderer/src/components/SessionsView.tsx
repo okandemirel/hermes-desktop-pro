@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { MessageSquare, Clock, ArrowRight, Trash2, Plus } from "lucide-react";
+import { MessageSquare, Clock, ArrowRight, Trash2, Plus, Search, History, Database } from "lucide-react";
 import { Screen, SearchInput, SectionLabel, Card, Badge, Button, IconButton, EmptyState } from "../ui";
 
 // Structural shapes returned by the preload bridge. The list path mirrors
@@ -102,7 +102,7 @@ function Snippet({ text }: { text: string }) {
   if (!text) return null;
   const parts = text.split(/(<<[^>]*>>)/g).filter(Boolean);
   return (
-    <p className="text-[13px] text-[var(--text-2)] line-clamp-1 mb-2.5">
+      <p className="ui-sessions-snippet">
       {parts.map((p, i) =>
         p.startsWith("<<") && p.endsWith(">>") ? (
           <mark key={i} className="bg-[var(--accent-weak)] text-[var(--accent-text)] rounded px-0.5">
@@ -196,41 +196,80 @@ export default function SessionsView({ onResumeSession, onNewSession }: Sessions
 
   return (
     <Screen
+      className="ui-sessions-console"
       kicker="Conversation History"
       icon={<MessageSquare size={19} />}
       title="Sessions"
       sub="Browse and search your conversation history — full-text search across every message."
       actions={
-        <div className="flex items-center gap-2">
+        <div className="ui-sessions-actions">
           <Badge variant="neutral">{list.length} session{list.length !== 1 ? "s" : ""}</Badge>
           <Badge variant="neutral">{totalMessages.toLocaleString()} messages</Badge>
           <Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={() => onNewSession?.()}>New session</Button>
         </div>
       }
     >
-      <div className="mb-7">
-        <SearchInput value={search} onChange={setSearch} placeholder="Search sessions with FTS5…" />
-      </div>
+      <div className="ui-sessions-shell">
+        <Card pad className="ui-sessions-hero mint-in mint-in-1">
+          <div className="ui-sessions-hero-mark">
+            <History size={26} />
+          </div>
+          <div className="ui-sessions-hero-copy">
+            <div className="ui-eyebrow">History Index</div>
+            <h2>{sessions.length} stored conversation{sessions.length !== 1 ? "s" : ""}</h2>
+            <p>Search runs against the local session index and keeps matched snippets intact.</p>
+          </div>
+          <div className="ui-sessions-metrics">
+            <div>
+              <span>Sessions</span>
+              <strong>{sessions.length}</strong>
+            </div>
+            <div>
+              <span>Messages</span>
+              <strong>{totalMessages.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>Results</span>
+              <strong>{list.length}</strong>
+            </div>
+          </div>
+        </Card>
+
+        <div className="ui-sessions-toolbar mint-in mint-in-2">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search sessions with FTS5..."
+            className="ui-sessions-search"
+          />
+          <Badge variant={searching ? "accent" : "neutral"}>
+            <Search size={12} />
+            {searching ? "Search mode" : "Grouped"}
+          </Badge>
+        </div>
 
       {hero && (
-        <div className="mb-8 mint-in mint-in-1">
+        <div className="ui-sessions-feature mint-in mint-in-3">
           <Card
             interactive
             pad
             onClick={() => onResumeSession?.(hero.id, hero.title)}
-            className="group relative overflow-hidden flex items-start gap-5 border-l-2 border-l-[var(--accent)] pl-5"
+            className="ui-sessions-feature-card"
           >
-            <div className="flex-1 min-w-0">
+            <div className="ui-sessions-feature-icon">
+              <MessageSquare size={21} />
+            </div>
+            <div className="ui-sessions-feature-copy">
               <div className="ui-eyebrow">Continue where you left off</div>
-              <h2 className="serif text-[22px] leading-tight text-[var(--text)] truncate mb-2">{hero.title}</h2>
-              <div className="flex items-center gap-4 text-[11.5px] text-[var(--text-3)] mt-2">
+              <h2>{hero.title}</h2>
+              <div className="ui-sessions-meta">
                 <Badge variant="neutral">{hero.source}</Badge>
                 {hero.model && <Badge variant="accent" className="font-mono">{hero.model}</Badge>}
                 <span className="flex items-center gap-1.5"><MessageSquare size={12} /> {hero.messageCount} messages</span>
                 <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {dateLabel(hero.startedAt)}</span>
               </div>
             </div>
-            <div className="flex items-center gap-1.5 shrink-0 self-center">
+            <div className="ui-sessions-card-actions">
               <Button variant="primary" size="sm" leftIcon={<ArrowRight size={15} />} onClick={e => { e.stopPropagation(); onResumeSession?.(hero.id, hero.title); }}>Resume</Button>
               <IconButton danger title="Delete session" disabled={deleting === hero.id} onClick={e => { e.stopPropagation(); void handleDelete(hero.id); }}><Trash2 size={15} /></IconButton>
             </div>
@@ -238,39 +277,43 @@ export default function SessionsView({ onResumeSession, onNewSession }: Sessions
         </div>
       )}
 
-      {Object.entries(grouped).map(([label, items]) => (
-        <div key={label} className="mb-7">
-          <div className="flex items-center gap-2 mb-1.5">
-            <SectionLabel>{label}</SectionLabel>
-            <Badge variant="neutral">{items.length}</Badge>
-          </div>
-          <hr className="ui-divider-gold mb-3" />
-          <div className="flex flex-col gap-2.5 stagger">
-            {items.map(s => (
-              <Card key={s.id} interactive pad onClick={() => onResumeSession?.(s.id, s.title)} className="group flex items-start gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{s.title}</h3>
-                    <Badge variant="neutral">{s.source}</Badge>
-                    {s.model && <Badge variant="neutral" className="font-mono">{s.model}</Badge>}
-                  </div>
+        <div className="ui-sessions-list">
+          {Object.entries(grouped).map(([label, items]) => (
+            <section key={label} className="ui-sessions-section">
+              <div className="ui-sessions-section-head">
+                <SectionLabel>{label}</SectionLabel>
+                <Badge variant="neutral">{items.length}</Badge>
+              </div>
+              <div className="ui-sessions-rows stagger">
+                {items.map(s => (
+                  <Card key={s.id} interactive pad onClick={() => onResumeSession?.(s.id, s.title)} className="ui-sessions-row">
+                    <div className="ui-sessions-row-icon">
+                      <Database size={16} />
+                    </div>
+                    <div className="ui-sessions-row-copy">
+                      <div className="ui-sessions-row-title">
+                        <h3>{s.title}</h3>
+                        <Badge variant="neutral">{s.source}</Badge>
+                        {s.model && <Badge variant="neutral" className="font-mono">{s.model}</Badge>}
+                      </div>
                   {searching && s.snippet ? (
                     <Snippet text={s.snippet} />
                   ) : null}
-                  <div className="flex items-center gap-4 text-[11.5px] text-[var(--text-3)]">
-                    <span className="flex items-center gap-1.5"><MessageSquare size={12} /> {s.messageCount} messages</span>
-                    <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {dateLabel(s.startedAt)}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  <IconButton title="Open session" onClick={e => { e.stopPropagation(); onResumeSession?.(s.id, s.title); }}><ArrowRight size={15} /></IconButton>
-                  <IconButton danger title="Delete session" disabled={deleting === s.id} onClick={e => { e.stopPropagation(); void handleDelete(s.id); }}><Trash2 size={15} /></IconButton>
-                </div>
-              </Card>
-            ))}
-          </div>
+                      <div className="ui-sessions-meta">
+                        <span className="flex items-center gap-1.5"><MessageSquare size={12} /> {s.messageCount} messages</span>
+                        <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {dateLabel(s.startedAt)}</span>
+                      </div>
+                    </div>
+                    <div className="ui-sessions-card-actions">
+                      <IconButton title="Open session" onClick={e => { e.stopPropagation(); onResumeSession?.(s.id, s.title); }}><ArrowRight size={15} /></IconButton>
+                      <IconButton danger title="Delete session" disabled={deleting === s.id} onClick={e => { e.stopPropagation(); void handleDelete(s.id); }}><Trash2 size={15} /></IconButton>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
-      ))}
 
       {error && list.length === 0 && (
         <EmptyState
@@ -287,6 +330,7 @@ export default function SessionsView({ onResumeSession, onNewSession }: Sessions
           sub={searching ? "Try a different search term." : "Your conversations will appear here once you start chatting."}
         />
       )}
+      </div>
     </Screen>
   );
 }

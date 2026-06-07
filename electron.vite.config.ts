@@ -18,7 +18,10 @@ export default defineConfig({
     build: {
       outDir: "out/preload",
       rollupOptions: {
-        input: { index: resolve(__dirname, "src/preload/index.ts") },
+        input: {
+          index: resolve(__dirname, "src/preload/index.ts"),
+          "office-webview": resolve(__dirname, "src/preload/office-webview.ts"),
+        },
       },
     },
   },

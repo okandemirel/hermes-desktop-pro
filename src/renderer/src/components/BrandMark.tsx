@@ -86,7 +86,7 @@ export function HermesWordmark({ size = 19, className = "" }: { size?: number; c
     <span
       className={`gold-text-sheen ${className}`}
       style={{
-        fontFamily: "var(--serif)",
+        fontFamily: "var(--brand-serif)",
         fontSize: size,
         fontWeight: 400,
         lineHeight: 1,

@@ -325,16 +325,16 @@ export async function commentTask(
   return { success: res.success, error: res.error };
 }
 
-// Read-only virtual board: Claw3D's headquarters task board, stored at
+// Read-only virtual board: Office runtime headquarters task board, stored at
 // ~/.openclaw/claw3d/task-manager/tasks.json on the remote. Only available in
-// SSH tunnel mode — there is no equivalent local store for the Claw3D HQ list.
+// SSH tunnel mode — there is no equivalent local store for the Office HQ list.
 export async function listClaw3dHqTasks(): Promise<KanbanResult<KanbanTask[]>> {
   const conn = getConnectionConfig();
   if (conn.mode !== "ssh" || !conn.ssh) {
     return {
       success: false,
       error:
-        "Claw3D HQ board is only available in SSH tunnel mode. Switch the connection mode in Settings to view it.",
+        "Office HQ board is only available in SSH tunnel mode. Switch the connection mode in Settings to view it.",
     };
   }
   const res = await sshListClaw3dHqTasks(conn.ssh);

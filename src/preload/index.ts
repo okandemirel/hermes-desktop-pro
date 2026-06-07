@@ -368,7 +368,36 @@ const api = {
     return () => ipcRenderer.removeListener("stream-usage", handler);
   },
 
-  // Claw3D (local mode only)
+  // Install wizard (first-run, local mode)
+  checkHermesInstalled: (): Promise<{
+    installed: boolean;
+    configured: boolean;
+    activeProfile: string;
+  }> => ipcRenderer.invoke("check-hermes-installed"),
+
+  getHermesVersion: (): Promise<string | null> =>
+    ipcRenderer.invoke("get-hermes-version"),
+
+  installHermes: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("install-hermes"),
+
+  onInstallProgress: (
+    callback: (progress: {
+      step: number;
+      totalSteps: number;
+      title: string;
+      detail: string;
+      log: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (_: any, progress: any) => callback(progress);
+    ipcRenderer.on("install-progress", handler);
+    return () => ipcRenderer.removeListener("install-progress", handler);
+  },
+
+  runDoctor: (): Promise<string> => ipcRenderer.invoke("run-doctor"),
+
+  // Office workspace engine (local mode only)
   claw3dStatus: (): Promise<{
     installed: boolean;
     running: boolean;
@@ -410,6 +439,64 @@ const api = {
     ipcRenderer.invoke("claw3d-start-all", profile),
   claw3dStopAll: (): Promise<boolean> => ipcRenderer.invoke("claw3d-stop-all"),
   claw3dGetLogs: (): Promise<string> => ipcRenderer.invoke("claw3d-get-logs"),
+
+  // Hermes-facing aliases. The IPC channel names stay stable, but renderer code
+  // should not expose upstream runtime names.
+  officeStatus: (): Promise<{
+    installed: boolean;
+    running: boolean;
+    port: number;
+    portInUse: boolean;
+    wsUrl: string;
+    remoteUrl: string | null;
+    error?: string;
+  }> => ipcRenderer.invoke("claw3d-status"),
+
+  officeSetup: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("claw3d-setup"),
+
+  onOfficeSetupProgress: (
+    callback: (progress: {
+      step: number;
+      totalSteps: number;
+      title: string;
+      detail: string;
+      log: string;
+    }) => void,
+  ): (() => void) => {
+    const handler = (_: any, progress: any) => callback(progress);
+    ipcRenderer.on("claw3d-setup-progress", handler);
+    return () => ipcRenderer.removeListener("claw3d-setup-progress", handler);
+  },
+
+  officeGetPort: (): Promise<number> => ipcRenderer.invoke("claw3d-get-port"),
+  officeSetPort: (port: number): Promise<boolean> =>
+    ipcRenderer.invoke("claw3d-set-port", port),
+  officeGetWsUrl: (): Promise<string> =>
+    ipcRenderer.invoke("claw3d-get-ws-url"),
+  officeSetWsUrl: (url: string): Promise<boolean> =>
+    ipcRenderer.invoke("claw3d-set-ws-url", url),
+
+  officeStart: (
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("claw3d-start-all", profile),
+  officeStop: (): Promise<boolean> => ipcRenderer.invoke("claw3d-stop-all"),
+  officeGetLogs: (): Promise<string> => ipcRenderer.invoke("claw3d-get-logs"),
+
+  officeViewShow: (
+    url: string,
+    bounds: { x: number; y: number; width: number; height: number },
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("office-view-show", url, bounds),
+  officeViewSetBounds: (
+    bounds: { x: number; y: number; width: number; height: number },
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("office-view-set-bounds", bounds),
+  officeViewHide: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("office-view-hide"),
+  officeViewReload: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("office-view-reload"),
 
   // External links
   openExternal: (url: string): Promise<void> =>

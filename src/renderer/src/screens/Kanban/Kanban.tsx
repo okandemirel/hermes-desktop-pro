@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import {
   Layout, Plus, MoreHorizontal, MessageSquare, Check, Ban, Trash2,
   UserPlus, RotateCcw,
@@ -30,6 +31,7 @@ function columnForStatus(status: string): ColumnId {
 // Priority is a number on the backend (0 normal … 10 urgent). Bucket it for the
 // card strip + footer dot so colour and weight always agree.
 type PriorityBucket = "urgent" | "high" | "medium" | "low";
+type KanbanMenu = { taskId: string; left: number; top: number };
 
 function priorityBucket(p: number): PriorityBucket {
   if (p >= 10) return "urgent";
@@ -53,6 +55,36 @@ const PRIORITY_STRIP: Record<PriorityBucket, { height: number; opacity: number }
   low: { height: 2, opacity: 0.45 },
 };
 
+function KanbanLoadingBoard(): React.JSX.Element {
+  return (
+    <div className="ui-kanban-loading">
+      <div className="ui-kanban-loading-head">
+        <div>
+          <SectionLabel>Board Sync</SectionLabel>
+          <strong>Loading task lanes</strong>
+        </div>
+        <Badge variant="accent">
+          <StatusDot color="var(--accent)" pulse />
+          Fetching
+        </Badge>
+      </div>
+      <div className="ui-kanban-loading-board">
+        {COLUMNS.map((column) => (
+          <div key={column.id} className="ui-kanban-loading-column">
+            <div className="ui-kanban-loading-title">
+              <StatusDot color={column.color} />
+              <span>{column.label}</span>
+            </div>
+            <i />
+            <i />
+            <i />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function KanbanView() {
   const [tasks, setTasks] = useState<KanbanTask[]>([]);
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
@@ -61,7 +93,7 @@ export default function KanbanView() {
   const [unsupported, setUnsupported] = useState(false);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("");
-  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [menu, setMenu] = useState<KanbanMenu | null>(null);
 
   // New-task form
   const [showForm, setShowForm] = useState(false);
@@ -82,11 +114,13 @@ export default function KanbanView() {
       }
       const list = res.data ?? [];
       setTasks(list);
+      setCommentCounts({});
       setUnsupported(false);
       setError("");
-      // Comment counts come from per-task detail — best-effort, never blocks the board.
+      // Comment counts come from per-task detail; fetch them in the background
+      // so the board does not stay stuck in a loading skeleton.
       const counts: Record<string, number> = {};
-      await Promise.all(
+      void Promise.all(
         list.map(async (task: KanbanTask) => {
           try {
             const detail = await window.hermes.kanbanGetTask(task.id);
@@ -97,8 +131,7 @@ export default function KanbanView() {
             /* leave count unset */
           }
         }),
-      );
-      setCommentCounts(counts);
+      ).then(() => setCommentCounts(counts));
     } catch (err) {
       setTasks([]);
       setUnsupported(false);
@@ -112,6 +145,33 @@ export default function KanbanView() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!menu) return;
+    const closeMenu = () => setMenu(null);
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest(".ui-kanban-card-menu, .ui-kanban-card-menu-trigger")) return;
+      closeMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menu]);
+
+  useEffect(() => {
+    setMenu(null);
+  }, [filter, loading]);
+
   const q = filter.toLowerCase().trim();
   const filteredTasks = useMemo(() => {
     if (!q) return tasks;
@@ -123,6 +183,19 @@ export default function KanbanView() {
     );
   }, [tasks, q]);
 
+  const boardStats = useMemo(() => {
+    const active = tasks.filter((task) => columnForStatus(task.status) === "in_progress").length;
+    const review = tasks.filter((task) => columnForStatus(task.status) === "review").length;
+    const blocked = tasks.filter((task) => (task.status || "").toLowerCase() === "blocked").length;
+    const urgent = tasks.filter((task) => priorityBucket(task.priority) === "urgent").length;
+    return { total: tasks.length, active, review, blocked, urgent };
+  }, [tasks]);
+
+  const menuTask = useMemo(
+    () => (menu ? tasks.find((task) => task.id === menu.taskId) ?? null : null),
+    [menu, tasks],
+  );
+
   const resetForm = () => {
     setFormTitle("");
     setFormBody("");
@@ -132,8 +205,24 @@ export default function KanbanView() {
 
   const openCreate = () => {
     setError("");
+    setMenu(null);
     resetForm();
     setShowForm(true);
+  };
+
+  const toggleCardMenu = (task: KanbanTask, event: MouseEvent<HTMLButtonElement>) => {
+    if (menu?.taskId === task.id) {
+      setMenu(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 190;
+    const menuHeight = 150;
+    setMenu({
+      taskId: task.id,
+      left: Math.min(Math.max(12, rect.right - menuWidth), window.innerWidth - menuWidth - 12),
+      top: Math.min(rect.bottom + 8, window.innerHeight - menuHeight - 12),
+    });
   };
 
   const handleCreate = async () => {
@@ -164,7 +253,7 @@ export default function KanbanView() {
     failMsg: string,
   ) => {
     setBusy(true);
-    setMenuFor(null);
+    setMenu(null);
     try {
       const res = await op();
       if (!res.success) {
@@ -190,26 +279,24 @@ export default function KanbanView() {
 
   return (
     <Screen
+      className="ui-kanban-screen"
       icon={<Layout size={19} />}
       kicker="Task Board"
       title="Kanban Board"
       sub="Durable multi-agent board — tasks the agent can pick up and finish on its own."
       actions={
-        <>
-          <SearchInput value={filter} onChange={setFilter} placeholder="Filter cards…" className="w-[220px]" />
+        <div className="ui-kanban-actions">
+          <SearchInput value={filter} onChange={setFilter} placeholder="Filter cards…" className="ui-kanban-search" />
           <Button variant="primary" leftIcon={<Plus size={15} />} onClick={openCreate}>New Task</Button>
-        </>
+        </div>
       }
     >
-      {/* gold-filament divider — separates the editorial header from the board (cohesion with Settings/Chat) */}
-      <div className="ui-divider-gold mb-4" />
-
       {error && (
-        <div className="mb-4 text-[12.5px] text-[var(--danger)]">{error}</div>
+        <div className="ui-kanban-error">{error}</div>
       )}
 
       {loading ? (
-        <div className="text-[13px] text-[var(--text-3)] py-8">Loading board…</div>
+        <KanbanLoadingBoard />
       ) : unsupported ? (
         <EmptyState
           icon={<Layout size={22} />}
@@ -235,19 +322,39 @@ export default function KanbanView() {
           action={<Button variant="secondary" onClick={() => setFilter("")}>Clear filter</Button>}
         />
       ) : (
-        <div className="overflow-x-auto pb-2 -mx-1 px-1">
-          <div className="flex gap-4 items-start min-w-[1140px]">
+        <>
+          <div className="ui-kanban-command-strip">
+            <Card className="ui-kanban-stat-card">
+              <span>Cards</span>
+              <strong>{boardStats.total}</strong>
+            </Card>
+            <Card className="ui-kanban-stat-card">
+              <span>Active</span>
+              <strong>{boardStats.active}</strong>
+            </Card>
+            <Card className="ui-kanban-stat-card">
+              <span>Review</span>
+              <strong>{boardStats.review}</strong>
+            </Card>
+            <Card className="ui-kanban-stat-card" active={boardStats.blocked > 0 || boardStats.urgent > 0}>
+              <span>Risk</span>
+              <strong>{boardStats.blocked + boardStats.urgent}</strong>
+            </Card>
+          </div>
+
+          <div className="ui-kanban-scroll">
+            <div className="ui-kanban-board">
             {COLUMNS.map(col => {
               const colTasks = filteredTasks.filter(t => columnForStatus(t.status) === col.id);
               const isActive = col.id === "in_progress";
               return (
                 <div
                   key={col.id}
-                  className="flex-1 min-w-[272px] flex flex-col rounded-[14px] bg-[var(--surface-3)] border border-[var(--border)]"
-                  style={{ boxShadow: "var(--edge)" }}
+                  className="ui-kanban-column"
+                  aria-label={`${col.label} lane`}
                 >
                   {/* Column header — title · count · add. The active "In Progress" column carries the gold thread. */}
-                  <div className="relative flex items-center gap-2 px-3.5 h-[46px] shrink-0">
+                  <div className="ui-kanban-column-head">
                     <StatusDot color={col.color} pulse={isActive} />
                     <SectionLabel>{col.label}</SectionLabel>
                     <Badge variant={isActive ? "accent" : "neutral"} className="tabular-nums">
@@ -260,73 +367,53 @@ export default function KanbanView() {
                   </div>
 
                   {/* Vertical stack of simple cards */}
-                  <div className="flex flex-col gap-2.5 px-2.5 pb-2.5 stagger">
+                  <div className="ui-kanban-card-stack stagger">
                     {colTasks.map(task => {
                       const bucket = priorityBucket(task.priority);
-                      const isBlocked = (task.status || "").toLowerCase() === "blocked";
                       const comments = commentCounts[task.id] ?? 0;
                       const assigneeInitial = (task.assignee || "?").charAt(0).toUpperCase();
                       return (
-                      <Card key={task.id} pad interactive className="group relative flex flex-col gap-2 overflow-hidden !p-3">
-                        {/* top strip encodes priority — colour from PRIORITY_COLOR, weight from PRIORITY_STRIP, so it always agrees with the footer dot */}
+                      <Card
+                        key={task.id}
+                        pad
+                        interactive
+                        className="ui-kanban-task-card group"
+                      >
+                        {/* Priority rail stays quiet while matching the footer dot. */}
                         <span
-                          className="absolute left-0 right-0 top-0"
+                          className="absolute left-0 top-0 bottom-0"
                           style={{
-                            height: PRIORITY_STRIP[bucket].height,
+                            width: PRIORITY_STRIP[bucket].height,
                             opacity: PRIORITY_STRIP[bucket].opacity,
                             background: PRIORITY_COLOR[bucket],
                           }}
                         />
 
                         {/* status row + card menu */}
-                        <div className="flex items-center gap-1.5 pt-0.5">
-                          <span className="text-[11px] uppercase tracking-wide text-[var(--text-3)]">{task.status}</span>
-                          <div className="relative ml-auto">
+                        <div className="ui-kanban-card-status">
+                          <span className="ui-kanban-card-status-label" title={task.status}>{task.status}</span>
+                          <div className="ml-auto">
                             <IconButton
-                              className="opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="ui-kanban-card-menu-trigger"
                               title="Card options"
-                              onClick={() => setMenuFor(menuFor === task.id ? null : task.id)}
+                              aria-expanded={menu?.taskId === task.id}
+                              onClick={(event) => toggleCardMenu(task, event)}
                             >
                               <MoreHorizontal size={15} />
                             </IconButton>
-                            {menuFor === task.id && (
-                              <div
-                                className="absolute right-0 top-[26px] z-10 min-w-[170px] rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] py-1 text-[12.5px]"
-                                style={{ boxShadow: "var(--shadow-pop, var(--edge))" }}
-                              >
-                                <button className="ui-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--text-2)] hover:bg-[var(--surface-3)] disabled:opacity-40" disabled={busy} onClick={() => assignToMe(task)}>
-                                  <UserPlus size={13} /> Assign to me
-                                </button>
-                                <button className="ui-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--text-2)] hover:bg-[var(--surface-3)] disabled:opacity-40" disabled={busy} onClick={() => completeTask(task)}>
-                                  <Check size={13} /> Mark complete
-                                </button>
-                                {isBlocked ? (
-                                  <button className="ui-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--text-2)] hover:bg-[var(--surface-3)] disabled:opacity-40" disabled={busy} onClick={() => unblockTask(task)}>
-                                    <RotateCcw size={13} /> Unblock
-                                  </button>
-                                ) : (
-                                  <button className="ui-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--text-2)] hover:bg-[var(--surface-3)] disabled:opacity-40" disabled={busy} onClick={() => blockTask(task)}>
-                                    <Ban size={13} /> Block
-                                  </button>
-                                )}
-                                <button className="ui-menu-item flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--danger)] hover:bg-[var(--surface-3)] disabled:opacity-40" disabled={busy} onClick={() => archiveTask(task)}>
-                                  <Trash2 size={13} /> Archive
-                                </button>
-                              </div>
-                            )}
                           </div>
                         </div>
 
                         {/* title */}
-                        <h4 className="text-[13.5px] font-medium text-[var(--text)] leading-snug">{task.title}</h4>
+                        <h4 className="ui-kanban-card-title" title={task.title}>{task.title}</h4>
 
                         {/* body preview — kept short so cards stay compact */}
                         {task.body && (
-                          <p className="text-[12px] text-[var(--text-3)] leading-snug line-clamp-2">{task.body}</p>
+                          <p className="ui-kanban-card-body">{task.body}</p>
                         )}
 
                         {/* compact footer — priority dot · assignee · comments */}
-                        <div className="flex items-center gap-2.5 text-[11.5px] text-[var(--text-3)]">
+                        <div className="ui-kanban-card-footer">
                           <StatusDot color={PRIORITY_COLOR[bucket]} />
                           <IconChip className="w-[20px] h-[20px] rounded-[6px] text-[10.5px] font-semibold">
                             {assigneeInitial}
@@ -335,7 +422,7 @@ export default function KanbanView() {
                             {task.assignee || "Unassigned"}
                           </span>
                           {comments > 0 && (
-                            <span className="ml-auto flex items-center gap-1 tabular-nums">
+                            <span className="ui-kanban-card-comments ml-auto flex items-center gap-1 tabular-nums">
                               <MessageSquare size={12} /> {comments}
                             </span>
                           )}
@@ -344,16 +431,52 @@ export default function KanbanView() {
                       );
                     })}
 
+                    {colTasks.length === 0 && (
+                      <div className="ui-kanban-empty-lane">
+                        <span>No cards</span>
+                        <small>Ready for the next task</small>
+                      </div>
+                    )}
+
                     {/* "Add a card" affordance — tinted down so empty columns recede rather than compete */}
-                    <Button variant="ghost" size="sm" leftIcon={<Plus size={14} />} onClick={openCreate} className="w-full justify-start text-[var(--text-3)] opacity-50 hover:opacity-100 transition-opacity">
+                    <Button variant="ghost" size="sm" leftIcon={<Plus size={14} />} onClick={openCreate} className="ui-kanban-add-card w-full justify-start text-[var(--text-3)] opacity-50 hover:opacity-100 transition-opacity">
                       Add a card
                     </Button>
                   </div>
                 </div>
               );
             })}
+            </div>
           </div>
-        </div>
+
+          {menu && menuTask && createPortal((
+            <div
+              className="ui-kanban-card-menu"
+              role="menu"
+              aria-label="Card actions"
+              style={{ left: menu.left, top: menu.top }}
+            >
+              <button type="button" role="menuitem" className="ui-kanban-menu-item ui-menu-item" disabled={busy} onClick={() => assignToMe(menuTask)}>
+                <UserPlus size={13} /> Assign to me
+              </button>
+              <button type="button" role="menuitem" className="ui-kanban-menu-item ui-menu-item" disabled={busy} onClick={() => completeTask(menuTask)}>
+                <Check size={13} /> Mark complete
+              </button>
+              {(menuTask.status || "").toLowerCase() === "blocked" ? (
+                <button type="button" role="menuitem" className="ui-kanban-menu-item ui-menu-item" disabled={busy} onClick={() => unblockTask(menuTask)}>
+                  <RotateCcw size={13} /> Unblock
+                </button>
+              ) : (
+                <button type="button" role="menuitem" className="ui-kanban-menu-item ui-menu-item" disabled={busy} onClick={() => blockTask(menuTask)}>
+                  <Ban size={13} /> Block
+                </button>
+              )}
+              <button type="button" role="menuitem" className="ui-kanban-menu-item ui-kanban-menu-item-danger ui-menu-item" disabled={busy} onClick={() => archiveTask(menuTask)}>
+                <Trash2 size={13} /> Archive
+              </button>
+            </div>
+          ), document.body)}
+        </>
       )}
 
       {/* New task modal */}
@@ -361,6 +484,7 @@ export default function KanbanView() {
         open={showForm}
         onClose={() => setShowForm(false)}
         title="New Task"
+        kicker="Board Intake"
         width={520}
         footer={
           <>
@@ -371,7 +495,7 @@ export default function KanbanView() {
           </>
         }
       >
-        <div className="flex flex-col gap-4">
+        <div className="ui-modal-form ui-kanban-modal-form">
           <Field label="Title">
             <Input
               type="text"

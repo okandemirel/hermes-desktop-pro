@@ -1,7 +1,7 @@
 export default {
   title: "Pengaturan",
   sections: {
-    hermesAgent: "Hermes Agent",
+    hermesAgent: "Hermes Desktop Pro",
     appearance: "Tampilan",
     privacy: "Privasi",
     credentialPool: "Kumpulan Kredensial",
@@ -88,9 +88,9 @@ export default {
   runDiagnosis: "Jalankan Diagnosis",
   running: "Berjalan...",
   debugDump: "Debug Dump",
-  migrationDetected: "Instalasi OpenClaw Terdeteksi",
+  migrationDetected: "Instalasi Legacy Terdeteksi",
   migrationDesc:
-    "OpenClaw ditemukan di <code>{{path}}</code>. Anda dapat memigrasikan konfigurasi, API key, sesi, dan skill ke Hermes.",
+    "Instalasi legacy yang kompatibel ditemukan di <code>{{path}}</code>. Anda dapat memigrasikan konfigurasi, API key, sesi, dan skill ke Hermes.",
   migrationDismiss: "Jangan tampilkan lagi",
   migrating: "Memigrasikan...",
   migrateToHermes: "Migrasi ke Hermes",

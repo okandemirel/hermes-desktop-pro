@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { Brain, Trash2, Download, Sparkles, Check, Package, X } from "lucide-react";
-import { Screen, Card, Button, IconButton, Badge, Tag, Field, Input, SearchInput, EmptyState, IconChip, Modal, cx } from "../../ui";
+import { Screen, Card, Button, IconButton, Badge, Tag, Field, Input, SearchInput, EmptyState, IconChip, Modal, cx, SectionLabel } from "../../ui";
 import type { InstalledSkill, SkillSearchResult } from "@shared/types";
 
 // ─── View model ─────────────────────────────────────────────
@@ -18,6 +18,11 @@ interface SkillCardModel {
   source: string; // "" for installed-only, "bundled" for browse entries
   installed: boolean;
   path?: string; // present for installed skills (for the detail/remove path)
+}
+
+function displaySkillDescription(description: string): string {
+  const trimmed = description.trim();
+  return /[A-Za-z0-9\u00C0-\u024F]/.test(trimmed) ? trimmed : "";
 }
 
 // ─── Component ──────────────────────────────────────────────
@@ -108,6 +113,7 @@ export default function SkillsView() {
   const installedCards = filtered.filter(
     s => s.installed && !(heroVisible && heroSkill && s.name === heroSkill.name),
   );
+  const installedVisibleCount = installedCards.length + (heroVisible ? 1 : 0);
   const installedCount = installed.length;
   const totalCount = installed.length + bundled.filter(b => !installedNames.has(b.name.toLowerCase())).length;
 
@@ -151,99 +157,110 @@ export default function SkillsView() {
 
   return (
     <Screen
+      className="ui-skills-console"
       icon={<Brain size={19} />}
       kicker="Agent Skills"
       title="Skills"
       sub={`Extend your agent with reusable skills and workflows — ${installedCount} of ${totalCount} installed.`}
       actions={<Badge variant="success"><Check size={11} /> {installedCount} active</Badge>}
     >
-      <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />
+      <div className="ui-skills-shell">
+        {error && (
+          <Card pad className="ui-skills-error mint-in mint-in-1">
+            <Badge variant="error">Error</Badge>
+            <p>{error}</p>
+            <IconButton onClick={() => setError("")} title="Dismiss" aria-label="Dismiss error">
+              <X size={15} />
+            </IconButton>
+          </Card>
+        )}
 
-      {/* ── Honest error banner ── */}
-      {error && (
-        <Card pad className="mb-6 mint-in mint-in-1 flex items-start gap-3 !border-[var(--error)]/40">
-          <Badge variant="error" className="shrink-0">Error</Badge>
-          <p className="text-[12.5px] text-[var(--text-2)] whitespace-pre-wrap flex-1 min-w-0">{error}</p>
-          <IconButton onClick={() => setError("")} title="Dismiss" aria-label="Dismiss error">
-            <X size={15} />
-          </IconButton>
+        <Card pad className="ui-skills-hero mint-in mint-in-1">
+          <div className="ui-skills-hero-mark">
+            <Sparkles size={26} />
+          </div>
+          <div className="ui-skills-hero-copy">
+            <div className="ui-eyebrow">{heroSkill && heroVisible ? heroSkill.category || "Installed Skill" : "Skill Library"}</div>
+            <h2>{heroSkill && heroVisible ? heroSkill.name : "Reusable workflows for Hermes"}</h2>
+            <p>
+              {heroSkill && heroVisible && displaySkillDescription(heroSkill.description)
+                ? displaySkillDescription(heroSkill.description)
+                : "Install, remove, and browse real skill entries from the Hermes skill registry without inventing mock metadata."}
+            </p>
+          </div>
+          <div className="ui-skills-metrics">
+            <div>
+              <span>Installed</span>
+              <strong>{installedCount}</strong>
+            </div>
+            <div>
+              <span>Browse</span>
+              <strong>{bundledCards.length}</strong>
+            </div>
+            <div>
+              <span>Total</span>
+              <strong>{totalCount}</strong>
+            </div>
+          </div>
+          {heroSkill && heroVisible && (
+            <Badge variant="accent" className="ui-skills-hero-badge"><Check size={11} /> Installed</Badge>
+          )}
         </Card>
-      )}
 
-      {/* ── Signature: first installed skill, struck as the focal hero ── */}
-      {heroSkill && heroVisible && (
-        <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
-          <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
-            <Sparkles size={24} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="ui-eyebrow">{heroSkill.category || "Installed Skill"}</div>
-            <h2 className="serif text-[var(--text)] leading-none" style={{ fontSize: "clamp(24px, 2.6vw, 31px)", letterSpacing: "-0.012em" }}>
-              {heroSkill.name}
-            </h2>
-            {heroSkill.description && (
-              <p className="text-[12.5px] text-[var(--text-2)] mt-2.5 max-w-xl">{heroSkill.description}</p>
+        <div className="ui-skills-toolbar mint-in mint-in-2">
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search skills by name, category, or description..."
+            className="ui-skills-search"
+          />
+          <Button variant="primary" onClick={() => setInstallOpen(true)} leftIcon={<Download size={15} />}>
+            Install Skill
+          </Button>
+        </div>
+
+        {loading ? (
+          <EmptyState
+            icon={<Brain size={24} />}
+            title="Loading skills..."
+            sub="Reading installed and bundled skills."
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<Brain size={24} />}
+            title="No skills found"
+            sub={query ? "Try a different search term." : "Install your first skill above."}
+          />
+        ) : (
+          <div className="ui-skills-content">
+            {installedCards.length > 0 && (
+              <Section
+                title="Installed Skills"
+                subtitle="Skills available to your agent"
+                count={installedVisibleCount}
+                skills={installedCards}
+                actionName={actionName}
+                onInstall={doInstall}
+                onUninstall={doUninstall}
+                className="ui-skills-section mint-in mint-in-3"
+              />
+            )}
+
+            {bundledCards.length > 0 && (
+              <Section
+                title="Browse Skills"
+                subtitle="Bundled skills you can install"
+                count={bundledCards.length}
+                skills={bundledCards}
+                actionName={actionName}
+                onInstall={doInstall}
+                onUninstall={doUninstall}
+                className="ui-skills-section mint-in mint-in-4"
+              />
             )}
           </div>
-          <Badge variant="accent" className="self-start shrink-0"><Check size={11} /> Installed</Badge>
-        </Card>
-      )}
-
-      {/* ── Search + install, on one calm line ── */}
-      <div className="flex flex-wrap items-center gap-3 mb-7 mint-in mint-in-2">
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="Search skills by name, category, or description…"
-          className="flex-1 min-w-[240px] max-w-[440px]"
-        />
-        <Button variant="primary" onClick={() => setInstallOpen(true)} leftIcon={<Download size={15} />}>
-          Install Skill
-        </Button>
+        )}
       </div>
-
-      {/* Content */}
-      {loading ? (
-        <EmptyState
-          icon={<Brain size={24} />}
-          title="Loading skills…"
-          sub="Reading installed and bundled skills."
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={<Brain size={24} />}
-          title="No skills found"
-          sub={query ? "Try a different search term." : "Install your first skill above."}
-        />
-      ) : (
-        <div className="flex flex-col gap-8">
-          {installedCards.length > 0 && (
-            <Section
-              title="Installed Skills"
-              subtitle="Skills available to your agent"
-              count={installedCards.length}
-              skills={installedCards}
-              actionName={actionName}
-              onInstall={doInstall}
-              onUninstall={doUninstall}
-              className="mint-in mint-in-3"
-            />
-          )}
-
-          {bundledCards.length > 0 && (
-            <Section
-              title="Browse Skills"
-              subtitle="Bundled skills you can install"
-              count={bundledCards.length}
-              skills={bundledCards}
-              actionName={actionName}
-              onInstall={doInstall}
-              onUninstall={doUninstall}
-              className="mint-in mint-in-4"
-            />
-          )}
-        </div>
-      )}
 
       {/* ── Install modal ── */}
       <Modal
@@ -259,19 +276,19 @@ export default function SkillsView() {
           </>
         }
       >
-        <Field label="Skill name or identifier" hint="Enter a registry name to install via the hermes skills CLI.">
-          <Input
-            autoFocus
-            value={installId}
-            onChange={e => setInstallId(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") handleInstallFromModal(); }}
-            placeholder="e.g. concept-diagrams"
-            disabled={installing}
-          />
-        </Field>
-        {error && (
-          <p className="text-[12px] text-[var(--error)] mt-3 whitespace-pre-wrap">{error}</p>
-        )}
+        <div className="ui-modal-form">
+          <Field label="Skill name or identifier" hint="Enter a registry name to install via the hermes skills CLI.">
+            <Input
+              autoFocus
+              value={installId}
+              onChange={e => setInstallId(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") handleInstallFromModal(); }}
+              placeholder="e.g. concept-diagrams"
+              disabled={installing}
+            />
+          </Field>
+          {error && <div className="ui-modal-alert whitespace-pre-wrap" role="alert">{error}</div>}
+        </div>
       </Modal>
     </Screen>
   );
@@ -300,13 +317,12 @@ function Section({
 }) {
   return (
     <section className={className}>
-      <div className="flex items-baseline gap-3">
-        <h2 className="serif text-[20px] leading-none text-[var(--text)]">{title}</h2>
+      <div className="ui-skills-section-head">
+        <SectionLabel>{title}</SectionLabel>
         <Badge variant="accent">{count}</Badge>
-        <p className="text-[12.5px] text-[var(--text-3)] truncate">{subtitle}</p>
+        <p>{subtitle}</p>
       </div>
-      <hr className="ui-divider-gold mt-3 mb-5" />
-      <div className="ui-grid stagger">
+      <div className="ui-skills-grid stagger">
         {skills.map(skill => (
           <SkillCard
             key={`${skill.category}/${skill.name}`}
@@ -335,19 +351,20 @@ function SkillCard({
   onUninstall: (name: string) => void | Promise<unknown>;
 }) {
   const isBundled = skill.source === "bundled";
+  const description = displaySkillDescription(skill.description);
   return (
-    <Card pad interactive active={skill.installed} className="flex flex-col gap-3.5">
-      {/* Head */}
-      <div className="flex items-start gap-3">
+    <Card pad interactive className={cx("ui-skills-card", skill.installed && "ui-skills-card-installed")}>
+      <div className="ui-skills-card-head">
         <IconChip className={cx(!skill.installed && "!bg-[var(--surface-3)] !text-[var(--text-3)] !border-[var(--border)]")}>
           {skill.installed ? <Sparkles size={18} /> : <Package size={18} />}
         </IconChip>
-        <div className="flex-1 min-w-0">
-          <h3 className="serif text-[16px] leading-tight text-[var(--text)] truncate">{skill.name}</h3>
+        <div className="ui-skills-card-copy">
+          <h3>{skill.name}</h3>
           {skill.category && (
-            <p className="text-[11.5px] text-[var(--text-3)] truncate">{skill.category}</p>
+            <small>{skill.category}</small>
           )}
         </div>
+        <div className="ui-skills-card-action">
         {skill.installed ? (
           <IconButton danger disabled={busy} onClick={() => onUninstall(skill.name)} title="Remove skill" aria-label="Remove skill">
             <Trash2 size={15} />
@@ -357,16 +374,15 @@ function SkillCard({
             {busy ? "Installing…" : "Install"}
           </Button>
         )}
+        </div>
       </div>
 
-      {/* Description */}
-      {skill.description && (
-        <p className="text-[12.5px] leading-relaxed text-[var(--text-2)]">{skill.description}</p>
+      {description && (
+        <p className="ui-skills-description">{description}</p>
       )}
 
-      {/* Category tag */}
       {skill.category && (
-        <div className="flex items-center gap-1.5 flex-wrap mt-auto">
+        <div className="ui-skills-tags">
           <Tag>{skill.category}</Tag>
           {isBundled && <Tag>bundled</Tag>}
         </div>

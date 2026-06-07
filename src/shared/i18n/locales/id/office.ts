@@ -1,18 +1,18 @@
 export default {
   title: "Office",
-  checkingStatus: "Memeriksa status Claw3D...",
-  setupTitle: "Siapkan Claw3D",
-  installTitle: "Menyiapkan Claw3D",
+  checkingStatus: "Memeriksa status runtime Office...",
+  setupTitle: "Siapkan Runtime Office",
+  installTitle: "Menyiapkan Runtime Office",
   processLogs: "Log Proses",
   noLogs: "Belum ada log. Mulai layanan untuk melihat output.",
-  loadingClaw3d: "Memuat Claw3D...",
-  installClaw3d: "Instal Claw3D",
+  loadingClaw3d: "Memuat workspace Office...",
+  installClaw3d: "Instal Runtime Office",
   setupFailed: "Setup gagal",
-  startFailed: "Gagal memulai Claw3D",
+  startFailed: "Gagal memulai runtime Office",
   portInUse:
     "Port {{port}} sedang digunakan. Ubah di pengaturan untuk memulai.",
   websocketUrl: "URL WebSocket",
-  viewOnGithub: "Lihat di GitHub",
+  viewOnGithub: "Diagnostics",
   waitingToStart: "Menunggu untuk mulai...",
   starting: "Memulai...",
   openInBrowser: "Buka di Browser",
@@ -20,11 +20,11 @@ export default {
   portInUseWarning:
     "Port {{port}} sedang digunakan. Ubah port di pengaturan atau hentikan proses lain.",
   close: "Tutup",
-  cannotLoadClaw3d: "Tidak dapat memuat Claw3D",
-  startingClaw3dService: "Memulai layanan Claw3D...",
-  clickToStart: 'Klik "Mulai" untuk menjalankan Claw3D',
+  cannotLoadClaw3d: "Tidak dapat memuat workspace Office",
+  startingClaw3dService: "Memulai runtime Office...",
+  clickToStart: 'Klik "Mulai" untuk menjalankan Office',
   setupDesc1:
-    "Claw3D adalah lingkungan visualisasi 3D untuk agent Hermes Anda. Ini memungkinkan Anda melihat agent bekerja di ruang office interaktif.",
+    "Office adalah workspace 3D tersemat untuk agent Hermes Anda. Ini memungkinkan Anda melihat agent bekerja di ruang office interaktif.",
   setupDesc2:
-    "Klik di bawah untuk mengunduh dan menyiapkan Claw3D otomatis. Ini akan meng-clone repository dan menginstal semua dependency.",
+    "Klik di bawah untuk mengunduh dan menyiapkan runtime Office otomatis. Dependency lokal yang diperlukan akan diinstal.",
 } as const;

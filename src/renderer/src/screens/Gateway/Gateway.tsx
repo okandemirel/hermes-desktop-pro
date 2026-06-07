@@ -124,16 +124,23 @@ const PLATFORM_CATALOG: PlatformDef[] = [
 
 // ─── Status → token mapping ──────────────────────────────────────────────
 
-const STATUS_COLOR: Record<PlatformState["status"], string> = {
-  connected: "var(--success)",
-  disconnected: "var(--text-3)",
-  error: "var(--error)",
-};
-const STATUS_LABEL: Record<PlatformState["status"], string> = {
-  connected: "Connected",
-  disconnected: "Disconnected",
-  error: "Error",
-};
+function platformDisplayState(platform: PlatformState): {
+  label: string;
+  badge: "success" | "accent" | "neutral" | "error";
+  dot: string;
+  pulse?: boolean;
+} {
+  if (platform.status === "connected") {
+    return { label: "Connected", badge: "success", dot: "var(--success)", pulse: true };
+  }
+  if (platform.status === "error") {
+    return { label: "Error", badge: "error", dot: "var(--error)" };
+  }
+  if (platform.configured) {
+    return { label: "Enabled", badge: "accent", dot: "var(--accent)" };
+  }
+  return { label: "Not configured", badge: "neutral", dot: "var(--text-3)" };
+}
 
 function initialState(): PlatformState[] {
   return PLATFORM_CATALOG.map((def) => ({
@@ -151,6 +158,8 @@ export default function GatewayView() {
   const [running, setRunning] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingValues, setEditingValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<"start" | "stop" | "restart" | "save" | "disable" | null>(null);
+  const [error, setError] = useState("");
 
   // Load real gateway status, per-platform enablement and credential env values
   // on mount. A platform counts as "connected" only when it is enabled AND the
@@ -197,6 +206,7 @@ export default function GatewayView() {
   }, [load]);
 
   const toggleExpand = useCallback((id: string) => {
+    setError("");
     setExpandedId((prev) => (prev === id ? null : id));
     const plat = platforms.find((p) => p.def.id === id);
     if (plat) setEditingValues({ ...plat.values });
@@ -212,67 +222,89 @@ export default function GatewayView() {
   const handleSave = useCallback(async (id: string) => {
     const plat = platforms.find((p) => p.def.id === id);
     if (!plat) return;
+    setBusy("save");
+    setError("");
     try {
       for (const field of plat.def.fields) {
         const value = editingValues[field.key] ?? "";
         await window.hermes.setEnvValue(field.key, value);
       }
       await window.hermes.setPlatformEnabled(id, true);
-    } catch {
-      // fall through to a reload which surfaces the true state
+      setExpandedId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save channel configuration.");
+    } finally {
+      setBusy(null);
+      await load();
     }
-    setExpandedId(null);
-    await load();
   }, [editingValues, platforms, load]);
 
   // Force-disable the platform (config.yaml enabled: false). Credentials in
   // .env are left intact so re-enabling doesn't require re-entry.
   const handleDisconnect = useCallback(async (id: string) => {
+    setBusy("disable");
+    setError("");
     try {
       await window.hermes.setPlatformEnabled(id, false);
-    } catch {
-      // reload surfaces the true state
+      setExpandedId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to disable channel.");
+    } finally {
+      setBusy(null);
+      await load();
     }
-    setExpandedId(null);
-    await load();
   }, [load]);
 
   const startGateway = useCallback(async () => {
+    setBusy("start");
+    setError("");
     try {
       await window.hermes.gatewayStart();
-    } catch {
-      // reload surfaces the true state
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start gateway.");
+    } finally {
+      setBusy(null);
+      await load();
     }
-    await load();
   }, [load]);
 
   const stopGateway = useCallback(async () => {
+    setBusy("stop");
+    setError("");
     try {
       await window.hermes.gatewayStop();
-    } catch {
-      // reload surfaces the true state
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to stop gateway.");
+    } finally {
+      setBusy(null);
+      await load();
     }
-    await load();
   }, [load]);
 
   const restartGateway = useCallback(async () => {
+    setBusy("restart");
+    setError("");
     try {
       await window.hermes.gatewayStop();
       await window.hermes.gatewayStart();
-    } catch {
-      // reload surfaces the true state
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to restart gateway.");
+    } finally {
+      setBusy(null);
+      await load();
     }
-    await load();
   }, [load]);
 
   const connectedCount = platforms.filter((p) => p.status === "connected").length;
   const errorCount = platforms.filter((p) => p.status === "error").length;
+  const enabledCount = platforms.filter((p) => p.configured).length;
   const offlineCount = platforms.length - connectedCount - errorCount;
 
   const expandedPlatform = platforms.find((p) => p.def.id === expandedId) || null;
 
   return (
     <Screen
+      className="ui-gateway-console"
       kicker="Local Server"
       icon={<Activity size={19} />}
       title={`Gateway ${running ? "Running" : "Stopped"}`}
@@ -292,20 +324,45 @@ export default function GatewayView() {
       actions={
         running ? (
           <>
-            <Button variant="danger" size="sm" leftIcon={<Square size={13} />} onClick={stopGateway}>Stop</Button>
-            <Button variant="secondary" size="sm" leftIcon={<RotateCcw size={13} />} onClick={restartGateway}>Restart</Button>
+            <Button variant="danger" size="sm" leftIcon={<Square size={13} />} onClick={stopGateway} disabled={!!busy}>
+              {busy === "stop" ? "Stopping..." : "Stop"}
+            </Button>
+            <Button variant="secondary" size="sm" leftIcon={<RotateCcw size={13} />} onClick={restartGateway} disabled={!!busy}>
+              {busy === "restart" ? "Restarting..." : "Restart"}
+            </Button>
           </>
         ) : (
-          <Button variant="primary" size="sm" leftIcon={<Play size={13} />} onClick={startGateway}>Start Gateway</Button>
+          <Button variant="primary" size="sm" leftIcon={<Play size={13} />} onClick={startGateway} disabled={!!busy}>
+            {busy === "start" ? "Starting..." : "Start Gateway"}
+          </Button>
         )
       }
     >
-      <div className="mx-auto" style={{ maxWidth: 960 }}>
+      <div className="ui-gateway-shell">
+        {error && !expandedPlatform && (
+          <div className="ui-modal-alert ui-gateway-alert" role="alert">
+            {error}
+          </div>
+        )}
+
+        <Card className="ui-gateway-hero">
+          <BrandMedallion size={70} />
+          <div className="ui-gateway-hero-copy">
+            <div className="ui-eyebrow">Gateway Control</div>
+            <h2>{running ? "Messaging bridge is live" : "Messaging bridge is idle"}</h2>
+            <p>Configure channels, keep credentials in the local Hermes environment, then start the gateway to bring agents into your operational inboxes.</p>
+          </div>
+          <div className="ui-gateway-metrics">
+            <div><span>Connected</span><strong>{connectedCount}</strong></div>
+            <div><span>Enabled</span><strong>{enabledCount}</strong></div>
+            <div><span>Offline</span><strong>{offlineCount}</strong></div>
+          </div>
+        </Card>
+
         {connectedCount === 0 && !running && (
-          <Card pad className="flex flex-col items-center text-center mb-7 fade-in">
-            <BrandMedallion size={72} className="mb-4" />
-            <h2 className="text-[18px] font-semibold text-[var(--text)]">Connect your channels</h2>
-            <p className="text-[13px] text-[var(--text-2)] mt-1.5 max-w-md">
+          <Card pad className="ui-gateway-setup-note fade-in">
+            <h2>Connect your channels</h2>
+            <p>
               Configure a platform below, then start the gateway to bring Hermes into Telegram, Discord, Slack and more.
             </p>
           </Card>
@@ -313,10 +370,10 @@ export default function GatewayView() {
 
         <hr className="ui-divider-gold mb-6" />
 
-        <div className="ui-grid stagger">
+        <div className="ui-gateway-platform-grid stagger">
           {platforms.map((platform) => {
             const Icon = platform.def.icon;
-            const showStatus = platform.status === "connected" || platform.status === "error";
+            const display = platformDisplayState(platform);
             return (
               <Card
                 key={platform.def.id}
@@ -324,26 +381,21 @@ export default function GatewayView() {
                 interactive
                 active={platform.configured}
                 onClick={() => toggleExpand(platform.def.id)}
-                className="flex items-center gap-3"
+                className="ui-gateway-platform-card"
+                data-configured={platform.configured}
+                data-status={platform.status}
               >
                 <IconChip>
                   <Icon size={17} />
                 </IconChip>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[14px] font-semibold text-[var(--text)] truncate">{platform.def.name}</div>
-                  {showStatus && (
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <StatusDot color={STATUS_COLOR[platform.status]} pulse={platform.status === "connected"} />
-                      <span
-                        className="text-[11.5px] font-medium"
-                        style={{ color: STATUS_COLOR[platform.status] }}
-                      >
-                        {STATUS_LABEL[platform.status]}
-                      </span>
-                    </div>
-                  )}
+                <div className="ui-gateway-platform-copy">
+                  <div className="ui-gateway-platform-name">{platform.def.name}</div>
+                  <div className="ui-gateway-platform-meta">
+                    <StatusDot color={display.dot} pulse={display.pulse} />
+                    <span>{display.label}</span>
+                  </div>
                 </div>
-                {platform.configured && <Badge variant="accent">Enabled</Badge>}
+                <Badge variant={display.badge} className="ui-gateway-platform-badge">{display.label}</Badge>
               </Card>
             );
           })}
@@ -360,7 +412,11 @@ export default function GatewayView() {
 
       <Modal
         open={!!expandedPlatform}
-        onClose={() => setExpandedId(null)}
+        onClose={() => {
+          if (busy) return;
+          setError("");
+          setExpandedId(null);
+        }}
         title={
           expandedPlatform ? (
             <span className="flex items-center gap-2.5">
@@ -373,22 +429,31 @@ export default function GatewayView() {
           expandedPlatform ? (
             <>
               {expandedPlatform.configured && (
-                <Button variant="danger" onClick={() => handleDisconnect(expandedPlatform.def.id)}>
-                  Disable
+                <Button variant="danger" onClick={() => handleDisconnect(expandedPlatform.def.id)} disabled={!!busy}>
+                  {busy === "disable" ? "Disabling..." : "Disable"}
                 </Button>
               )}
-              <Button variant="ghost" onClick={() => setExpandedId(null)}>Cancel</Button>
-              <Button variant="primary" leftIcon={<Check size={15} />} onClick={() => handleSave(expandedPlatform.def.id)}>
-                Save &amp; Enable
+              <Button variant="ghost" onClick={() => setExpandedId(null)} disabled={!!busy}>Cancel</Button>
+              <Button variant="primary" leftIcon={<Check size={15} />} onClick={() => handleSave(expandedPlatform.def.id)} disabled={!!busy}>
+                {busy === "save" ? "Saving..." : "Save & Enable"}
               </Button>
             </>
           ) : null
         }
       >
         {expandedPlatform && (
-          <div className="flex flex-col gap-4">
+          <div className="ui-gateway-modal-body ui-modal-form">
+            <div className="ui-gateway-modal-summary">
+              <StatusDot
+                color={platformDisplayState(expandedPlatform).dot}
+                pulse={platformDisplayState(expandedPlatform).pulse}
+              />
+              <span>{platformDisplayState(expandedPlatform).label}</span>
+              <code>{expandedPlatform.def.id}</code>
+            </div>
+            {error && <div className="ui-modal-alert" role="alert">{error}</div>}
             {expandedPlatform.def.fields.map((field) => (
-              <Field key={field.key} label={field.label}>
+              <Field key={field.key} label={<span className="ui-gateway-field-label">{field.label}<code>{field.key}</code></span>}>
                 <Input
                   type={field.type || "text"}
                   value={editingValues[field.key] || ""}

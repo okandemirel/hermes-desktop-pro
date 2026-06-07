@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Brain, Plus, Trash2, Check, Pencil, X } from "lucide-react";
+import { Brain, Plus, Trash2, Check, Pencil, X, Database, FileText } from "lucide-react";
 import {
   Screen, Card, Button, IconButton, Textarea, Field,
-  SearchInput, EmptyState, Modal,
+  SearchInput, EmptyState, Modal, Badge,
 } from "../../ui";
 import type { MemoryInfo, MemoryEntry } from "@shared/types";
 
@@ -123,6 +123,7 @@ export default function MemoryView() {
 
   return (
     <Screen
+      className="ui-memory-console"
       icon={<Brain size={19} />}
       kicker="Agent Recall"
       title="Memory"
@@ -138,103 +139,120 @@ export default function MemoryView() {
         </Button>
       }
     >
-      <hr className="ui-divider-gold mt-5 mb-7 mint-in mint-in-1" />
-
-      {/* ── Signature: recall budget, struck as the editorial hero ── */}
-      <Card pad className="mb-8 mint-in mint-in-1 flex items-center gap-5">
-        <span className="ui-stamp w-[58px] h-[58px] rounded-full text-[var(--accent-text)]">
-          <Brain size={24} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="ui-eyebrow">Recall Budget</div>
-          <h2 className="serif text-[var(--text)] leading-none" style={{ fontSize: "clamp(24px, 2.6vw, 31px)", letterSpacing: "-0.012em" }}>
-            {charCount.toLocaleString()}<span className="text-[var(--text-3)]"> / {charLimit.toLocaleString()}</span> chars
-          </h2>
-          <div className="mt-3 h-1.5 rounded-full overflow-hidden bg-[var(--surface-3)]">
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min(Math.max(usedPct, 2), 100)}%`, background: "var(--gold-grad)" }} />
+      <div className="ui-memory-shell">
+        <Card pad className="ui-memory-hero mint-in mint-in-1">
+          <div className="ui-memory-hero-mark">
+            <Brain size={26} />
           </div>
-        </div>
-        <div className="self-start shrink-0 text-right">
-          <div className="serif text-[22px] leading-none text-[var(--accent-text)]">{usedPct}%</div>
-          <div className="text-[11px] text-[var(--text-3)] mt-1.5">{entries.length} {entries.length === 1 ? "entry" : "entries"}</div>
-        </div>
-      </Card>
+          <div className="ui-memory-hero-copy">
+            <div className="ui-eyebrow">Recall Budget</div>
+            <h2>
+              {charCount.toLocaleString()}<span> / {charLimit.toLocaleString()}</span> chars
+            </h2>
+            <p>
+              Persistent notes are stored as indexed free-text entries. Hermes uses them as durable context across sessions.
+            </p>
+            <div className="ui-memory-progress">
+              <div style={{ width: `${Math.min(Math.max(usedPct, 2), 100)}%` }} />
+            </div>
+          </div>
+          <div className="ui-memory-metrics">
+            <div>
+              <span>Used</span>
+              <strong>{usedPct}%</strong>
+            </div>
+            <div>
+              <span>Entries</span>
+              <strong>{entries.length}</strong>
+            </div>
+            <div>
+              <span>Visible</span>
+              <strong>{filtered.length}</strong>
+            </div>
+          </div>
+        </Card>
 
-      {/* Single control row */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          placeholder="Search memories…"
-          className="flex-1 min-w-[240px]"
-        />
-      </div>
+        <div className="ui-memory-toolbar mint-in mint-in-2">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search memories..."
+            className="ui-memory-search"
+          />
+          <Badge variant="neutral">
+            <Database size={12} />
+            MEMORY.md
+          </Badge>
+        </div>
 
-      {/* Memory grid */}
-      {error ? (
-        <EmptyState
-          icon={<Brain size={24} />}
-          title="Could not load memory"
-          sub="Hermes could not read MEMORY.md. Check your connection and try again."
-        />
-      ) : !loaded ? (
-        <EmptyState icon={<Brain size={24} />} title="Loading memory…" />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={<Brain size={24} />}
-          title={search.trim() ? "No matching memories" : "No memories yet"}
-          sub={
-            search.trim()
-              ? "Try a different search term."
-              : "Add memory entries to give your agent persistent context."
-          }
-          action={
-            !search.trim() ? (
-              <Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowAdd(true)}>Add Memory</Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="ui-grid stagger">
-          {filtered.map((entry) => (
-            <Card key={entry.index} pad interactive className="group flex flex-col">
-              <div className="flex items-start justify-between gap-3 mb-2.5">
-                <span className="text-[11.5px] font-mono text-[var(--text-3)]">#{entry.index + 1}</span>
-                <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {editingIndex === entry.index ? (
-                    <>
-                      <IconButton onClick={() => saveEdit(entry.index)} title="Save"><Check size={14} /></IconButton>
-                      <IconButton onClick={cancelEdit} title="Cancel"><X size={14} /></IconButton>
-                    </>
-                  ) : (
-                    <>
-                      <IconButton onClick={() => startEdit(entry)} title="Edit"><Pencil size={14} /></IconButton>
-                      <IconButton danger onClick={() => setDeleteConfirm(entry.index)} title="Delete"><Trash2 size={14} /></IconButton>
-                    </>
-                  )}
+        {error ? (
+          <EmptyState
+            icon={<Brain size={24} />}
+            title="Could not load memory"
+            sub="Hermes could not read MEMORY.md. Check your connection and try again."
+          />
+        ) : !loaded ? (
+          <EmptyState icon={<Brain size={24} />} title="Loading memory..." />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<Brain size={24} />}
+            title={search.trim() ? "No matching memories" : "No memories yet"}
+            sub={
+              search.trim()
+                ? "Try a different search term."
+                : "Add memory entries to give your agent persistent context."
+            }
+            action={
+              !search.trim() ? (
+                <Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowAdd(true)}>Add Memory</Button>
+              ) : undefined
+            }
+          />
+        ) : (
+          <div className="ui-memory-grid stagger">
+            {filtered.map((entry) => (
+              <Card key={entry.index} pad interactive className="ui-memory-card">
+                <div className="ui-memory-card-head">
+                  <div>
+                    <FileText size={14} />
+                    <span>#{entry.index + 1}</span>
+                  </div>
+                  <div className="ui-memory-card-actions">
+                    {editingIndex === entry.index ? (
+                      <>
+                        <IconButton onClick={() => saveEdit(entry.index)} title="Save"><Check size={14} /></IconButton>
+                        <IconButton onClick={cancelEdit} title="Cancel"><X size={14} /></IconButton>
+                      </>
+                    ) : (
+                      <>
+                        <IconButton onClick={() => startEdit(entry)} title="Edit"><Pencil size={14} /></IconButton>
+                        <IconButton danger onClick={() => setDeleteConfirm(entry.index)} title="Delete"><Trash2 size={14} /></IconButton>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {editingIndex === entry.index ? (
-                <>
-                  <Textarea
-                    autoFocus
-                    rows={4}
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
-                  />
-                  {editError && (
-                    <p className="text-[12px] text-[var(--error)] mt-2">{editError}</p>
-                  )}
-                </>
-              ) : (
-                <p className="text-[13px] leading-relaxed text-[var(--text-2)] whitespace-pre-wrap">{entry.content}</p>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
+                {editingIndex === entry.index ? (
+                  <>
+                    <Textarea
+                      autoFocus
+                      rows={4}
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Escape") cancelEdit(); }}
+                    />
+                    {editError && (
+                      <p className="text-[12px] text-[var(--error)] mt-2">{editError}</p>
+                    )}
+                  </>
+                ) : (
+                  <p>{entry.content}</p>
+                )}
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Add memory modal */}
       <Modal
@@ -250,7 +268,7 @@ export default function MemoryView() {
           </>
         }
       >
-        <div className="flex flex-col gap-4">
+        <div className="ui-modal-form">
           <Field label="What should the agent remember?">
             <Textarea
               autoFocus
@@ -260,9 +278,7 @@ export default function MemoryView() {
               placeholder="e.g. Prefers concise, code-first answers with no preamble."
             />
           </Field>
-          {addError && (
-            <p className="text-[12px] text-[var(--error)]">{addError}</p>
-          )}
+          {addError && <div className="ui-modal-alert" role="alert">{addError}</div>}
         </div>
       </Modal>
 
@@ -279,9 +295,13 @@ export default function MemoryView() {
           </>
         }
       >
-        <p className="text-[13px] text-[var(--text-2)] leading-relaxed">
-          This permanently removes this entry from MEMORY.md. The agent will lose this context.
-        </p>
+        <div className="ui-confirm-panel ui-confirm-danger">
+          <span className="ui-confirm-icon"><Trash2 size={18} /></span>
+          <div className="ui-confirm-copy">
+            <strong>Delete memory entry?</strong>
+            <p>This permanently removes this entry from MEMORY.md. The agent will lose this context.</p>
+          </div>
+        </div>
       </Modal>
     </Screen>
   );

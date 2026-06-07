@@ -1513,13 +1513,13 @@ export async function sshRunKanban<T = unknown>(
   }
 }
 
-// ── Claw3D HQ board (read-only) ───────────────────────────────────────────────
+// ── Office HQ board (read-only) ───────────────────────────────────────────────
 //
-// Claw3D ("hermes-office") maintains its own headquarters task board independent
+// The Office runtime maintains its own headquarters task board independent
 // of `hermes kanban`. It stores tasks at
 // `<state-dir>/claw3d/task-manager/tasks.json`, where <state-dir> resolves to
 // `~/.openclaw` (new) or `~/.clawdbot` / `~/.moltbot` (legacy). We surface it as
-// a virtual, read-only second board in the desktop's Kanban tab so the Claw3D HQ
+// a virtual, read-only second board in the desktop's Kanban tab so the Office HQ
 // cards are visible alongside the agent dispatcher's own board.
 
 interface Claw3dSharedTaskRecord {
@@ -1536,7 +1536,7 @@ interface Claw3dSharedTaskRecord {
   isArchived?: boolean;
 }
 
-// Claw3D's TaskBoardStatus → desktop kanban status string. Claw3D has no
+// Office TaskBoardStatus → desktop kanban status string. Runtime tasks have no
 // "triage" or "ready" semantics, so `review` (awaiting attention) lands in
 // "ready" and `in_progress` maps to "running". Everything else is
 // straight-through.
@@ -1621,12 +1621,12 @@ export async function sshListClaw3dHqTasks(
     } catch (err) {
       return {
         success: false,
-        error: `Failed to parse Claw3D tasks.json: ${(err as Error).message}`,
+        error: `Failed to parse Office task board: ${(err as Error).message}`,
       };
     }
   }
   // No file found at any candidate path — that's fine, just means the user
-  // hasn't run Claw3D's HQ board yet. Return empty rather than erroring so the
+  // hasn't run the Office HQ board yet. Return empty rather than erroring so the
   // renderer can still show an empty HQ board placeholder.
   return { success: true, tasks: [] };
 }

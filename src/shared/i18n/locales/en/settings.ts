@@ -1,7 +1,7 @@
 export default {
   title: "Settings",
   sections: {
-    hermesAgent: "Hermes Agent",
+    hermesAgent: "Hermes Desktop Pro",
     appearance: "Appearance",
     privacy: "Privacy",
     credentialPool: "Credential Pool",
@@ -88,9 +88,9 @@ export default {
   runDiagnosis: "Run Diagnosis",
   running: "Running...",
   debugDump: "Debug Dump",
-  migrationDetected: "OpenClaw Installation Detected",
+  migrationDetected: "Legacy Installation Detected",
   migrationDesc:
-    "Found OpenClaw at <code>{{path}}</code>. You can migrate your configuration, API keys, sessions, and skills to Hermes.",
+    "Found a compatible legacy install at <code>{{path}}</code>. You can migrate your configuration, API keys, sessions, and skills to Hermes.",
   migrationDismiss: "Don't show again",
   migrating: "Migrating...",
   migrateToHermes: "Migrate to Hermes",

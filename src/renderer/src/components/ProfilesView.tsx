@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import {
   Screen, Card, Button, IconButton, IconChip, Badge, Input, Field, Select,
-  Modal, EmptyState, StatusDot, SectionLabel,
+  Modal, EmptyState, StatusDot, SectionLabel, SearchInput,
 } from "../ui";
 import type { ProfileInfo } from "@shared/types";
 
@@ -29,6 +29,7 @@ export default function ProfilesView() {
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [cloneDefault, setCloneDefault] = useState("");
+  const [query, setQuery] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
@@ -119,6 +120,8 @@ export default function ProfilesView() {
 
   const active = profiles.find((p) => p.isActive);
   const others = profiles.filter((p) => !p.isActive);
+  const gatewayCount = profiles.filter((p) => p.gatewayRunning).length;
+  const totalSkills = profiles.reduce((sum, p) => sum + p.skillCount, 0);
 
   const summaryFor = (p: ProfileInfo): string => {
     const bits: string[] = [];
@@ -128,105 +131,150 @@ export default function ProfilesView() {
     bits.push(p.hasEnv ? "keys configured" : "no keys yet");
     return bits.join(" · ");
   };
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleOthers = normalizedQuery
+    ? others.filter((p) => [
+        p.name,
+        p.model,
+        p.provider,
+        summaryFor(p),
+      ].some((value) => value.toLowerCase().includes(normalizedQuery)))
+    : others;
 
   return (
     <Screen
+      className="ui-profiles-console"
       kicker="Workspace Profiles"
       icon={<User size={19} />}
       title="Profiles"
       sub={`${profiles.length} isolated Hermes workspace${profiles.length !== 1 ? "s" : ""} — each its own config, models, skills and memory.`}
       actions={<Button variant="primary" size="sm" leftIcon={<Plus size={15} />} onClick={() => setShowCreate(true)}>New Profile</Button>}
     >
-      {error && profiles.length === 0 ? (
-        <EmptyState
-          icon={<User size={22} />}
-          title="Couldn't load profiles"
-          sub={error}
-          action={<Button variant="primary" onClick={() => void load()}>Retry</Button>}
-        />
-      ) : !loading && profiles.length === 0 ? (
-        <EmptyState
-          icon={<User size={22} />}
-          title="No profiles yet"
-          sub="Create an isolated Hermes environment to keep models, skills and config separate."
-          action={<Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowCreate(true)}>New Profile</Button>}
-        />
-      ) : (
-        <>
-          {/* ── Signature hero: the current workspace, struck in gold ── */}
-          {active && (
-            <Card pad className="mint-in mint-in-1 relative overflow-hidden">
-              <div className="flex items-start gap-5">
-                <span className="ui-stamp shrink-0" style={{ width: 66, height: 66, borderRadius: "50%" }}>
-                  <User size={26} className="text-[var(--accent-text)]" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="ui-eyebrow">Current workspace</div>
-                  <div className="flex items-center gap-3">
-                    <h2 className="serif text-[27px] leading-none text-[var(--text)] truncate">{active.name}</h2>
+      <div className="ui-profiles-shell">
+        {error && profiles.length === 0 ? (
+          <EmptyState
+            icon={<User size={22} />}
+            title="Couldn't load profiles"
+            sub={error}
+            action={<Button variant="primary" onClick={() => void load()}>Retry</Button>}
+          />
+        ) : !loading && profiles.length === 0 ? (
+          <EmptyState
+            icon={<User size={22} />}
+            title="No profiles yet"
+            sub="Create an isolated Hermes environment to keep models, skills and config separate."
+            action={<Button variant="primary" leftIcon={<Plus size={15} />} onClick={() => setShowCreate(true)}>New Profile</Button>}
+          />
+        ) : (
+          <>
+            {active && (
+              <Card pad className="ui-profiles-hero mint-in mint-in-1">
+                <div className="ui-profiles-hero-mark">
+                  <User size={26} />
+                </div>
+                <div className="ui-profiles-hero-copy">
+                  <div className="ui-eyebrow">Current Workspace</div>
+                  <div className="ui-profiles-title-line">
+                    <h2>{active.name}</h2>
                     <Badge variant="success"><StatusDot color="var(--success)" pulse /> Active</Badge>
                     {active.isDefault && <Badge variant="neutral">Default</Badge>}
                   </div>
-                  <p className="text-[13.5px] text-[var(--text-2)] mt-2.5 max-w-xl">{summaryFor(active)}</p>
+                  <p>{summaryFor(active)}</p>
+                  <div className="ui-profiles-hero-meta">
+                    {active.model && <span><Brain size={13} /> {active.model}</span>}
+                    <span><Sparkles size={13} /> {active.provider || "auto"}</span>
+                    <span><Wrench size={13} /> {active.skillCount} skill{active.skillCount !== 1 ? "s" : ""}</span>
+                    <span><Database size={13} /> {active.hasSoul ? "soul on" : "no soul"}</span>
+                    <span><Power size={13} /> {active.gatewayRunning ? "gateway up" : "gateway down"}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="ui-profiles-metrics">
+                  <div>
+                    <span>Profiles</span>
+                    <strong>{profiles.length}</strong>
+                  </div>
+                  <div>
+                    <span>Skills</span>
+                    <strong>{totalSkills}</strong>
+                  </div>
+                  <div>
+                    <span>Gateway</span>
+                    <strong>{gatewayCount}</strong>
+                  </div>
+                </div>
+                <div className="ui-profiles-hero-actions">
                   <IconButton onClick={() => void handleClone(active.name)} title="Clone" disabled={busy === active.name}><Copy size={15} /></IconButton>
                 </div>
-              </div>
+              </Card>
+            )}
 
-              <hr className="ui-divider-gold my-5" />
-
-              <div className="flex items-center gap-6 text-[12px] text-[var(--text-3)] flex-wrap">
-                {active.model && <span className="flex items-center gap-1.5 font-mono"><Brain size={13} /> {active.model}</span>}
-                <span className="flex items-center gap-1.5 font-mono capitalize"><Sparkles size={13} /> {active.provider || "auto"}</span>
-                <span className="flex items-center gap-1.5 font-mono"><Wrench size={13} /> {active.skillCount} skill{active.skillCount !== 1 ? "s" : ""}</span>
-                <span className="flex items-center gap-1.5 font-mono"><Database size={13} /> {active.hasSoul ? "soul on" : "no soul"}</span>
-                <span className="flex items-center gap-1.5 font-mono">
-                  <Power size={13} /> {active.gatewayRunning ? "gateway up" : "gateway down"}
-                </span>
-              </div>
-            </Card>
-          )}
-
-          {/* ── The quieter ledger of the remaining profiles ── */}
-          {others.length > 0 && (
-            <>
-              <SectionLabel className="mt-9 mb-3.5 block">Other profiles · {others.length}</SectionLabel>
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 stagger">
-                {others.map((p) => (
-                  <Card key={p.name} pad interactive className="group flex items-start gap-3">
-                    <IconChip className="!bg-[var(--surface-3)] !text-[var(--text-3)] !border-[var(--border)]">
-                      <User size={18} />
-                    </IconChip>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">{p.name}</h3>
-                        {p.isDefault && <Badge variant="neutral">Default</Badge>}
-                        {p.gatewayRunning && <StatusDot color="var(--success)" pulse />}
-                      </div>
-                      <p className="text-[13px] text-[var(--text-2)] line-clamp-1 mt-1.5">{summaryFor(p)}</p>
-                      <div className="flex items-center gap-4 text-[11.5px] text-[var(--text-3)] mt-2">
-                        {p.model && <span className="flex items-center gap-1.5 font-mono"><Brain size={12} /> {p.model}</span>}
-                        <span className="flex items-center gap-1.5 font-mono capitalize"><Sparkles size={12} /> {p.provider || "auto"}</span>
-                        <span className="flex items-center gap-1.5 font-mono"><FileText size={12} /> {p.skillCount} skill{p.skillCount !== 1 ? "s" : ""}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <Button variant="ghost" size="sm" disabled={busy === p.name} onClick={() => void handleActivate(p.name)}>Activate</Button>
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <IconButton onClick={() => void handleClone(p.name)} title="Clone" disabled={busy === p.name}><Copy size={15} /></IconButton>
-                        {!p.isDefault && (
-                          <IconButton danger onClick={() => setDeleteTarget(p.name)} title="Delete" disabled={busy === p.name}><Trash2 size={15} /></IconButton>
-                        )}
-                      </div>
-                    </div>
+            {others.length > 0 && (
+              <section className="ui-profiles-ledger mint-in mint-in-2">
+                <div className="ui-profiles-ledger-head">
+                  <div className="ui-profiles-ledger-title">
+                    <SectionLabel>Other profiles</SectionLabel>
+                    <Badge variant="neutral">{visibleOthers.length}/{others.length}</Badge>
+                  </div>
+                  <SearchInput
+                    className="ui-profiles-search"
+                    value={query}
+                    onChange={setQuery}
+                    placeholder="Search profile, model, provider..."
+                  />
+                </div>
+                {visibleOthers.length === 0 ? (
+                  <Card pad className="ui-profiles-empty">
+                    <strong>No matching profiles</strong>
+                    <p>Clear the search to show all isolated workspaces.</p>
                   </Card>
-                ))}
+                ) : (
+                  <div className="ui-profiles-grid stagger">
+                    {visibleOthers.map((p) => (
+                      <Card
+                        key={p.name}
+                        pad
+                        interactive
+                        className="ui-profiles-card"
+                        onClick={() => void handleActivate(p.name)}
+                      >
+                        <div className="ui-profiles-card-main">
+                          <IconChip className="ui-profiles-card-icon">
+                            <User size={18} />
+                          </IconChip>
+                          <div className="ui-profiles-card-copy">
+                            <div className="ui-profiles-card-title">
+                              <h3>{p.name}</h3>
+                              {p.isDefault && <Badge variant="neutral">Default</Badge>}
+                              {p.gatewayRunning && (
+                                <Badge variant="success">
+                                  <StatusDot color="var(--success)" pulse /> Gateway
+                                </Badge>
+                              )}
+                            </div>
+                            <p>{summaryFor(p)}</p>
+                          </div>
+                        </div>
+                        <div className="ui-profiles-card-meta">
+                          <span title={p.model || "No model"}><Brain size={12} /> {p.model || "No model"}</span>
+                          <span title={p.provider || "auto"}><Sparkles size={12} /> {p.provider || "auto"}</span>
+                          <span><FileText size={12} /> {p.skillCount} skill{p.skillCount !== 1 ? "s" : ""}</span>
+                        </div>
+                        <div className="ui-profiles-card-actions">
+                          <Button variant="ghost" size="sm" disabled={busy === p.name} onClick={(event) => { event.stopPropagation(); void handleActivate(p.name); }}>Activate</Button>
+                          <IconButton onClick={(event) => { event.stopPropagation(); void handleClone(p.name); }} title="Clone" disabled={busy === p.name}><Copy size={15} /></IconButton>
+                          {!p.isDefault && (
+                            <IconButton danger onClick={(event) => { event.stopPropagation(); setDeleteTarget(p.name); }} title="Delete" disabled={busy === p.name}><Trash2 size={15} /></IconButton>
+                          )}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </>
+        )}
               </div>
-            </>
-          )}
-        </>
-      )}
 
       {/* Create profile modal */}
       <Modal
@@ -240,7 +288,7 @@ export default function ProfilesView() {
           </>
         }
       >
-        <div className="flex flex-col gap-4">
+        <div className="ui-modal-form">
           <Field label="Profile Name" hint="Lowercase letters, numbers, underscores and hyphens.">
             <Input
               value={newName}
@@ -256,9 +304,7 @@ export default function ProfilesView() {
               <option value="default">Clone from default</option>
             </Select>
           </Field>
-          {createError && (
-            <p className="text-[12.5px] text-[var(--error)]">{createError}</p>
-          )}
+          {createError && <div className="ui-modal-alert" role="alert">{createError}</div>}
         </div>
       </Modal>
 
@@ -274,10 +320,15 @@ export default function ProfilesView() {
           </>
         }
       >
-        <p className="text-[13.5px] text-[var(--text-2)]">
-          Permanently delete the <span className="font-semibold text-[var(--text)]">{deleteTarget}</span> profile?
-          Its config, models, skills, memory and saved keys are erased from disk. This cannot be undone.
-        </p>
+        <div className="ui-confirm-panel ui-confirm-danger">
+          <span className="ui-confirm-icon"><Trash2 size={18} /></span>
+          <div className="ui-confirm-copy">
+            <strong>Delete {deleteTarget}?</strong>
+            <p>
+              Its config, models, skills, memory and saved keys are erased from disk. This cannot be undone.
+            </p>
+          </div>
+        </div>
       </Modal>
     </Screen>
   );

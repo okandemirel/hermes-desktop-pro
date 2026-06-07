@@ -1,7 +1,7 @@
 export default {
   title: "Ustawienia",
   sections: {
-    hermesAgent: "Hermes Agent",
+    hermesAgent: "Hermes Desktop Pro",
     appearance: "Wygląd",
     privacy: "Prywatność",
     credentialPool: "Pula poświadczeń",
@@ -90,9 +90,9 @@ export default {
   runDiagnosis: "Uruchom diagnostykę",
   running: "Działa...",
   debugDump: "Zrzut debugowania",
-  migrationDetected: "Wykryto instalację OpenClaw",
+  migrationDetected: "Wykryto starszą instalację",
   migrationDesc:
-    "Znaleziono OpenClaw w <code>{{path}}</code>. Możesz przenieść konfigurację, klucze API, sesje i umiejętności do Hermes.",
+    "Znaleziono zgodną starszą instalację w <code>{{path}}</code>. Możesz przenieść konfigurację, klucze API, sesje i umiejętności do Hermes.",
   migrationDismiss: "Nie pokazuj ponownie",
   migrating: "Migrowanie...",
   migrateToHermes: "Migruj do Hermes",

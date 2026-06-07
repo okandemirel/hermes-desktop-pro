@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import {
   Wrench,
   Zap,
@@ -9,6 +9,7 @@ import {
   Info,
   Power,
   PackageOpen,
+  ShieldCheck,
 } from "lucide-react";
 import type { ToolsetInfo } from "@shared/types";
 import {
@@ -22,11 +23,11 @@ import {
   SearchInput,
   EmptyState,
   IconChip,
-  Divider,
   SectionLabel,
 } from "../../ui";
 
 type Category = "Core" | "Media" | "Reasoning" | "Automation";
+type CategoryIcon = ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
 
 // Client-side display grouping only — the data itself is the fixed set of
 // toolset keys returned by the backend. Categories never leave the renderer
@@ -57,7 +58,7 @@ function categoryFor(key: string): Category {
 const CATEGORIES = ["All", "Core", "Media", "Reasoning", "Automation"];
 const GROUP_ORDER = ["Core", "Media", "Reasoning", "Automation"] as const;
 
-const CATEGORY_ICONS: Record<string, React.FC<{ size?: number }>> = {
+const CATEGORY_ICONS: Record<string, CategoryIcon> = {
   Core: Wrench,
   Media: ImageIcon,
   Reasoning: MessageSquare,
@@ -148,13 +149,15 @@ export default function ToolsView() {
   const disableAll = () => setAll(false);
 
   const enabledCount = toolsets.filter((t) => t.enabled).length;
+  const disabledCount = toolsets.length - enabledCount;
   const restartRequired = toolsets.some(
     (t) => baseline[t.key] !== undefined && t.enabled !== baseline[t.key],
   );
 
   return (
     <Screen
-      icon={<Wrench size={19} />}
+      className="ui-tools-console"
+      icon={<Wrench size={19} className="ui-tools-screen-glyph" />}
       kicker="Capabilities"
       title="Tools & Plugins"
       sub="Enable or disable the toolsets your agent can use during conversations."
@@ -169,99 +172,120 @@ export default function ToolsView() {
         </>
       }
     >
-      {/* Search + category filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          placeholder="Search toolsets…"
-          className="flex-1 min-w-[240px] max-w-[400px]"
-        />
-        <Segment>
-          {CATEGORIES.map((cat) => {
-            const CatIcon = CATEGORY_ICONS[cat];
-            return (
-              <SegmentItem
-                key={cat}
-                active={cat === activeCategory}
-                onClick={() => setActiveCategory(cat)}
-              >
-                <CatIcon size={13} />
-                {cat}
-              </SegmentItem>
-            );
-          })}
-        </Segment>
-      </div>
+      <div className="ui-tools-shell">
+        <Card pad className="ui-tools-hero mint-in mint-in-1">
+          <div className="ui-tools-hero-mark">
+            <ShieldCheck size={26} />
+          </div>
+          <div className="ui-tools-hero-copy">
+            <div className="ui-eyebrow">Capability Matrix</div>
+            <h2>{enabledCount} toolset{enabledCount !== 1 ? "s" : ""} enabled</h2>
+            <p>Tool availability is written back to config.yaml. Changes are optimistic and reverted if the backend cannot persist them.</p>
+          </div>
+          <div className="ui-tools-metrics">
+            <div>
+              <span>Enabled</span>
+              <strong>{enabledCount}</strong>
+            </div>
+            <div>
+              <span>Disabled</span>
+              <strong>{disabledCount}</strong>
+            </div>
+            <div>
+              <span>Total</span>
+              <strong>{toolsets.length}</strong>
+            </div>
+          </div>
+          {restartRequired && (
+            <Badge variant="warning" className="ui-tools-restart">
+              <Info size={12} /> Restart required
+            </Badge>
+          )}
+        </Card>
 
-      {/* Gold-filament section break — one confident line between controls and content */}
-      <Divider className="ui-divider-gold !my-0" />
+        <div className="ui-tools-toolbar mint-in mint-in-2">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search toolsets..."
+            className="ui-tools-search"
+          />
+          <Segment className="ui-tools-segment">
+            {CATEGORIES.map((cat) => {
+              const CatIcon = CATEGORY_ICONS[cat];
+              return (
+                <SegmentItem
+                  key={cat}
+                  active={cat === activeCategory}
+                  onClick={() => setActiveCategory(cat)}
+                >
+                  <CatIcon
+                    size={13}
+                    className={cat === "Core" ? "ui-tools-segment-glyph-core" : "ui-tools-segment-glyph"}
+                  />
+                  {cat}
+                </SegmentItem>
+              );
+            })}
+          </Segment>
+        </div>
 
-      {/* Quiet editorial summary — one line, not a stat strip */}
-      <div className="flex flex-wrap items-center justify-between gap-3 mt-3.5 mb-5">
-        <SectionLabel className="font-mono normal-case tracking-normal text-[11.5px]">
-          {enabledCount} / {toolsets.length} toolsets enabled
-        </SectionLabel>
-        {restartRequired && (
-          <Badge variant="warning">
-            <Info size={12} /> Restart required to apply changes
-          </Badge>
+        {toolsets.length === 0 ? (
+          <EmptyState
+            icon={<PackageOpen size={24} />}
+            title={loaded ? "No toolsets found" : "Loading toolsets..."}
+            sub={
+              loaded
+                ? "Could not read toolsets from config.yaml. Start the gateway or check your connection."
+                : undefined
+            }
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={<PackageOpen size={24} />}
+            title="No toolsets found"
+            sub={
+              search.trim()
+                ? `No toolsets match "${search}".`
+                : "No toolsets in this category."
+            }
+          />
+        ) : activeCategory === "All" ? (
+          <div className="ui-tools-groups">
+            {GROUP_ORDER.map((group) => {
+              const inGroup = filtered.filter((t) => categoryFor(t.key) === group);
+              if (inGroup.length === 0) return null;
+              return (
+                <section key={group} className="ui-tools-section">
+                  <div className="ui-tools-section-head">
+                    <SectionLabel>{group}</SectionLabel>
+                    <Badge variant="neutral">{inGroup.length}</Badge>
+                  </div>
+                  <div className="ui-tools-grid stagger">
+                    {inGroup.map((toolset) => (
+                      <ToolsetCard
+                        key={toolset.key}
+                        toolset={toolset}
+                        onToggle={() => toggleToolset(toolset.key)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="ui-tools-grid stagger">
+            {filtered.map((toolset) => (
+              <ToolsetCard
+                key={toolset.key}
+                toolset={toolset}
+                onToggle={() => toggleToolset(toolset.key)}
+              />
+            ))}
+          </div>
         )}
       </div>
-
-      {/* Toolset grid */}
-      {toolsets.length === 0 ? (
-        <EmptyState
-          icon={<PackageOpen size={24} />}
-          title={loaded ? "No toolsets found" : "Loading toolsets…"}
-          sub={
-            loaded
-              ? "Could not read toolsets from config.yaml. Start the gateway or check your connection."
-              : undefined
-          }
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={<PackageOpen size={24} />}
-          title="No toolsets found"
-          sub={
-            search.trim()
-              ? `No toolsets match "${search}".`
-              : "No toolsets in this category."
-          }
-        />
-      ) : activeCategory === "All" ? (
-        <div className="flex flex-col gap-7">
-          {GROUP_ORDER.map((group) => {
-            const inGroup = filtered.filter((t) => categoryFor(t.key) === group);
-            if (inGroup.length === 0) return null;
-            return (
-              <section key={group} className="flex flex-col gap-3">
-                <SectionLabel>{group}</SectionLabel>
-                <div className="ui-grid stagger">
-                  {inGroup.map((toolset) => (
-                    <ToolsetCard
-                      key={toolset.key}
-                      toolset={toolset}
-                      onToggle={() => toggleToolset(toolset.key)}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="ui-grid stagger">
-          {filtered.map((toolset) => (
-            <ToolsetCard
-              key={toolset.key}
-              toolset={toolset}
-              onToggle={() => toggleToolset(toolset.key)}
-            />
-          ))}
-        </div>
-      )}
     </Screen>
   );
 }
@@ -274,32 +298,29 @@ function ToolsetCard({ toolset, onToggle }: { toolset: ToolsetInfo; onToggle: ()
     <Card
       pad
       interactive
-      className={`flex flex-col gap-3.5 transition-opacity ${enabled ? "" : "opacity-55"}`}
+      className="ui-tools-card"
+      data-enabled={enabled}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="ui-tools-card-head">
+        <div className="ui-tools-card-title">
           <IconChip
             className={
               enabled
-                ? "shadow-[0_0_0_1px_var(--accent-line)]"
-                : "!bg-[var(--surface-2)] !text-[var(--text-3)] !border-[var(--border)]"
+                ? `ui-tools-card-icon ui-tools-card-icon-${category.toLowerCase()} shadow-[0_0_0_1px_var(--accent-line)]`
+                : `ui-tools-card-icon ui-tools-card-icon-${category.toLowerCase()} !bg-[var(--surface-2)] !text-[var(--text-3)] !border-[var(--border)]`
             }
           >
-            <CatIcon size={18} />
+            <CatIcon size={18} className="ui-tools-card-glyph" />
           </IconChip>
-          <div className="min-w-0">
-            <h3 className="text-[14px] font-semibold text-[var(--text)] truncate">
-              {toolset.label}
-            </h3>
-            <div className="text-[11.5px] text-[var(--text-3)] mt-0.5">
-              {category}
-            </div>
+          <div>
+            <h3>{toolset.label}</h3>
+            <span>{category}</span>
           </div>
         </div>
         <Toggle on={enabled} onChange={onToggle} />
       </div>
 
-      <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
+      <p>
         {toolset.description}
       </p>
     </Card>

@@ -3,7 +3,7 @@ export default {
   startingInstall: "Rozpoczynanie instalacji",
   installationComplete: "Instalacja zakończona",
   installationFailed: "Instalacja nie powiodła się",
-  installingHermes: "Instalowanie Hermes Agent",
+  installingHermes: "Instalowanie Hermes Desktop Pro",
   installationFailedHint:
     "Instalacja nie powiodła się. Spróbuj ponownie albo zainstaluj przez terminal.",
   retryInstallation: "Ponów instalację",
