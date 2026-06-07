@@ -593,6 +593,8 @@ export default function ModelsView() {
         onClose={closeForm}
         title={editingId ? "Edit Model" : "New Model"}
         kicker="Model Catalog"
+        width={700}
+        className="ui-models-editor-modal"
         footer={
           <>
             <Button variant="ghost" onClick={closeForm} disabled={saving}>Cancel</Button>
@@ -602,159 +604,189 @@ export default function ModelsView() {
           </>
         }
       >
-        <div className="ui-modal-form ui-models-modal-form">
-          <div className="ui-modal-form-note">
-            <Cpu size={16} />
+        <div className="ui-models-editor">
+          <div className="ui-models-editor-hero">
+            <span className="ui-models-editor-mark"><Cpu size={22} /></span>
             <div>
+              <span className="ui-models-editor-kicker">{editingId ? "Saved route" : "New route"}</span>
               <strong>{editingId ? "Update saved model" : "Register a model"}</strong>
-              <span>Provider credentials stay in your Hermes environment. This only changes the selector catalog.</span>
+              <p>Provider credentials stay in your Hermes environment. This only changes the selector catalog.</p>
+            </div>
+            <div className="ui-models-editor-summary" aria-label="Model draft summary">
+              <Badge variant="accent">{providerLabel(formProvider)}</Badge>
+              <code>{formModel.trim() || "model-id"}</code>
             </div>
           </div>
           {saveError && <div className="ui-modal-alert">{saveError}</div>}
 
-          <Field label="Display Name" hint="Shown in the model catalog and chat selector.">
-            <Input id={nameInputId} value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. My DeepSeek" />
-          </Field>
+          <div className="ui-models-editor-grid">
+            <section className="ui-models-editor-card">
+              <div className="ui-models-editor-section-head">
+                <span>Identity</span>
+                <small>How it appears in Hermes.</small>
+              </div>
 
-          <div className="ui-modal-grid-2">
-            <Field label="Provider" hint="Routes requests through this provider.">
-              <Select
-                id={providerSelectId}
-                value={formProvider}
-                onChange={(e) => {
-                  setFormProvider(e.target.value);
-                  setModelSuggestionsOpen(false);
-                  setDiscoveredModels([]);
-                  setDiscoverStatus(null);
-                  setActiveModelSuggestionIndex(0);
-                }}
-                aria-label="Provider"
-              >
-                {providerOptions.map((p) => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </Select>
-            </Field>
-
-            <Field
-              label="Model ID"
-              hint={
-                discoverLoading
-                  ? "Discovering available models..."
-                  : discoveredModels.length > 0
-                    ? `${discoveredModels.length} model${discoveredModels.length === 1 ? "" : "s"} found`
-                    : discoverStatus === "no-key"
-                      ? "Add this provider's API key for autocomplete."
-                      : "Type an exact provider model id."
-              }
-            >
-              <div className="ui-model-discovery" ref={modelDiscoveryRef}>
+              <Field label="Display Name" hint="Shown in the model catalog and chat selector.">
                 <Input
-                  id={modelInputId}
-                  value={formModel}
-                  onChange={(e) => {
-                    setFormModel(e.target.value);
-                    setModelSuggestionsOpen(true);
-                  }}
-                  onFocus={() => setModelSuggestionsOpen(true)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      if (modelSuggestionsOpen) {
+                  id={nameInputId}
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="e.g. My DeepSeek"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </Field>
+
+              <Field
+                label="Model ID"
+                hint={
+                  discoverLoading
+                    ? "Discovering available models..."
+                    : discoveredModels.length > 0
+                      ? `${discoveredModels.length} model${discoveredModels.length === 1 ? "" : "s"} found`
+                      : discoverStatus === "no-key"
+                        ? "Add this provider's API key for autocomplete."
+                        : "Type an exact provider model id."
+                }
+              >
+                <div className="ui-model-discovery" ref={modelDiscoveryRef}>
+                  <Input
+                    id={modelInputId}
+                    value={formModel}
+                    onChange={(e) => {
+                      setFormModel(e.target.value);
+                      setModelSuggestionsOpen(true);
+                    }}
+                    onFocus={() => setModelSuggestionsOpen(true)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        if (modelSuggestionsOpen) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setModelSuggestionsOpen(false);
+                        }
+                        return;
+                      }
+                      if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
+                      if (suggestedModels.length === 0) return;
+                      if (event.key === "ArrowDown") {
                         event.preventDefault();
-                        event.stopPropagation();
+                        setModelSuggestionsOpen(true);
+                        setActiveModelSuggestionIndex((current) => Math.min(current + 1, suggestedModels.length - 1));
+                      } else if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setModelSuggestionsOpen(true);
+                        setActiveModelSuggestionIndex((current) => Math.max(current - 1, 0));
+                      } else if (event.key === "Enter" && modelSuggestionsOpen) {
+                        event.preventDefault();
+                        const selected = suggestedModels[activeModelSuggestionIndex] || suggestedModels[0];
+                        setFormModel(selected);
                         setModelSuggestionsOpen(false);
                       }
-                      return;
-                    }
-                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
-                    if (suggestedModels.length === 0) return;
-                    if (event.key === "ArrowDown") {
-                      event.preventDefault();
-                      setModelSuggestionsOpen(true);
-                      setActiveModelSuggestionIndex((current) => Math.min(current + 1, suggestedModels.length - 1));
-                    } else if (event.key === "ArrowUp") {
-                      event.preventDefault();
-                      setModelSuggestionsOpen(true);
-                      setActiveModelSuggestionIndex((current) => Math.max(current - 1, 0));
-                    } else if (event.key === "Enter" && modelSuggestionsOpen) {
-                      event.preventDefault();
-                      const selected = suggestedModels[activeModelSuggestionIndex] || suggestedModels[0];
-                      setFormModel(selected);
-                      setModelSuggestionsOpen(false);
-                    }
-                  }}
-                  placeholder="e.g. gpt-4o"
-                  className="font-mono"
-                  role="combobox"
-                  aria-autocomplete="list"
-                  aria-expanded={modelSuggestionsOpen && suggestedModels.length > 0}
-                  aria-controls={modelSuggestionsOpen && suggestedModels.length > 0 ? modelSuggestionListId : undefined}
-                  aria-activedescendant={
-                    modelSuggestionsOpen && suggestedModels.length > 0
-                      ? `${modelSuggestionListId}-${activeModelSuggestionIndex}`
-                      : undefined
-                  }
-                />
-                {modelSuggestionsOpen && suggestedModels.length > 0 && modelSuggestionRect && (
-                  createPortal(<div
-                    id={modelSuggestionListId}
-                    ref={modelSuggestionMenuRef}
-                    className="ui-model-discovery-menu ui-model-discovery-menu-portal slide-up"
-                    role="listbox"
-                    aria-label="Model suggestions"
-                    data-placement={modelSuggestionRect?.placement}
-                    style={{
-                      left: modelSuggestionRect.left,
-                      top: modelSuggestionRect.top,
-                      width: modelSuggestionRect.width,
-                      maxHeight: Math.min(modelSuggestionRect.maxHeight, 240),
                     }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Tab") return;
-                      event.preventDefault();
-                      setModelSuggestionsOpen(false);
-                      requestAnimationFrame(() => {
-                        document.getElementById(modelInputId)?.focus();
-                      });
-                    }}
-                  >
-                    {suggestedModels.map((id, index) => (
-                      <button
-                        key={id}
-                        id={`${modelSuggestionListId}-${index}`}
-                        type="button"
-                        role="option"
-                        aria-selected={index === activeModelSuggestionIndex}
-                        className={index === activeModelSuggestionIndex ? "ui-model-discovery-item is-active" : "ui-model-discovery-item"}
-                        onMouseEnter={() => setActiveModelSuggestionIndex(index)}
-                        onClick={() => {
-                          setFormModel(id);
-                          setModelSuggestionsOpen(false);
-                        }}
-                      >
-                        <code>{id}</code>
-                      </button>
-                    ))}
-                  </div>, document.body)
-                )}
-              </div>
-            </Field>
-          </div>
+                    placeholder="e.g. gpt-4o"
+                    className="font-mono"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={modelSuggestionsOpen && suggestedModels.length > 0}
+                    aria-controls={modelSuggestionsOpen && suggestedModels.length > 0 ? modelSuggestionListId : undefined}
+                    aria-activedescendant={
+                      modelSuggestionsOpen && suggestedModels.length > 0
+                        ? `${modelSuggestionListId}-${activeModelSuggestionIndex}`
+                        : undefined
+                    }
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  {modelSuggestionsOpen && suggestedModels.length > 0 && modelSuggestionRect && (
+                    createPortal(<div
+                      id={modelSuggestionListId}
+                      ref={modelSuggestionMenuRef}
+                      className="ui-model-discovery-menu ui-model-discovery-menu-portal slide-up"
+                      role="listbox"
+                      aria-label="Model suggestions"
+                      data-placement={modelSuggestionRect?.placement}
+                      style={{
+                        left: modelSuggestionRect.left,
+                        top: modelSuggestionRect.top,
+                        width: modelSuggestionRect.width,
+                        maxHeight: Math.min(modelSuggestionRect.maxHeight, 240),
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Tab") return;
+                        event.preventDefault();
+                        setModelSuggestionsOpen(false);
+                        requestAnimationFrame(() => {
+                          document.getElementById(modelInputId)?.focus();
+                        });
+                      }}
+                    >
+                      {suggestedModels.map((id, index) => (
+                        <button
+                          key={id}
+                          id={`${modelSuggestionListId}-${index}`}
+                          type="button"
+                          role="option"
+                          aria-selected={index === activeModelSuggestionIndex}
+                          className={index === activeModelSuggestionIndex ? "ui-model-discovery-item is-active" : "ui-model-discovery-item"}
+                          onMouseEnter={() => setActiveModelSuggestionIndex(index)}
+                          onClick={() => {
+                            setFormModel(id);
+                            setModelSuggestionsOpen(false);
+                          }}
+                        >
+                          <code>{id}</code>
+                        </button>
+                      ))}
+                    </div>, document.body)
+                  )}
+                </div>
+              </Field>
+            </section>
 
-          <Field label="Base URL" hint="Optional. Use only for custom or local OpenAI-compatible endpoints.">
-            <Input
-              id={baseUrlInputId}
-              value={formBaseUrl}
-              onChange={(e) => {
-                setFormBaseUrl(e.target.value);
-                setDiscoveredModels([]);
-                setDiscoverStatus(null);
-                setActiveModelSuggestionIndex(0);
-              }}
-              placeholder="Optional — for custom / local endpoints"
-              className="font-mono"
-            />
-          </Field>
+            <section className="ui-models-editor-card">
+              <div className="ui-models-editor-section-head">
+                <span>Routing</span>
+                <small>Where Hermes sends requests.</small>
+              </div>
+
+              <Field label="Provider" hint="Routes requests through this provider.">
+                <Select
+                  id={providerSelectId}
+                  value={formProvider}
+                  onChange={(e) => {
+                    setFormProvider(e.target.value);
+                    setModelSuggestionsOpen(false);
+                    setDiscoveredModels([]);
+                    setDiscoverStatus(null);
+                    setActiveModelSuggestionIndex(0);
+                  }}
+                  aria-label="Provider"
+                >
+                  {providerOptions.map((p) => (
+                    <option key={p.id} value={p.id}>{p.label}</option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field label="Base URL" hint="Optional. Use only for custom or local OpenAI-compatible endpoints.">
+                <Input
+                  id={baseUrlInputId}
+                  value={formBaseUrl}
+                  onChange={(e) => {
+                    setFormBaseUrl(e.target.value);
+                    setDiscoveredModels([]);
+                    setDiscoverStatus(null);
+                    setActiveModelSuggestionIndex(0);
+                  }}
+                  placeholder="Optional — for custom / local endpoints"
+                  className="font-mono"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </Field>
+            </section>
+          </div>
         </div>
       </Modal>
 

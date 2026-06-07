@@ -464,8 +464,8 @@ export function EmptyState({ icon, title, sub, action }: { icon?: ReactNode; tit
 }
 
 /* ── Modal ── */
-export function Modal({ open, onClose, title, kicker, children, footer, width = 560 }: {
-  open: boolean; onClose: () => void; title?: ReactNode; kicker?: ReactNode; children: ReactNode; footer?: ReactNode; width?: number;
+export function Modal({ open, onClose, title, kicker, children, footer, width = 560, className }: {
+  open: boolean; onClose: () => void; title?: ReactNode; kicker?: ReactNode; children: ReactNode; footer?: ReactNode; width?: number; className?: string;
 }) {
   const titleId = useId();
   const modalRef = useRef<HTMLDivElement>(null);
@@ -525,7 +525,7 @@ export function Modal({ open, onClose, title, kicker, children, footer, width = 
     <div className="ui-overlay fade-in" onClick={onClose}>
       <div
         ref={modalRef}
-        className="ui-modal slide-up"
+        className={cx("ui-modal slide-up", className)}
         style={{ maxWidth: width }}
         onClick={e => e.stopPropagation()}
         role="dialog"
