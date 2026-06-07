@@ -2,42 +2,122 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md)
 
-Hermes Desktop Pro는 Hermes agents를 위한 macOS 우선 독립형 데스크톱 command center입니다. 채팅, 모델/프로바이더 관리, 메모리, 스킬, 도구, 프로필, 게이트웨이 제어, 스케줄, 칸반, Hermes Office 공간 워크스페이스를 하나의 네이티브 데스크톱 셸에 통합합니다.
+Hermes Desktop Pro는 Hermes agents를 위한 macOS 우선 독립형 데스크톱 command center입니다. 채팅 실행, 다중 프로필 dispatch, 모델/프로바이더 관리, 도구, 스킬, 메모리, 스케줄, cron jobs, 칸반, Hermes Office 공간 워크스페이스를 하나의 프리미엄 데스크톱 앱에 통합합니다.
 
-Hermes Office는 Hermes Desktop Pro 내부에 포함된 로컬 워크스페이스입니다. 별도 제품 셸이 아니며 Hermes 앱 identity, 내비게이션, 비주얼 시스템을 대체해서는 안 됩니다.
+Hermes Office는 Hermes Desktop Pro 내부에 포함되어 있습니다. 별도 제품 셸이 아니며 Hermes 앱 identity, 내비게이션, 비주얼 시스템을 대체해서는 안 됩니다.
 
-## 주요 기능
+![Hermes Desktop Pro chat and profile dispatch](docs/assets/screenshots/hermes-chat-dispatch.png)
 
-- 프리미엄 다크/골드 Hermes 비주얼 시스템과 반응형 데스크톱 레이아웃.
-- 채팅 전환, 닫기 컨트롤, 실행 activity 상태를 지원하는 멀티 채팅 워크스페이스.
-- 프롬프트 수신, 컨텍스트 준비, 생성, 도구 activity, 사용량, 완료, 중단/오류 상태를 보여주는 agent run timeline.
-- 컨텍스트, activity, 모델 상태, 도구 컨트롤, 메모리를 위한 Inspector 패널.
-- 로컬 환경 키 처리를 포함한 프로바이더 및 모델 카탈로그 관리.
-- 프로필, 스킬, soul/persona, 영구 메모리, 스케줄, 칸반 운영.
-- 앱 내부에 포함된 로컬 공간 command floor인 Hermes Office.
+## 제품 개요
+
+Hermes Desktop Pro는 여러 AI 프로필과 워크플로를 하나의 로컬 데스크톱 화면에서 운영하기 위한 앱입니다. 제품 identity는 Electron 및 embedded runtime과 분리되어 있습니다. Electron은 데스크톱 framework일 뿐이며 앱 이름, bundle metadata, Dock/menu identity, 패키지 산출물은 Hermes Desktop Pro로 표시됩니다.
+
+UI는 마케팅 페이지가 아니라 실제 운영 workspace로 설계되었습니다. 다크/골드 Hermes visual system, compact desktop controls, 읽기 쉬운 panels, persistent navigation을 통해 chat, tools, models, providers, memory, schedules, cron jobs, kanban, Office 사이를 context를 잃지 않고 이동할 수 있습니다.
+
+## 제품 화면
+
+### Chat Command Center
+
+Chat page는 핵심 실행 화면입니다. 여러 open chats, close/new controls, provider/model selectors, inspector panels, quick actions, 구조화된 profile dispatch picker를 지원합니다.
+
+![Hermes multi-profile execution picker](docs/assets/screenshots/hermes-chat-dispatch.png)
+
+### Tools Matrix
+
+Tools와 plugins는 capability별로 그룹화되며 UI에서 toggle할 수 있고 agent configuration flow에 반영됩니다.
+
+![Hermes tools and plugins matrix](docs/assets/screenshots/hermes-tools-matrix.png)
+
+### Provider Catalog
+
+Providers 화면은 model counts, capability tags, context windows, API-key requirements, local/no-key provider status를 보여줍니다.
+
+![Hermes provider catalog](docs/assets/screenshots/hermes-provider-catalog.png)
+
+### Model Dialogs
+
+Model 생성과 편집은 dimmed app background, 명확한 fields, action-focused controls를 갖춘 centered modal dialogs에서 이루어집니다.
+
+![Hermes model edit dialog](docs/assets/screenshots/hermes-model-dialog.png)
+
+## 핵심 기능
+
+- Tab switching, close controls, new chat creation, active-session loading을 갖춘 multi-chat workspace.
+- Chat composer에서 실행되는 real multi-profile execution: single, sequential, parallel, hybrid dispatch modes.
+- 하나의 prompt를 하나의 profile, 여러 profiles, 또는 primary profile plus team으로 보낼 수 있는 profile-scoped commands.
+- Prompt intake, context preparation, generation, tool activity, usage, completion, abort, error states를 보여주는 agent run timeline.
+- Activity, context, pinned information, model state, tool controls, memory를 위한 inspector panels.
+- Local environment key handling을 포함한 provider/model catalog management.
+- Grouped capability filters와 enable/disable controls를 갖춘 tools and plugin matrix.
+- Profiles, skills, persona/soul, persistent memory, schedules, cron jobs, kanban operations.
+- 같은 Hermes application shell 안에 embedded 된 Hermes Office spatial command floor.
+
+## 실행 모델
+
+Hermes Desktop Pro는 multi-profile execution을 mock으로 처리하지 않습니다. Renderer는 preload bridge를 통해 Electron main process로 dispatch request를 보내고, main process는 선택된 profiles를 real chat execution path로 실행한 뒤 status를 UI로 stream합니다.
+
+지원되는 dispatch modes:
+
+- `single`: 선택한 하나의 profile에 prompt 전송.
+- `sequential`: 선택한 profiles를 순차 실행.
+- `parallel`: 선택한 profiles를 동시에 실행.
+- `hybrid`: primary profile을 먼저 실행한 뒤 selected team에 dispatch.
+
+UI는 profile별 state를 유지하므로 사용자는 queued, running, completed, aborted, failed runs를 정적 mockup이 아니라 실제 상태로 확인할 수 있습니다.
+
+## 앱 섹션
+
+- `Chat`: direct prompts, agent runs, tool activity, multi-profile dispatch를 위한 command center.
+- `Sessions`: session browsing과 active-chat loading.
+- `Profiles`: 각자 config, models, skills, memory, gateway state를 가진 isolated Hermes workspaces.
+- `Tools`: toolset availability, grouped filters, enable/disable controls.
+- `Skills`: agents가 사용할 수 있는 reusable capabilities and workflows.
+- `Soul` / `Persona`: agent의 behavior, tone, principles.
+- `Memory`: sessions를 넘어 Hermes가 recall할 수 있는 persistent context.
+- `Models`: saved model catalog와 default model selection.
+- `Providers`: provider catalog, API-key hints, context windows, local providers.
+- `Gateway`: local communication and integration server controls.
+- `Office`: embedded Hermes Office spatial command floor.
+- `Schedules`: recurring scheduled work.
+- `Cron Jobs`: profile-scoped cron registry, active/paused state, edit controls, profile grouping.
+- `Kanban`: durable multi-agent task board.
+- `Settings`: connection mode, network, providers, appearance, backup, diagnostics, runtime preferences.
+
+## 아키텍처
+
+Hermes Desktop Pro는 Electron, React, TypeScript, Vite, Tailwind CSS, SQLite-backed local state를 사용합니다.
+
+- `src/main`: Electron main process, IPC handlers, local runtime orchestration, app windows, packaged identity, backend-facing execution.
+- `src/preload`: renderer surfaces와 main-process APIs 사이의 안전한 bridge.
+- `src/renderer`: React interface, visual system, chat workspace, pages, dialogs, timeline, inspector, Office container.
+- `src/shared`: shared types, provider metadata, i18n helpers, URL helpers, cross-process contracts.
+- `resources`: app icons와 package resources.
+- `build`: macOS entitlements와 packaging support files.
+
+앱은 user-facing identity를 framework identity와 분리합니다. `package.json`은 `productName: "Hermes Desktop Pro"`를 사용하고 package metadata는 `com.hermes.desktop-pro`, app icon은 Hermes asset set에서 가져옵니다.
 
 ## 요구 사항
 
-- 패키징된 macOS 빌드는 macOS 11 이상이 필요합니다.
-- Node.js 22 이상을 권장합니다.
+- 패키징된 macOS build는 macOS 11 이상 필요.
+- Node.js 22 이상 권장.
 - npm.
-- 라이브 채팅과 agent 워크플로를 위해 Hermes/OpenCode runtime 접근 권한이 필요합니다.
+- Live chat과 agent workflows를 위한 Hermes/OpenCode runtime access.
 
 ## 개발
 
-의존성을 설치합니다:
+의존성 설치:
 
 ```bash
 npm install
 ```
 
-개발 모드로 데스크톱 앱을 실행합니다:
+개발 모드로 desktop app 실행:
 
 ```bash
 npm run dev
 ```
 
-일반 검증 스위트를 실행합니다:
+일반 검증 스위트 실행:
 
 ```bash
 npm run lint
@@ -48,56 +128,43 @@ npm run build
 
 ## 패키징
 
-macOS 패키지를 빌드합니다:
+macOS package build:
 
 ```bash
 npm run build:mac
 ```
 
-Apple Silicon만 빌드합니다:
+Apple Silicon만 build:
 
 ```bash
 npm run build:mac:arm64
 ```
 
-Intel만 빌드합니다:
+Intel만 build:
 
 ```bash
 npm run build:mac:x64
 ```
 
-패키징된 앱 identity는 다음과 같이 설정되어 있습니다:
-
-- 앱 이름: `Hermes Desktop Pro`
-- App ID: `com.hermes.desktop-pro`
-- macOS 아이콘: `resources/icon.icns`
-- Linux 아이콘: `resources/icon.png`
-- Windows 아이콘: `resources/icon.ico`
-
-Electron은 runtime framework일 뿐입니다. 앱 제목, Dock/메뉴 identity, bundle 메타데이터, 패키지 산출물은 제품이 Hermes Desktop Pro로 보이도록 구성되어 있습니다.
+다른 platform scripts는 `npm run build:linux`, `npm run build:win`, `npm run build:all`로 사용할 수 있습니다.
 
 ## Office
 
-Hermes Office는 Office 페이지 내부에서 시작하고 중지합니다. Office 뷰는 Hermes Desktop Pro에 포함되며, 메인 Hermes 내비게이션과 앱 chrome을 유지해야 합니다.
+Hermes Office는 Office page 내부에서 start/stop합니다. Office view는 Hermes Desktop Pro에 embedded 되며 main Hermes navigation과 app chrome을 유지해야 합니다.
 
-Office가 멈춘 것처럼 보이면 먼저 Office 컨트롤에서 로컬 Office runtime 로그를 확인한 뒤, 같은 페이지에서 Office runtime을 다시 시작하세요.
-
-## 저장소 구조
-
-- `src/main`: Electron main process, IPC handlers, 로컬 runtime orchestration.
-- `src/preload`: renderer와 Office view를 위한 안전한 preload bridges.
-- `src/renderer`: React 인터페이스와 비주얼 시스템.
-- `src/shared`: 공유 타입, providers, i18n, URL/key helpers.
-- `resources`: 앱 아이콘과 패키지 리소스.
-- `build`: macOS entitlement 파일.
+Office가 멈춘 것처럼 보이면 먼저 Office controls에서 local Office runtime logs를 확인하고, 같은 page에서 Office runtime을 다시 시작하세요.
 
 ## 릴리스 체크리스트
 
 출시 전:
 
-1. `npm run typecheck`를 실행합니다.
-2. `npm run lint`를 실행합니다.
-3. `npm test`를 실행합니다.
-4. `npm run build`를 실행합니다.
-5. 대상 플랫폼을 패키징합니다.
-6. 패키징된 앱을 열고 채팅 탭, Activity inspector, 모델/프로바이더 대화상자, Office 시작을 수동으로 확인합니다.
+1. `npm run typecheck` 실행.
+2. `npm run lint` 실행.
+3. `npm test` 실행.
+4. `npm run build` 실행.
+5. 대상 platform package.
+6. Packaged app을 열고 chat tabs, multi-profile dispatch, Activity inspector, model/provider dialogs, cron jobs, Office startup을 수동 확인.
+
+## 키워드
+
+Hermes Desktop Pro, AI desktop app, agent workspace, multi-agent execution, OpenCode desktop, Electron React app, macOS AI app, local AI command center, provider management, AI workflow automation, cron jobs, kanban, agent memory.

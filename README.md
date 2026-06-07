@@ -2,19 +2,99 @@
 
 [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-Hermes Desktop Pro is a standalone macOS-first desktop command center for Hermes agents. It provides chat, model/provider management, memory, skills, tools, profiles, gateway controls, schedules, kanban, and the Hermes Office spatial workspace in one native desktop shell.
+Hermes Desktop Pro is a standalone macOS-first command center for Hermes agents. It brings chat execution, multi-profile dispatch, model and provider management, tools, skills, memory, schedules, cron jobs, kanban, and the Hermes Office spatial workspace into one premium desktop application.
 
-Hermes Office is an embedded local workspace inside Hermes Desktop Pro. It is not a separate product shell and it should not replace the Hermes app identity, navigation, or visual system.
+Hermes Office is embedded inside Hermes Desktop Pro. It is not a separate product shell and must not replace the Hermes app identity, navigation, or visual system.
 
-## Highlights
+![Hermes Desktop Pro chat and profile dispatch](docs/assets/screenshots/hermes-chat-dispatch.png)
 
-- Premium dark/gold Hermes visual system with responsive desktop layouts.
-- Multi-chat workspace with tab switching, close controls, and run activity state.
-- Agent run timeline showing prompt intake, context preparation, generation, tool activity, usage, completion, and abort/error states.
-- Inspector panels for context, activity, model state, tool controls, and memory.
+## What It Is
+
+Hermes Desktop Pro is built for people who operate several AI profiles and workflows from one local desktop surface. The app keeps the product identity independent from Electron and from embedded runtimes: Electron is only the desktop framework, while the app name, bundle metadata, Dock/menu identity, and packaged artifacts are Hermes Desktop Pro.
+
+The interface is designed as an operational workspace rather than a marketing page. It uses a dark/gold Hermes visual system, compact desktop controls, readable panels, and persistent navigation so users can move between chat, tools, models, providers, memory, schedules, cron jobs, kanban, and Office without losing context.
+
+## Product Screens
+
+### Chat Command Center
+
+The chat page is the primary execution surface. It supports multiple open chats, close/new controls, provider and model selectors, inspector panels, quick actions, and a structured profile dispatch picker.
+
+![Hermes multi-profile execution picker](docs/assets/screenshots/hermes-chat-dispatch.png)
+
+### Tools Matrix
+
+Tools and plugins are grouped by capability, can be toggled from the UI, and are reflected back into the agent configuration flow.
+
+![Hermes tools and plugins matrix](docs/assets/screenshots/hermes-tools-matrix.png)
+
+### Provider Catalog
+
+Providers show model counts, capability tags, context windows, API-key requirements, and local/no-key provider status.
+
+![Hermes provider catalog](docs/assets/screenshots/hermes-provider-catalog.png)
+
+### Model Dialogs
+
+Model creation and editing use centered modal dialogs with a dimmed app background, clear fields, and action-focused controls.
+
+![Hermes model edit dialog](docs/assets/screenshots/hermes-model-dialog.png)
+
+## Core Capabilities
+
+- Multi-chat workspace with tab switching, close controls, new chat creation, and active-session loading.
+- Real multi-profile execution from the chat composer: single, sequential, parallel, and hybrid dispatch modes.
+- Profile-scoped commands so one prompt can run against one profile, several profiles, or a primary profile plus a team.
+- Agent run timeline for prompt intake, context preparation, generation, tool activity, usage, completion, abort, and error states.
+- Inspector panels for activity, context, pinned information, model state, tool controls, and memory.
 - Provider and model catalog management with local environment key handling.
-- Profiles, skills, soul/persona, persistent memory, schedules, and kanban operations.
-- Hermes Office for a local spatial command floor embedded inside the app.
+- Tools and plugin matrix with grouped capability filters and enable/disable controls.
+- Profiles, skills, persona/soul, persistent memory, schedules, cron jobs, and kanban operations.
+- Hermes Office as an embedded local spatial command floor inside the same Hermes application shell.
+
+## Execution Model
+
+Hermes Desktop Pro does not fake multi-profile execution. The renderer sends a dispatch request through the preload bridge to the Electron main process. The main process runs the selected profiles through the real chat execution path and streams status back to the UI.
+
+Supported dispatch modes:
+
+- `single`: send the prompt to one selected profile.
+- `sequential`: run selected profiles one by one.
+- `parallel`: run selected profiles at the same time.
+- `hybrid`: run the primary profile first, then dispatch to the selected team.
+
+The UI keeps per-profile state so the user can see queued, running, completed, aborted, and failed runs without treating the output as a static mockup.
+
+## App Sections
+
+- `Chat`: command center for direct prompts, agent runs, tool activity, and multi-profile dispatch.
+- `Sessions`: session browsing and active-chat loading.
+- `Profiles`: isolated Hermes workspaces, each with its own config, models, skills, memory, and gateway state.
+- `Tools`: toolset availability, grouped filters, and enable/disable controls.
+- `Skills`: reusable capabilities and workflows available to agents.
+- `Soul` / `Persona`: the agent's behavior, tone, and principles.
+- `Memory`: persistent context that Hermes can recall across sessions.
+- `Models`: saved model catalog and default model selection.
+- `Providers`: provider catalog, API-key hints, context windows, and local providers.
+- `Gateway`: local communication and integration server controls.
+- `Office`: embedded Hermes Office spatial command floor.
+- `Schedules`: recurring scheduled work.
+- `Cron Jobs`: profile-scoped cron registry with active/paused state, edit controls, and grouping by profile.
+- `Kanban`: durable multi-agent task board.
+- `Settings`: connection mode, network, providers, appearance, backup, diagnostics, and runtime preferences.
+
+## Architecture
+
+Hermes Desktop Pro uses Electron, React, TypeScript, Vite, Tailwind CSS, and SQLite-backed local state.
+
+- `src/main`: Electron main process, IPC handlers, local runtime orchestration, app windows, packaged identity, and backend-facing execution.
+- `src/preload`: safe bridge between renderer surfaces and main-process APIs.
+- `src/renderer`: React interface, visual system, chat workspace, pages, dialogs, timeline, inspector, and Office container.
+- `src/shared`: shared types, provider metadata, i18n helpers, URL helpers, and cross-process contracts.
+- `resources`: app icons and package resources.
+- `build`: macOS entitlements and packaging support files.
+
+The app keeps user-facing identity separate from framework identity. `package.json` uses `productName: "Hermes Desktop Pro"`, package metadata uses `com.hermes.desktop-pro`, and the app icon is sourced from the Hermes asset set.
 
 ## Requirements
 
@@ -66,30 +146,13 @@ Build only Intel:
 npm run build:mac:x64
 ```
 
-The packaged app identity is configured as:
-
-- App name: `Hermes Desktop Pro`
-- App ID: `com.hermes.desktop-pro`
-- macOS icon: `resources/icon.icns`
-- Linux icon: `resources/icon.png`
-- Windows icon: `resources/icon.ico`
-
-Electron is the runtime framework only. The app title, Dock/menu identity, bundle metadata, and package artifacts are configured to present the product as Hermes Desktop Pro.
+Other platform scripts are available through `npm run build:linux`, `npm run build:win`, and `npm run build:all`.
 
 ## Office
 
 Hermes Office is started and stopped from inside the Office page. The Office view is embedded into Hermes Desktop Pro and must keep the main Hermes navigation and app chrome intact.
 
 If Office appears stuck, verify the local Office runtime logs from the Office controls first, then restart the Office runtime from the same page.
-
-## Repository Structure
-
-- `src/main`: Electron main process, IPC handlers, local runtime orchestration.
-- `src/preload`: Secure preload bridges for the renderer and Office view.
-- `src/renderer`: React interface and visual system.
-- `src/shared`: Shared types, providers, i18n, and URL/key helpers.
-- `resources`: App icon and package resources.
-- `build`: macOS entitlement files.
 
 ## Release Checklist
 
@@ -100,4 +163,8 @@ Before shipping:
 3. Run `npm test`.
 4. Run `npm run build`.
 5. Package the target platform.
-6. Open the packaged app and manually check chat tabs, Activity inspector, model/provider dialogs, and Office startup.
+6. Open the packaged app and manually check chat tabs, multi-profile dispatch, Activity inspector, model/provider dialogs, cron jobs, and Office startup.
+
+## Keywords
+
+Hermes Desktop Pro, AI desktop app, agent workspace, multi-agent execution, OpenCode desktop, Electron React app, macOS AI app, local AI command center, provider management, AI workflow automation, cron jobs, kanban, agent memory.
