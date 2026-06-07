@@ -491,8 +491,8 @@ export default function ChatView({
           className="ui-chat-switcher-current"
           aria-expanded={tabMenuOpen}
           aria-haspopup="menu"
+          aria-label={`Switch chats, current chat ${tab.name}`}
           onClick={() => setTabMenuOpen(open => !open)}
-          title={`Switch chats · ${tab.name}`}
         >
           <MessageSquare size={14} />
           <span className="ui-chat-switcher-label">Chats</span>

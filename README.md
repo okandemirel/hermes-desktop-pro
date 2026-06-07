@@ -1,5 +1,7 @@
 # Hermes Desktop Pro
 
+[简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
+
 Hermes Desktop Pro is a standalone macOS-first desktop command center for Hermes agents. It provides chat, model/provider management, memory, skills, tools, profiles, gateway controls, schedules, kanban, and the Hermes Office spatial workspace in one native desktop shell.
 
 Hermes Office is an embedded local workspace inside Hermes Desktop Pro. It is not a separate product shell and it should not replace the Hermes app identity, navigation, or visual system.
