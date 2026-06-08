@@ -256,6 +256,28 @@ export interface ModelConfig {
   baseUrl: string;
 }
 
+// ─── Application update types ──────────────────────────────────
+export type AppUpdatePhase =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "installing"
+  | "error"
+  | "unsupported";
+
+export interface AppUpdateStatus {
+  phase: AppUpdatePhase;
+  currentVersion: string;
+  availableVersion?: string;
+  percent?: number;
+  message?: string;
+  canCheck: boolean;
+  canInstall: boolean;
+}
+
 // ─── Memory types ───────────────────────────────────────────────
 export interface MemoryEntry {
   index: number;

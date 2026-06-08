@@ -11,6 +11,11 @@ files:
   - "out/**/*"
   - "resources/**/*"
 
+publish:
+  provider: github
+  owner: okandemirel
+  repo: hermes-desktop-pro
+
 # ── macOS ──────────────────────────────────────────
 mac:
   target:

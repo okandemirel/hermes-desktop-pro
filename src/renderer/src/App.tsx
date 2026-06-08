@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import {
   MessageSquare, Clock, User, Brain, Cpu, HardDrive,
   Heart, Wrench, Calendar, Radio, Layout, Box, Package,
-  CalendarClock, PanelLeftClose, PanelLeft, Plus, FileText, Bell, HelpCircle, SlidersHorizontal, Settings,
+  CalendarClock, PanelLeftClose, PanelLeft, Plus, FileText, Bell, HelpCircle, SlidersHorizontal, Settings, RefreshCw, Download,
 } from "lucide-react";
 import ChatView from "./components/ChatView";
 import SessionsView from "./components/SessionsView";
@@ -20,7 +20,7 @@ import KanbanView from "./screens/Kanban/Kanban";
 import OfficeView from "./screens/Office/Office";
 import { BrandMark, HermesWordmark } from "./components/BrandMark";
 import { cx, StatusDot } from "./ui";
-import type { ChatTab, DispatchMode, ProfileDispatchTarget, ProviderId, ProviderInfo } from "@shared/types";
+import type { AppUpdateStatus, ChatTab, DispatchMode, ProfileDispatchTarget, ProviderId, ProviderInfo } from "@shared/types";
 import { getAllProviders } from "@shared/providers";
 import { sessionHistoryToChatMessages } from "./sessionHistory";
 
@@ -95,6 +95,7 @@ export default function App() {
   const [providers] = useState<ProviderInfo[]>(getAllProviders);
   const [collapsed, setCollapsed] = useState(false);
   const [connStatus, setConnStatus] = useState<{ ok: boolean; mode: string }>({ ok: false, mode: "local" });
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [recentSessions, setRecentSessions] = useState<SidebarSession[]>([]);
   const navRefs = useRef<Record<NavScreen, HTMLButtonElement | null>>({} as Record<NavScreen, HTMLButtonElement | null>);
 
@@ -145,6 +146,32 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    window.hermes.getAppUpdateStatus()
+      .then((status: AppUpdateStatus) => {
+        if (!cancelled) setUpdateStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUpdateStatus({
+            phase: "error",
+            currentVersion: "",
+            canCheck: true,
+            canInstall: false,
+            message: "Update status is unavailable.",
+          });
+        }
+      });
+    const unsubscribe = window.hermes.onAppUpdateStatus((status: AppUpdateStatus) => {
+      if (!cancelled) setUpdateStatus(status);
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
   const connLabel = connStatus.mode.charAt(0).toUpperCase() + connStatus.mode.slice(1);
 
   const handleNewTab = useCallback(() => {
@@ -177,6 +204,45 @@ export default function App() {
   const handleUpdateDispatch = useCallback((tabId: string, mode: DispatchMode, targets: ProfileDispatchTarget[]) => {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, dispatchMode: mode, dispatchTargets: targets } : t));
   }, []);
+
+  const handleAppUpdate = useCallback(async () => {
+    try {
+      const next = updateStatus?.phase === "downloaded"
+        ? await window.hermes.installAppUpdate()
+        : await window.hermes.checkForAppUpdates();
+      setUpdateStatus(next);
+    } catch (error) {
+      setUpdateStatus(prev => ({
+        phase: "error",
+        currentVersion: prev?.currentVersion || "",
+        canCheck: true,
+        canInstall: false,
+        message: error instanceof Error ? error.message : "Update check failed.",
+      }));
+    }
+  }, [updateStatus?.phase]);
+
+  const renderUpdateButton = () => {
+    const phase = updateStatus?.phase || "idle";
+    const active = ["checking", "available", "downloading", "downloaded", "installing", "error"].includes(phase);
+    const busy = phase === "checking" || phase === "available" || phase === "downloading" || phase === "installing";
+    const title = updateStatus?.message || (
+      phase === "downloaded" ? "Install downloaded update" : "Check for updates"
+    );
+    const Icon = phase === "downloaded" ? Download : RefreshCw;
+
+    return (
+      <button
+        className={cx("ui-sidebar-update no-drag", active && "is-active", phase === "downloaded" && "is-ready", phase === "error" && "is-error")}
+        onClick={handleAppUpdate}
+        title={title}
+        disabled={busy}
+        aria-label={title}
+      >
+        <Icon size={14.5} className={busy ? "animate-spin" : undefined} />
+      </button>
+    );
+  };
 
   // Open a stored session in Chat: open a fresh tab seeded with the session id
   // (useChatStream resumes from tab.sessionId) and switch to the Chat screen.
@@ -269,6 +335,7 @@ export default function App() {
           <BrandMark size={collapsed ? 22 : 25} />
           {!collapsed && <HermesWordmark size={22} />}
           {!collapsed && <span className="ml-auto ui-tag ui-tag-gold no-drag">PRO</span>}
+          {!collapsed && renderUpdateButton()}
           {!collapsed && (
             <button className="ui-sidebar-collapse no-drag" onClick={() => setCollapsed(true)} title="Collapse">
               <PanelLeftClose size={17} />

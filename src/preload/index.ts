@@ -16,6 +16,7 @@ import type {
   KanbanBoard,
   KanbanTaskDetail,
   KanbanResult,
+  AppUpdateStatus,
 } from "../shared/types";
 
 const api = {
@@ -561,6 +562,21 @@ const api = {
     };
   }) => ipcRenderer.invoke("set-connection-config", input),
   testConnection: () => ipcRenderer.invoke("test-connection"),
+
+  // Application updates
+  getAppUpdateStatus: (): Promise<AppUpdateStatus> =>
+    ipcRenderer.invoke("app-update-status"),
+  checkForAppUpdates: (): Promise<AppUpdateStatus> =>
+    ipcRenderer.invoke("app-update-check"),
+  installAppUpdate: (): Promise<AppUpdateStatus> =>
+    ipcRenderer.invoke("app-update-install"),
+  onAppUpdateStatus: (
+    callback: (status: AppUpdateStatus) => void,
+  ): (() => void) => {
+    const handler = (_: any, status: AppUpdateStatus) => callback(status);
+    ipcRenderer.on("app-update-status", handler);
+    return () => ipcRenderer.removeListener("app-update-status", handler);
+  },
 
   // Gateway
   gatewayStatus: () => ipcRenderer.invoke("gateway-status"),

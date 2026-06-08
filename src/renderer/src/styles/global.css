@@ -1285,6 +1285,60 @@ button.ui-inspector-row:hover { background: var(--hover); }
   transition: all var(--t);
 }
 .ui-sidebar-collapse:hover { color: var(--text); background: rgba(255,255,255,0.09); }
+.ui-sidebar-update {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--text-2);
+  background: rgba(255,255,255,0.055);
+  border: 1px solid rgba(255,255,255,0.10);
+  transition: all var(--t);
+}
+.ui-sidebar-update:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255,255,255,0.09);
+  border-color: rgba(var(--accent-rgb),0.34);
+}
+.ui-sidebar-update.is-active {
+  color: var(--accent-text);
+  background: rgba(var(--accent-rgb),0.11);
+  border-color: rgba(var(--accent-rgb),0.34);
+}
+.ui-sidebar-update.is-ready {
+  color: #171104;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  border-color: rgba(var(--accent-rgb),0.74);
+  box-shadow: 0 10px 24px rgba(var(--accent-rgb),0.16), inset 0 1px 0 rgba(255,255,255,0.35);
+}
+.ui-sidebar-update.is-active::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.28), 0 0 10px rgba(var(--accent-rgb),0.55);
+}
+.ui-sidebar-update.is-error {
+  color: var(--warning);
+  background: rgba(255,192,73,0.10);
+  border-color: rgba(255,192,73,0.30);
+}
+.ui-sidebar-update.is-error::after {
+  background: var(--warning);
+}
+.ui-sidebar-update:disabled {
+  opacity: 0.78;
+  cursor: default;
+}
 .ui-sidebar-new-wrap { padding-top: 5px; padding-bottom: 5px; }
 .ui-sidebar-new {
   height: 34px;
@@ -10204,6 +10258,7 @@ button.ui-inspector-row:hover { background: var(--hover); }
 }
 :root[data-theme="light"] .ui-sidebar-footer-actions button,
 :root[data-theme="light"] .ui-sidebar-collapse,
+:root[data-theme="light"] .ui-sidebar-update,
 :root[data-theme="light"] .ui-iconbtn {
   color: var(--text-2);
 }
