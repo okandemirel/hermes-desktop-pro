@@ -1265,6 +1265,7 @@ button.ui-inspector-row:hover { background: var(--hover); }
   backdrop-filter: blur(34px) saturate(150%);
   -webkit-backdrop-filter: blur(34px) saturate(150%);
   box-shadow: inset -1px 0 0 rgba(255,255,255,0.05), 18px 0 60px rgba(0,0,0,0.20);
+  overflow: hidden;
   will-change: width;
   transition:
     width 340ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -1297,8 +1298,8 @@ button.ui-inspector-row:hover { background: var(--hover); }
   opacity: 1;
   transform: translateX(0);
   transition:
-    opacity 260ms ease,
-    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 340ms ease,
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1),
     max-width 340ms cubic-bezier(0.22, 1, 0.36, 1),
     width 340ms cubic-bezier(0.22, 1, 0.36, 1),
     margin 340ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -1308,7 +1309,7 @@ button.ui-inspector-row:hover { background: var(--hover); }
 .ui-sidebar[data-labels-visible="false"] .ui-nav .ui-nav-shortcut,
 .ui-sidebar[data-labels-visible="false"] .ui-navgroup-label {
   opacity: 0;
-  transform: translateX(-5px);
+  transform: translateX(-10px);
   pointer-events: none;
 }
 .ui-sidebar-wordmark {
@@ -1420,9 +1421,14 @@ button.ui-inspector-row:hover { background: var(--hover); }
   padding: 6px 16px 6px;
   gap: 4px;
   scroll-padding: 10px 0;
+  overflow-x: hidden;
   transition:
     padding 340ms cubic-bezier(0.22, 1, 0.36, 1),
     gap 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.ui-sidebar-nav::-webkit-scrollbar:horizontal {
+  display: none;
+  height: 0;
 }
 .ui-navgroup-label {
   padding: 4px 6px 2px;
@@ -1561,6 +1567,20 @@ button.ui-inspector-row:hover { background: var(--hover); }
   border-right: 1px solid rgba(255,255,255,0.08);
   transition: all var(--t);
 }
+.ui-sidebar-footer-actions .ui-sidebar-update {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 0;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  border-radius: 0;
+  background: transparent;
+}
+.ui-sidebar-footer-actions .ui-sidebar-update.is-active,
+.ui-sidebar-footer-actions .ui-sidebar-update.is-ready,
+.ui-sidebar-footer-actions .ui-sidebar-update.is-error {
+  border-right-color: rgba(var(--accent-rgb),0.22);
+}
 .ui-sidebar-footer-actions button:last-child { border-right: 0; }
 .ui-sidebar-footer-actions button:hover { color: var(--text); background: rgba(255,255,255,0.065); }
 .ui-footer-identity {
@@ -1596,6 +1616,12 @@ button.ui-inspector-row:hover { background: var(--hover); }
 .ui-sidebar.is-collapsed .ui-sidebar-nav {
   padding-inline: 9px;
   padding-bottom: 8px;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+.ui-sidebar.is-collapsed .ui-sidebar-nav::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 .ui-sidebar.is-collapsed .ui-sidebar-footer {
   align-items: center;

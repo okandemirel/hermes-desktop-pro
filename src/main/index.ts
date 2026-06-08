@@ -212,8 +212,16 @@ function revealMainWindow(mainWindow: BrowserWindow): void {
   if (process.platform === "darwin") app.focus({ steal: true });
 }
 
+function bundledAppPath(...segments: string[]): string {
+  return app.isPackaged
+    ? join(app.getAppPath(), "out", ...segments)
+    : join(__dirname, "..", ...segments);
+}
+
 function createWindow(): BrowserWindow {
   const isMac = process.platform === "darwin";
+  const preloadPath = bundledAppPath("preload", "index.js");
+  const rendererPath = bundledAppPath("renderer", "index.html");
 
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -238,7 +246,7 @@ function createWindow(): BrowserWindow {
           backgroundColor: "#0E0E11",
         }),
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: preloadPath,
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
@@ -264,7 +272,10 @@ function createWindow(): BrowserWindow {
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    if (!existsSync(rendererPath)) {
+      console.error(`[Hermes Desktop Pro] Renderer entry not found: ${rendererPath}`);
+    }
+    mainWindow.loadFile(rendererPath);
   }
 
   return mainWindow;

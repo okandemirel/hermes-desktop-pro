@@ -1,9 +1,13 @@
-import { WebContentsView } from "electron";
+import { app, WebContentsView } from "electron";
 import type { BrowserWindow, Rectangle, WebContents } from "electron";
 import { join } from "path";
 
 const LOCAL_OFFICE_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-const OFFICE_PRELOAD = join(__dirname, "../preload/office-webview.js");
+const officePreloadPath = () => (
+  app.isPackaged
+    ? join(app.getAppPath(), "out", "preload", "office-webview.js")
+    : join(__dirname, "../preload/office-webview.js")
+);
 const HERMES_OFFICE_GUEST_GUARD_SCRIPT = String.raw`
 try {
   window.localStorage.setItem("claw3d:onboarding:completed", "true");
@@ -360,7 +364,7 @@ export class OfficeViewManager {
     if (!this.view || this.view.webContents.isDestroyed()) {
       this.view = new WebContentsView({
         webPreferences: {
-          preload: OFFICE_PRELOAD,
+          preload: officePreloadPath(),
           nodeIntegration: false,
           contextIsolation: true,
           sandbox: true,
