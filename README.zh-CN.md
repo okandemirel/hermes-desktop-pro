@@ -126,9 +126,28 @@ npm test
 npm run build
 ```
 
+## 作为 macOS 应用打开
+
+从源码运行时，最直接的 no-AI 路径是:
+
+```bash
+npm install
+npm run start:mac
+```
+
+`start:mac` 会构建真正的本地应用 bundle，并通过 macOS 打开它。Apple Silicon 上的产物位于 `dist/mac-arm64/Hermes Desktop Pro.app`，Intel 上位于 `dist/mac/Hermes Desktop Pro.app`。
+
+如果只想构建 `.app` bundle 而不打开:
+
+```bash
+npm run build:mac:app
+```
+
+如果 macOS 阻止本地未签名 build，请右键点击 `Hermes Desktop Pro.app` 并选择一次 `打开`。公开分发前应使用 Developer ID certificate 和 notarization 来签名 DMG。
+
 ## 打包
 
-构建 macOS package:
+构建可分发的 macOS DMG 和 ZIP artifacts:
 
 ```bash
 npm run build:mac

@@ -54,6 +54,7 @@ import {
   stopSshTunnel,
   testSshConnection,
 } from "./ssh-tunnel";
+import { transcribeVoiceInput } from "./voice";
 
 import {
   sshReadRemoteApiKey,
@@ -177,6 +178,7 @@ import {
 } from "./kanban";
 
 import { OfficeViewManager } from "./office-view";
+import { createDarwinApplicationMenuTemplate } from "./app-menu";
 
 import icon from "../../resources/icon.png?asset";
 
@@ -927,6 +929,16 @@ function registerIpcHandlers(): void {
     },
   );
 
+  ipcMain.handle(
+    "transcribe-voice-input",
+    (
+      _event,
+      audio: ArrayBuffer | Uint8Array,
+      mimeType?: string,
+      request?: string | { profile?: string; provider?: string; baseUrl?: string; model?: string },
+    ) => transcribeVoiceInput(audio, mimeType, request),
+  );
+
   ipcMain.on("chat-abort", () => {
     currentChatAbort?.();
     currentChatAbort = null;
@@ -1282,21 +1294,9 @@ app.whenReady().then(() => {
 
   // macOS app menu
   if (process.platform === "darwin") {
-    const template: Electron.MenuItemConstructorOptions[] = [
-      {
-        label: APP_NAME,
-        submenu: [
-          { role: "about" as const },
-          { type: "separator" as const },
-          { role: "hide" as const },
-          { role: "hideOthers" as const },
-          { role: "unhide" as const },
-          { type: "separator" as const },
-          { role: "quit" as const },
-        ],
-      },
-    ];
-    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate(createDarwinApplicationMenuTemplate(APP_NAME)),
+    );
   }
 
   registerIpcHandlers();

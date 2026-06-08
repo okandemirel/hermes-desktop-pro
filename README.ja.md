@@ -126,9 +126,28 @@ npm test
 npm run build
 ```
 
+## macOS アプリとして開く
+
+ソースから起動する場合、もっとも簡単な no-AI 手順は次のとおりです:
+
+```bash
+npm install
+npm run start:mac
+```
+
+`start:mac` は実際のローカル application bundle を build し、macOS から開きます。Apple Silicon では `dist/mac-arm64/Hermes Desktop Pro.app`、Intel では `dist/mac/Hermes Desktop Pro.app` に生成されます。
+
+`.app` bundle だけを build して開かない場合:
+
+```bash
+npm run build:mac:app
+```
+
+macOS がローカルの unsigned build をブロックする場合は、`Hermes Desktop Pro.app` を右クリックして一度 `開く` を選択してください。公開配布する DMG は Developer ID certificate と notarization で署名する必要があります。
+
 ## パッケージング
 
-macOS package を build:
+配布用 macOS DMG と ZIP artifacts を build:
 
 ```bash
 npm run build:mac

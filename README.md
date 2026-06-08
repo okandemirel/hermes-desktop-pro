@@ -126,9 +126,28 @@ npm test
 npm run build
 ```
 
+## Open As A macOS App
+
+From source, the fastest no-AI path is:
+
+```bash
+npm install
+npm run start:mac
+```
+
+`start:mac` builds a real local application bundle and opens it through macOS. The generated app is placed under `dist/mac-arm64/Hermes Desktop Pro.app` on Apple Silicon, or `dist/mac/Hermes Desktop Pro.app` on Intel.
+
+If you only want to build the `.app` bundle without opening it:
+
+```bash
+npm run build:mac:app
+```
+
+If macOS blocks a local unsigned build, right-click `Hermes Desktop Pro.app` and choose `Open` once. Public distribution should use a Developer ID certificate and notarization before shipping the DMG.
+
 ## Packaging
 
-Build a macOS package:
+Build distributable macOS DMG and ZIP artifacts:
 
 ```bash
 npm run build:mac

@@ -26,7 +26,14 @@ import { ChatMessageBubble } from "./ChatMessageBubble";
 import { BrandMark, BrandMedallion } from "./BrandMark";
 import { useChatStream } from "../hooks/useChatStream";
 import { normalizeDispatchTargets, sendLabelForDispatch } from "../chatDispatch";
-import { IconButton, StatusDot, Toggle } from "../ui";
+import { IconButton, StatusDot, Toggle, cx } from "../ui";
+import {
+  mergeVoiceTranscript,
+  supportedVoiceMimeType,
+  voiceErrorMessage,
+  voiceStatusLabel,
+  type VoiceInputStatus,
+} from "../voiceInput";
 
 interface ChatViewProps {
   tab: ChatTab; providers: ProviderInfo[]; allTabs: ChatTab[];
@@ -383,10 +390,15 @@ export default function ChatView({
   const [profilePickerOpen, setProfilePickerOpen] = useState(false);
   const [dispatchMode, setDispatchMode] = useState<DispatchMode>(tab.dispatchMode || "single");
   const [dispatchTargets, setDispatchTargets] = useState<ProfileDispatchTarget[]>(tab.dispatchTargets || []);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceInputStatus>("idle");
+  const [voiceNotice, setVoiceNotice] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const tabMenuRef = useRef<HTMLDivElement>(null);
   const profilePickerRef = useRef<HTMLDivElement>(null);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
   const suppressCommandMenuRef = useRef(false);
   const activeProvider = providers.find(p => p.id === tab.providerId);
 
@@ -535,6 +547,48 @@ export default function ChatView({
       setShowCommands(false);
     }
   }, [input]);
+
+  useEffect(() => {
+    if (!voiceNotice) return;
+    const id = window.setTimeout(() => setVoiceNotice(""), 5200);
+    return () => window.clearTimeout(id);
+  }, [voiceNotice]);
+
+  const stopVoiceTracks = useCallback(() => {
+    voiceStreamRef.current?.getTracks().forEach(track => track.stop());
+    voiceStreamRef.current = null;
+  }, []);
+
+  const finishVoiceRecording = useCallback(async (mimeType?: string) => {
+    const blob = new Blob(voiceChunksRef.current, { type: mimeType || "audio/webm" });
+    voiceChunksRef.current = [];
+    stopVoiceTracks();
+    try {
+      if (blob.size === 0) throw new Error("Voice input was empty.");
+      setVoiceStatus("transcribing");
+      const result = await window.hermes.transcribeVoiceInput(await blob.arrayBuffer(), blob.type || mimeType, {
+        profile: activeProfileName,
+        provider: tab.providerId,
+        baseUrl: activeProvider?.baseUrl,
+        model: tab.modelId || undefined,
+      });
+      setInput(current => mergeVoiceTranscript(current, result.text));
+      requestAnimationFrame(() => inputRef.current?.focus());
+    } catch (error) {
+      setVoiceNotice(voiceErrorMessage(error));
+    } finally {
+      setVoiceStatus("idle");
+      voiceRecorderRef.current = null;
+    }
+  }, [activeProfileName, activeProvider?.baseUrl, stopVoiceTracks, tab.modelId, tab.providerId]);
+
+  useEffect(() => {
+    return () => {
+      const recorder = voiceRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      stopVoiceTracks();
+    };
+  }, [stopVoiceTracks]);
 
   const modelName = activeProvider?.models?.find(m => m.id === tab.modelId)?.name || tab.modelId || "Auto";
   const providerLabel = activeProvider?.label || tab.providerId;
@@ -707,6 +761,54 @@ export default function ChatView({
     setInput("");
     setShowCommands(false);
   }, [input, isStreaming, sendMessage, onNewTab]);
+
+  const handleVoiceInput = useCallback(async () => {
+    if (voiceStatus === "recording") {
+      const recorder = voiceRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        setVoiceStatus("transcribing");
+        recorder.stop();
+      }
+      return;
+    }
+
+    if (voiceStatus !== "idle") return;
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceNotice("Voice input is not available right now.");
+      return;
+    }
+
+    setVoiceNotice("");
+    setVoiceStatus("requesting");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = supportedVoiceMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      voiceStreamRef.current = stream;
+      voiceRecorderRef.current = recorder;
+      voiceChunksRef.current = [];
+
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) voiceChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        void finishVoiceRecording(recorder.mimeType || mimeType || "audio/webm");
+      };
+      recorder.onerror = () => {
+        setVoiceNotice("Voice input is not available right now.");
+        setVoiceStatus("idle");
+        stopVoiceTracks();
+      };
+
+      recorder.start();
+      setVoiceStatus("recording");
+    } catch (error) {
+      setVoiceNotice(voiceErrorMessage(error));
+      setVoiceStatus("idle");
+      stopVoiceTracks();
+    }
+  }, [finishVoiceRecording, stopVoiceTracks, voiceStatus]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1037,6 +1139,18 @@ export default function ChatView({
           {filteredCommands.length === 0 && <div className="px-3 py-3 text-[12.5px] text-[var(--text-3)] text-center">No commands</div>}
         </div>
       )}
+      {voiceNotice && (
+        <div className="ui-voice-toast slide-up" role="status" aria-live="polite">
+          <span><Mic size={16} /></span>
+          <div>
+            <strong>Main agent</strong>
+            <p>{voiceNotice}</p>
+          </div>
+          <button type="button" onClick={() => setVoiceNotice("")} aria-label="Dismiss voice notice">
+            <X size={14} />
+          </button>
+        </div>
+      )}
       <div className="ui-compose-box">
         <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
           placeholder="Ask Hermes..." rows={1}
@@ -1051,7 +1165,14 @@ export default function ChatView({
           </div>
           <div className="flex items-center gap-2 min-w-0">
             {renderProfileDispatchPicker()}
-            <button className="ui-compose-tool" onClick={() => focusCommand("/voice ")} title="Voice">
+            <button
+              className={cx("ui-compose-tool", voiceStatus !== "idle" && "is-voice-active")}
+              onClick={handleVoiceInput}
+              disabled={voiceStatus === "requesting" || voiceStatus === "transcribing"}
+              title={voiceStatusLabel(voiceStatus)}
+              aria-label={voiceStatusLabel(voiceStatus)}
+              aria-pressed={voiceStatus === "recording"}
+            >
               <Mic size={17} />
             </button>
             <span className="ui-model-chip">{providerLabel} · {modelName}</span>
@@ -1067,9 +1188,10 @@ export default function ChatView({
           </div>
         </div>
       </div>
-      {(isStreaming || displayedUsage.totalTokens > 0) && (
+      {(isStreaming || displayedUsage.totalTokens > 0 || voiceStatus !== "idle") && (
         <div className="ui-compose-status">
           {isStreaming && <span><StatusDot color="var(--accent)" pulse /> Streaming</span>}
+          {voiceStatus !== "idle" && <span><StatusDot color="var(--accent-text)" pulse /> {voiceStatusLabel(voiceStatus)}</span>}
           {displayedUsage.totalTokens > 0 && <em>{displayedUsage.totalTokens.toLocaleString()} tokens{(displayedUsage.cost ?? 0) > 0 ? ` · $${(displayedUsage.cost ?? 0).toFixed(4)}` : ""}</em>}
         </div>
       )}

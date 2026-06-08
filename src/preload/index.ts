@@ -299,6 +299,17 @@ const api = {
     options: DispatchMessageOptions,
   ): Promise<DispatchMessageResult> =>
     ipcRenderer.invoke("dispatch-message", message, options),
+  transcribeVoiceInput: (
+    audio: ArrayBuffer,
+    mimeType?: string,
+    request?: {
+      profile?: string;
+      provider?: string;
+      baseUrl?: string;
+      model?: string;
+    },
+  ): Promise<{ text: string }> =>
+    ipcRenderer.invoke("transcribe-voice-input", audio, mimeType, request),
   abortChat: (): void => ipcRenderer.send("chat-abort"),
   abortDispatch: (dispatchId?: string, runId?: string): void =>
     ipcRenderer.send("dispatch-abort", dispatchId, runId),

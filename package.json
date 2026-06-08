@@ -16,11 +16,14 @@
     "test:watch": "vitest",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
+    "build:mac:app": "npm run build && electron-builder --mac --dir",
     "build:mac:arm64": "npm run build && electron-builder --mac --arm64",
     "build:mac:x64": "npm run build && electron-builder --mac --x64",
     "build:linux": "npm run build && electron-builder --linux",
     "build:rpm": "npm run build && electron-builder --linux --rpm",
-    "build:all": "npm run build && electron-builder --mac --linux --win"
+    "build:all": "npm run build && electron-builder --mac --linux --win",
+    "open:mac": "node scripts/open-built-mac-app.mjs",
+    "start:mac": "npm run build:mac:app && npm run open:mac"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
