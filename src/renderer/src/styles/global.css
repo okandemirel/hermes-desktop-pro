@@ -8545,7 +8545,7 @@ button.ui-inspector-row:hover { background: var(--hover); }
 }
 .ui-settings-cron-job {
   display: grid;
-  grid-template-columns: minmax(78px, 92px) minmax(0, 1.4fr) minmax(220px, 0.8fr) auto;
+  grid-template-columns: minmax(78px, 92px) minmax(0, 1.25fr) minmax(200px, 0.75fr) minmax(178px, auto);
   align-items: center;
   gap: 12px;
   min-height: 82px;
@@ -8635,7 +8635,13 @@ button.ui-inspector-row:hover { background: var(--hover); }
 .ui-settings-cron-job-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 7px;
+}
+.ui-settings-cron-delete-action {
+  min-width: 82px;
+  color: var(--error);
+  border-color: rgba(240,86,80,0.28);
 }
 .ui-settings-cron-empty {
   min-height: 116px;

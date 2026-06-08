@@ -760,14 +760,18 @@ export default function SettingsView({
                                     >
                                       {state === "active" ? <Pause size={15} /> : <Play size={15} />}
                                     </IconButton>
-                                    <IconButton
-                                      danger
+                                    <Button
+                                      variant="danger"
+                                      size="sm"
+                                      leftIcon={<Trash2 size={14} />}
+                                      className="ui-settings-cron-delete-action"
                                       disabled={deleting}
                                       onClick={() => openCronDelete(group.profile.name, job)}
                                       title="Delete cron job"
+                                      aria-label={`Delete cron job ${job.name}`}
                                     >
-                                      <Trash2 size={15} />
-                                    </IconButton>
+                                      Delete
+                                    </Button>
                                   </div>
                                 </article>
                               );
