@@ -225,6 +225,8 @@ export default function App() {
   const renderUpdateButton = () => {
     const phase = updateStatus?.phase || "idle";
     const active = ["checking", "available", "downloading", "downloaded", "installing", "error"].includes(phase);
+    if (!active) return null;
+
     const busy = phase === "checking" || phase === "available" || phase === "downloading" || phase === "installing";
     const title = updateStatus?.message || (
       phase === "downloaded" ? "Install downloaded update" : "Check for updates"
@@ -395,13 +397,18 @@ export default function App() {
               <StatusDot color={connStatus.ok ? "var(--success)" : "var(--error)"} />
             </button>
           )}
-          <div className="ui-sidebar-footer-actions no-drag">
-            <button onClick={() => setActiveScreen("settings")} title="Settings"><SlidersHorizontal size={17} /></button>
-            <button onClick={() => setActiveScreen("schedules")} title="Activity"><Bell size={17} /></button>
-            <button onClick={() => setActiveScreen("tools")} title="Help"><HelpCircle size={17} /></button>
-            <button className="ui-footer-identity" onClick={() => setActiveScreen("chat")} title="Hermes">H</button>
-            {collapsed && <button onClick={() => setCollapsed(false)} title="Expand"><PanelLeft size={17} /></button>}
-          </div>
+          {collapsed ? (
+            <button className="ui-sidebar-expand no-drag" onClick={() => setCollapsed(false)} title="Expand sidebar">
+              <PanelLeft size={17} />
+            </button>
+          ) : (
+            <div className="ui-sidebar-footer-actions no-drag">
+              <button onClick={() => setActiveScreen("settings")} title="Settings"><SlidersHorizontal size={17} /></button>
+              <button onClick={() => setActiveScreen("schedules")} title="Activity"><Bell size={17} /></button>
+              <button onClick={() => setActiveScreen("tools")} title="Help"><HelpCircle size={17} /></button>
+              <button className="ui-footer-identity" onClick={() => setActiveScreen("chat")} title="Hermes">H</button>
+            </div>
+          )}
         </div>
       </aside>
 

@@ -180,7 +180,7 @@ import {
 import { OfficeViewManager } from "./office-view";
 import { createDarwinApplicationMenuTemplate } from "./app-menu";
 import { recordDispatchSessionMetadata } from "./session-metadata";
-import { registerAppUpdateIpc } from "./app-updater";
+import { registerAppUpdateIpc, scheduleInitialAppUpdateCheck } from "./app-updater";
 
 import icon from "../../resources/icon.png?asset";
 
@@ -1315,6 +1315,7 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   registerAppUpdateIpc();
   createWindow();
+  scheduleInitialAppUpdateCheck();
 
   // Auto-start the SSH tunnel on launch when SSH mode is configured, so the
   // first chat doesn't pay the tunnel-startup latency. Best effort: a failure

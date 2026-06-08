@@ -1446,6 +1446,24 @@ button.ui-inspector-row:hover { background: var(--hover); }
   font-size: 16px;
   color: var(--accent-text) !important;
 }
+.ui-sidebar-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin: 0 auto;
+  border-radius: 12px;
+  color: var(--text-2);
+  background: rgba(255,255,255,0.055);
+  border: 1px solid rgba(255,255,255,0.10);
+  transition: all var(--t);
+}
+.ui-sidebar-expand:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.09);
+  border-color: rgba(var(--accent-rgb),0.34);
+}
 
 .ui-screen-inner.ui-kanban-screen {
   container-type: inline-size;
@@ -9996,11 +10014,14 @@ button.ui-inspector-row:hover { background: var(--hover); }
   box-shadow: var(--app-sidebar-edge);
 }
 .ui-sidebar-collapse,
+.ui-sidebar-expand,
+.ui-sidebar-update,
 .ui-sidebar-footer-actions {
   background: var(--app-control-bg);
   border-color: var(--app-muted-border);
 }
 .ui-sidebar-collapse:hover,
+.ui-sidebar-expand:hover,
 .ui-sidebar-footer-actions button:hover {
   background: var(--app-control-bg-hover);
 }
@@ -10258,6 +10279,7 @@ button.ui-inspector-row:hover { background: var(--hover); }
 }
 :root[data-theme="light"] .ui-sidebar-footer-actions button,
 :root[data-theme="light"] .ui-sidebar-collapse,
+:root[data-theme="light"] .ui-sidebar-expand,
 :root[data-theme="light"] .ui-sidebar-update,
 :root[data-theme="light"] .ui-iconbtn {
   color: var(--text-2);

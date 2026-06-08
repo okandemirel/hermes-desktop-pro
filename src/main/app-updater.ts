@@ -8,6 +8,8 @@ const UPDATE_STATUS_CHANNEL = "app-update-status";
 let initialized = false;
 let checkPromise: Promise<AppUpdateStatus> | null = null;
 let status: AppUpdateStatus = createBaseStatus("idle");
+let silentUpdateCheck = false;
+let initialCheckTimer: NodeJS.Timeout | null = null;
 
 function createBaseStatus(phase: AppUpdateStatus["phase"]): AppUpdateStatus {
   const canCheck = app.isPackaged;
@@ -58,6 +60,7 @@ function configureUpdater(): void {
   });
 
   autoUpdater.on("checking-for-update", () => {
+    if (silentUpdateCheck) return;
     publishStatus({
       phase: "checking",
       percent: undefined,
@@ -78,6 +81,10 @@ function configureUpdater(): void {
   });
 
   autoUpdater.on("update-not-available", (info: UpdateInfo) => {
+    if (silentUpdateCheck) {
+      status = createBaseStatus("idle");
+      return;
+    }
     publishStatus({
       phase: "not-available",
       availableVersion: info.version,
@@ -110,6 +117,10 @@ function configureUpdater(): void {
   });
 
   autoUpdater.on("error", error => {
+    if (silentUpdateCheck) {
+      status = createBaseStatus("idle");
+      return;
+    }
     publishStatus({
       phase: "error",
       canCheck: true,
@@ -126,7 +137,7 @@ export function getAppUpdateStatus(): AppUpdateStatus {
   return status;
 }
 
-export async function checkForAppUpdates(): Promise<AppUpdateStatus> {
+export async function checkForAppUpdates(options: { silent?: boolean } = {}): Promise<AppUpdateStatus> {
   if (!app.isPackaged) {
     return publishStatus(createBaseStatus("unsupported"));
   }
@@ -140,6 +151,8 @@ export async function checkForAppUpdates(): Promise<AppUpdateStatus> {
   if (checkPromise) return checkPromise;
 
   checkPromise = (async () => {
+    const previousSilentCheck = silentUpdateCheck;
+    silentUpdateCheck = Boolean(options.silent);
     try {
       const result = await autoUpdater.checkForUpdates();
       if (!result?.isUpdateAvailable) return status;
@@ -152,6 +165,10 @@ export async function checkForAppUpdates(): Promise<AppUpdateStatus> {
       await autoUpdater.downloadUpdate();
       return status;
     } catch (error) {
+      if (options.silent) {
+        status = createBaseStatus("idle");
+        return status;
+      }
       return publishStatus({
         phase: "error",
         canCheck: true,
@@ -159,11 +176,23 @@ export async function checkForAppUpdates(): Promise<AppUpdateStatus> {
         message: messageFromError(error),
       });
     } finally {
+      silentUpdateCheck = previousSilentCheck;
       checkPromise = null;
     }
   })();
 
   return checkPromise;
+}
+
+export function scheduleInitialAppUpdateCheck(delayMs = 7000): void {
+  if (!app.isPackaged || initialCheckTimer) return;
+  configureUpdater();
+  initialCheckTimer = setTimeout(() => {
+    initialCheckTimer = null;
+    if (status.phase === "idle" || status.phase === "not-available") {
+      void checkForAppUpdates({ silent: true });
+    }
+  }, delayMs);
 }
 
 export async function installAppUpdate(): Promise<AppUpdateStatus> {
