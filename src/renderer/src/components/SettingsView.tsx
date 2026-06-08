@@ -48,12 +48,12 @@ interface PublicConnConfig {
   ssh: { host: string; port: number; username: string; keyPath: string; remotePort: number; localPort: number };
 }
 type LogTab = "gateway" | "agent" | "error";
-type SectionId = "general" | "network" | "providers" | "cronJobs" | "appearance" | "backup" | "diagnostics";
+export type SettingsSectionId = "general" | "network" | "providers" | "cronJobs" | "appearance" | "backup" | "diagnostics";
 
-const CRON_SECTION: { id: SectionId; label: string; icon: typeof Settings; desc: string } =
+const CRON_SECTION: { id: SettingsSectionId; label: string; icon: typeof Settings; desc: string } =
   { id: "cronJobs", label: "Cron Jobs", icon: CalendarClock, desc: "Profile-scoped scheduled automations" };
 
-const SETTINGS_SECTIONS: { id: SectionId; label: string; icon: typeof Settings; desc: string }[] = [
+const SETTINGS_SECTIONS: { id: SettingsSectionId; label: string; icon: typeof Settings; desc: string }[] = [
   { id: "general", label: "General", icon: SlidersHorizontal, desc: "Connection mode and automatic updates" },
   { id: "network", label: "Network", icon: Globe, desc: "Local port, remote endpoint and authentication" },
   { id: "providers", label: "Providers", icon: KeyRound, desc: "Model provider API credentials" },
@@ -165,10 +165,10 @@ export default function SettingsView({
   initialSection = "general",
   standaloneSection = false,
 }: {
-  initialSection?: SectionId;
+  initialSection?: SettingsSectionId;
   standaloneSection?: boolean;
 }) {
-  const [section, setSection] = useState<SectionId>(initialSection);
+  const [section, setSection] = useState<SettingsSectionId>(initialSection);
   const initialAppearance = useMemo(() => readAppearancePreferences(), []);
   const [theme, setTheme] = useState<ThemePreference>(initialAppearance.theme);
   const [accent, setAccent] = useState(initialAppearance.accent);
@@ -201,8 +201,24 @@ export default function SettingsView({
   const [cronSaving, setCronSaving] = useState(false);
 
   useEffect(() => {
+    setSection(initialSection);
+  }, [initialSection]);
+
+  useEffect(() => {
     applyAppearancePreferences({ theme, accent });
   }, [theme, accent]);
+
+  useEffect(() => {
+    const handler = (event: Event): void => {
+      const detail = (event as CustomEvent<{ theme?: ThemePreference; accent?: string }>).detail;
+      if (!detail) return;
+      if (detail.theme) setTheme(detail.theme);
+      if (detail.accent) setAccent(detail.accent);
+    };
+
+    window.addEventListener("hermes:appearance-updated", handler);
+    return () => window.removeEventListener("hermes:appearance-updated", handler);
+  }, []);
 
   useEffect(() => subscribeToSystemTheme(() => {
     if (theme === "system") applyAppearancePreferences({ theme, accent });

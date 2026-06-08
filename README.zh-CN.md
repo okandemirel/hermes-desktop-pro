@@ -167,6 +167,24 @@ npm run build:mac:x64
 
 其他平台脚本可通过 `npm run build:linux`、`npm run build:win` 和 `npm run build:all` 使用。
 
+## 应用内更新按钮条件
+
+应用内更新按钮使用 GitHub Releases。它不会从 `main`、npm 或本地 build 目录安装更新。Hermes Desktop Pro 使用 `electron-updater`，并配置为读取 `okandemirel/hermes-desktop-pro` 的 GitHub release feed。
+
+只有满足以下全部条件时，更新按钮才能真正安装更新:
+
+- 应用必须以 packaged app 方式运行。`npm run dev` 和 `electron-vite preview` 不支持更新。本地 `build:mac:app` bundle 可用于手动测试，但它本身不是公开更新源。
+- 已安装应用的版本必须低于最新 GitHub Release 版本。
+- 发布 release 前，`package.json` 必须已经提升到新的版本号。
+- `okandemirel/hermes-desktop-pro` 中必须存在对应新版本的 GitHub Release。
+- Release 必须包含 `electron-builder` 生成的更新 assets: `latest-mac.yml`、macOS `.dmg`、macOS `.zip` 和生成的 `.blockmap` 文件。
+- 面向真实用户公开分发时，macOS artifacts 必须使用 Developer ID Application certificate 签名并完成 notarization。Release workflow 需要 `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_API_KEY`、`APPLE_API_KEY_ID` 和 `APPLE_API_ISSUER`。
+- 用户设备必须可以访问 GitHub Releases。
+
+点击按钮后，Hermes 会检查 GitHub release feed；如果存在更高版本，就下载对应 asset；下载进入 `downloaded` 状态后才会启用 install/restart。任何条件缺失时，按钮可能显示 checking、error、unsupported 或 up-to-date，但不会安装任何内容。
+
+此 updater 不需要上传 npm。公开更新源是 GitHub Releases。完整发布流程见 `docs/RELEASE.md`。
+
 ## Office
 
 Hermes Office 从 Office 页面内部启动和停止。Office view 嵌入 Hermes Desktop Pro，并且必须保留主 Hermes navigation 和 app chrome。

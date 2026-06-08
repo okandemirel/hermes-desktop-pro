@@ -17,6 +17,7 @@ import type {
   KanbanTaskDetail,
   KanbanResult,
   AppUpdateStatus,
+  AppMenuCommand,
 } from "../shared/types";
 
 const api = {
@@ -576,6 +577,13 @@ const api = {
     const handler = (_: any, status: AppUpdateStatus) => callback(status);
     ipcRenderer.on("app-update-status", handler);
     return () => ipcRenderer.removeListener("app-update-status", handler);
+  },
+  onAppMenuCommand: (
+    callback: (command: AppMenuCommand) => void,
+  ): (() => void) => {
+    const handler = (_: any, command: AppMenuCommand) => callback(command);
+    ipcRenderer.on("app-menu-command", handler);
+    return () => ipcRenderer.removeListener("app-menu-command", handler);
   },
 
   // Gateway

@@ -167,6 +167,24 @@ npm run build:mac:x64
 
 다른 platform scripts는 `npm run build:linux`, `npm run build:win`, `npm run build:all`로 사용할 수 있습니다.
 
+## 앱 내 업데이트 버튼 조건
+
+앱 내 업데이트 버튼은 GitHub Releases updater입니다. `main`, npm, 또는 local build folder에서 설치하지 않습니다. Hermes Desktop Pro는 `electron-updater`를 사용하며 `okandemirel/hermes-desktop-pro` GitHub release feed를 읽도록 설정되어 있습니다.
+
+업데이트 버튼이 실제로 설치를 진행하려면 아래 조건이 모두 충족되어야 합니다:
+
+- 앱이 packaged app으로 실행 중이어야 합니다. `npm run dev`와 `electron-vite preview`에서는 updates가 unsupported입니다. 로컬 `build:mac:app` bundle은 수동 테스트에는 유용하지만, 그 자체가 public update source는 아닙니다.
+- 설치된 앱 version이 최신 GitHub Release version보다 낮아야 합니다.
+- release를 publish하기 전에 `package.json` version이 더 높은 값으로 bump되어 있어야 합니다.
+- `okandemirel/hermes-desktop-pro`에 해당 새 version의 GitHub Release가 있어야 합니다.
+- Release에는 `electron-builder` update assets가 포함되어야 합니다: `latest-mac.yml`, macOS `.dmg`, macOS `.zip`, 생성된 `.blockmap` files.
+- 실제 사용자에게 공개 배포하려면 macOS artifacts가 Developer ID Application certificate로 signed 되고 notarized 되어야 합니다. Release workflow에는 `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`가 필요합니다.
+- 사용자 환경에서 GitHub Releases에 network access가 가능해야 합니다.
+
+버튼을 클릭하면 Hermes가 GitHub release feed를 확인하고, 더 높은 version이 있으면 asset을 download합니다. Download가 `downloaded` state가 된 뒤에만 install/restart가 활성화됩니다. 조건 중 하나라도 빠지면 button은 checking, error, unsupported, 또는 up-to-date 상태를 보여줄 수 있지만 아무것도 설치하지 않습니다.
+
+이 updater에는 npm upload가 필요하지 않습니다. Public update source는 GitHub Releases입니다. Release flow는 `docs/RELEASE.md`를 참고하세요.
+
 ## Office
 
 Hermes Office는 Office page 내부에서 start/stop합니다. Office view는 Hermes Desktop Pro에 embedded 되며 main Hermes navigation과 app chrome을 유지해야 합니다.

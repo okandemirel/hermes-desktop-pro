@@ -167,6 +167,24 @@ npm run build:mac:x64
 
 Other platform scripts are available through `npm run build:linux`, `npm run build:win`, and `npm run build:all`.
 
+## Update Button Requirements
+
+The in-app update button is a GitHub Releases updater. It does not install from `main`, npm, or a local build folder. Hermes Desktop Pro uses `electron-updater`, configured for the `okandemirel/hermes-desktop-pro` GitHub release feed.
+
+The button can install an update only when all of these conditions are true:
+
+- The app is running as a packaged app. `npm run dev` and `electron-vite preview` are unsupported for updates. A local `build:mac:app` bundle is useful for manual testing, but it is not a public update source by itself.
+- The installed app version is lower than the newest GitHub Release version.
+- `package.json` has been bumped to that newer version before the release is published.
+- A GitHub Release exists for the newer version in `okandemirel/hermes-desktop-pro`.
+- The release contains the `electron-builder` update assets: `latest-mac.yml`, macOS `.dmg`, macOS `.zip`, and the generated `.blockmap` files.
+- For public user machines, macOS artifacts are signed with a Developer ID Application certificate and notarized. The release workflow needs `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`.
+- The user has network access to GitHub Releases.
+
+Clicking the button checks the GitHub release feed, downloads a newer asset when one exists, then enables install/restart after the download reaches the `downloaded` state. If any requirement is missing, the button may show checking, error, unsupported, or up-to-date state, but it will not install anything.
+
+There is no npm upload requirement for this updater. The public update source is GitHub Releases. See `docs/RELEASE.md` for the release flow.
+
 ## Office
 
 Hermes Office is started and stopped from inside the Office page. The Office view is embedded into Hermes Desktop Pro and must keep the main Hermes navigation and app chrome intact.

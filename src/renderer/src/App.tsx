@@ -20,9 +20,15 @@ import KanbanView from "./screens/Kanban/Kanban";
 import OfficeView from "./screens/Office/Office";
 import { BrandMark, HermesWordmark } from "./components/BrandMark";
 import { cx, StatusDot } from "./ui";
-import type { AppUpdateStatus, ChatTab, DispatchMode, ProfileDispatchTarget, ProviderId, ProviderInfo } from "@shared/types";
+import type { AppMenuCommand, AppUpdateStatus, ChatTab, DispatchMode, ProfileDispatchTarget, ProviderId, ProviderInfo } from "@shared/types";
 import { getAllProviders } from "@shared/providers";
 import { sessionHistoryToChatMessages } from "./sessionHistory";
+import {
+  applyAppearancePreferences,
+  readAppearancePreferences,
+  type ThemePreference,
+} from "./themePreferences";
+import type { SettingsSectionId } from "./components/SettingsView";
 
 type NavScreen = "chat" | "sessions" | "profiles" | "providers" | "skills" | "models" | "memory" | "soul" | "tools" | "schedules" | "cronJobs" | "gateway" | "kanban" | "office" | "settings";
 type NavItem = { id: NavScreen; label: string; icon: typeof MessageSquare; shortcut?: string };
@@ -65,6 +71,49 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   ] },
 ];
 
+const MENU_SCREEN_COMMANDS: Partial<Record<AppMenuCommand, NavScreen>> = {
+  "show-chat": "chat",
+  "show-sessions": "sessions",
+  "show-profiles": "profiles",
+  "show-tools": "tools",
+  "show-skills": "skills",
+  "show-soul": "soul",
+  "show-memory": "memory",
+  "show-models": "models",
+  "show-providers": "providers",
+  "show-gateway": "gateway",
+  "show-office": "office",
+  "show-schedules": "schedules",
+  "show-cron-jobs": "cronJobs",
+  "show-kanban": "kanban",
+};
+
+const MENU_SETTINGS_COMMANDS: Partial<Record<AppMenuCommand, SettingsSectionId>> = {
+  "show-settings": "general",
+  "show-settings-general": "general",
+  "show-settings-network": "network",
+  "show-settings-providers": "providers",
+  "show-settings-appearance": "appearance",
+  "show-settings-backup": "backup",
+  "show-settings-diagnostics": "diagnostics",
+};
+
+const MENU_THEME_COMMANDS: Partial<Record<AppMenuCommand, ThemePreference>> = {
+  "set-theme-dark": "dark",
+  "set-theme-light": "light",
+  "set-theme-system": "system",
+};
+
+const MENU_ACCENT_COMMANDS: Partial<Record<AppMenuCommand, string>> = {
+  "set-accent-gold": "#E7B84E",
+  "set-accent-green": "#30D158",
+  "set-accent-blue": "#0A84FF",
+  "set-accent-purple": "#BF5AF2",
+};
+
+const SIDEBAR_LABEL_FADE_MS = 260;
+const SIDEBAR_WIDTH_MS = 340;
+
 let tabCounter = 1;
 function createTab(providerId: ProviderId = "opencode-zen"): ChatTab {
   return { id: `tab-${tabCounter++}`, name: `Chat ${tabCounter - 1}`, providerId, modelId: "" };
@@ -94,12 +143,46 @@ export default function App() {
   const [activeTabId, setActiveTabId] = useState(tabs[0].id);
   const [providers] = useState<ProviderInfo[]>(getAllProviders);
   const [collapsed, setCollapsed] = useState(false);
+  const [sidebarLabelsVisible, setSidebarLabelsVisible] = useState(true);
   const [connStatus, setConnStatus] = useState<{ ok: boolean; mode: string }>({ ok: false, mode: "local" });
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [recentSessions, setRecentSessions] = useState<SidebarSession[]>([]);
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("general");
   const navRefs = useRef<Record<NavScreen, HTMLButtonElement | null>>({} as Record<NavScreen, HTMLButtonElement | null>);
+  const sidebarTimers = useRef<number[]>([]);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+  const clearSidebarTimers = useCallback(() => {
+    sidebarTimers.current.forEach(timer => window.clearTimeout(timer));
+    sidebarTimers.current = [];
+  }, []);
+
+  const scheduleSidebarTimer = useCallback((callback: () => void, delay: number) => {
+    const timer = window.setTimeout(() => {
+      sidebarTimers.current = sidebarTimers.current.filter(active => active !== timer);
+      callback();
+    }, delay);
+    sidebarTimers.current.push(timer);
+  }, []);
+
+  const setSidebarExpanded = useCallback((expanded: boolean) => {
+    clearSidebarTimers();
+    if (expanded) {
+      setCollapsed(false);
+      scheduleSidebarTimer(() => setSidebarLabelsVisible(true), SIDEBAR_WIDTH_MS - 70);
+      return;
+    }
+
+    setSidebarLabelsVisible(false);
+    scheduleSidebarTimer(() => setCollapsed(true), SIDEBAR_LABEL_FADE_MS);
+  }, [clearSidebarTimers, scheduleSidebarTimer]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarExpanded(collapsed);
+  }, [collapsed, setSidebarExpanded]);
+
+  useEffect(() => clearSidebarTimers, [clearSidebarTimers]);
 
   // Live connection status for the sidebar footer — poll every 10s.
   useEffect(() => {
@@ -205,6 +288,54 @@ export default function App() {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, dispatchMode: mode, dispatchTargets: targets } : t));
   }, []);
 
+  const openSettings = useCallback((section: SettingsSectionId = "general") => {
+    setSettingsSection(section);
+    setActiveScreen("settings");
+  }, []);
+
+  const updateAppearance = useCallback((patch: Partial<{ theme: ThemePreference; accent: string }>) => {
+    const next = applyAppearancePreferences({
+      ...readAppearancePreferences(),
+      ...patch,
+    });
+    window.dispatchEvent(new CustomEvent("hermes:appearance-updated", { detail: next }));
+  }, []);
+
+  useEffect(() => {
+    return window.hermes.onAppMenuCommand((command: AppMenuCommand) => {
+      if (command === "new-chat") {
+        handleNewTab();
+        return;
+      }
+
+      if (command === "toggle-sidebar") {
+        toggleSidebar();
+        return;
+      }
+
+      const theme = MENU_THEME_COMMANDS[command];
+      if (theme) {
+        updateAppearance({ theme });
+        return;
+      }
+
+      const accent = MENU_ACCENT_COMMANDS[command];
+      if (accent) {
+        updateAppearance({ accent });
+        return;
+      }
+
+      const settings = MENU_SETTINGS_COMMANDS[command];
+      if (settings) {
+        openSettings(settings);
+        return;
+      }
+
+      const screen = MENU_SCREEN_COMMANDS[command];
+      if (screen) setActiveScreen(screen);
+    });
+  }, [handleNewTab, openSettings, toggleSidebar, updateAppearance]);
+
   const handleAppUpdate = useCallback(async () => {
     try {
       const next = updateStatus?.phase === "downloaded"
@@ -222,12 +353,13 @@ export default function App() {
     }
   }, [updateStatus?.phase]);
 
-  const renderUpdateButton = () => {
+  const renderUpdateButton = (placement: "brand" | "dock" = "brand") => {
     const phase = updateStatus?.phase || "idle";
     const active = ["checking", "available", "downloading", "downloaded", "installing", "error"].includes(phase);
-    if (!active) return null;
-
     const busy = phase === "checking" || phase === "available" || phase === "downloading" || phase === "installing";
+    const canInteract = phase === "downloaded"
+      ? updateStatus?.canInstall !== false
+      : updateStatus?.canCheck !== false;
     const title = updateStatus?.message || (
       phase === "downloaded" ? "Install downloaded update" : "Check for updates"
     );
@@ -235,10 +367,10 @@ export default function App() {
 
     return (
       <button
-        className={cx("ui-sidebar-update no-drag", active && "is-active", phase === "downloaded" && "is-ready", phase === "error" && "is-error")}
+        className={cx("ui-sidebar-update no-drag", placement === "dock" && "is-compact", active && "is-active", phase === "downloaded" && "is-ready", phase === "error" && "is-error")}
         onClick={handleAppUpdate}
         title={title}
-        disabled={busy}
+        disabled={busy || !canInteract}
         aria-label={title}
       >
         <Icon size={14.5} className={busy ? "animate-spin" : undefined} />
@@ -306,7 +438,7 @@ export default function App() {
       case "gateway": return <GatewayView />;
       case "kanban": return <KanbanView />;
       case "office": return <OfficeView />;
-      case "settings": return <SettingsView />;
+      case "settings": return <SettingsView initialSection={settingsSection} />;
       default: return null;
     }
   };
@@ -314,12 +446,12 @@ export default function App() {
   const renderNav = (item: NavItem) => {
     const active = activeScreen === item.id;
     return (
-      <button key={item.id} className={cx("ui-nav no-drag", collapsed && "justify-center px-0")} data-active={active}
+      <button key={item.id} className={cx("ui-nav no-drag", collapsed && "is-compact")} data-active={active}
         ref={node => { navRefs.current[item.id] = node; }}
         onClick={() => setActiveScreen(item.id)} title={collapsed ? item.label : undefined}>
         <item.icon size={17} className="shrink-0" strokeWidth={active ? 2.2 : 1.9} />
-        {!collapsed && <span className="truncate">{item.label}</span>}
-        {!collapsed && item.shortcut && <span className="ui-nav-shortcut">{item.shortcut}</span>}
+        <span className="ui-nav-label truncate">{item.label}</span>
+        {item.shortcut && <span className="ui-nav-shortcut">{item.shortcut}</span>}
       </button>
     );
   };
@@ -331,25 +463,28 @@ export default function App() {
   return (
     <div className="ui-shell flex overflow-hidden">
       <div className="ui-window-title drag">Hermes Desktop Pro</div>
-      <aside className={cx("ui-sidebar flex flex-col shrink-0 transition-[width] duration-200", collapsed ? "w-[68px]" : "w-[276px]")}>
+      <aside
+        className={cx("ui-sidebar flex flex-col shrink-0", collapsed ? "w-[68px] is-collapsed" : "w-[276px]")}
+        data-labels-visible={sidebarLabelsVisible ? "true" : "false"}
+      >
         <div className="h-[30px] shrink-0 drag" />
-        <div className={cx("ui-sidebar-brand drag", collapsed ? "justify-center px-0" : "gap-3 px-6")}>
-          <BrandMark size={collapsed ? 22 : 25} />
-          {!collapsed && <HermesWordmark size={22} />}
-          {!collapsed && <span className="ml-auto ui-tag ui-tag-gold no-drag">PRO</span>}
-          {!collapsed && renderUpdateButton()}
+        <div className={cx("ui-sidebar-brand drag", collapsed ? "is-compact" : "is-expanded")}>
+          <BrandMark size={25} />
+          {!collapsed && <span className="ui-sidebar-label-fade ui-sidebar-wordmark"><HermesWordmark size={22} /></span>}
+          {!collapsed && <span className="ml-auto ui-tag ui-tag-gold no-drag ui-sidebar-label-fade">PRO</span>}
+          {!collapsed && <span className="ui-sidebar-label-fade no-drag">{renderUpdateButton()}</span>}
           {!collapsed && (
-            <button className="ui-sidebar-collapse no-drag" onClick={() => setCollapsed(true)} title="Collapse">
+            <button className="ui-sidebar-collapse no-drag ui-sidebar-label-fade" onClick={() => setSidebarExpanded(false)} title="Collapse">
               <PanelLeftClose size={17} />
             </button>
           )}
         </div>
 
-        <div className={cx("no-drag ui-sidebar-new-wrap", collapsed ? "px-2 flex justify-center" : "px-6")}>
+        <div className={cx("no-drag ui-sidebar-new-wrap", collapsed ? "is-compact" : "is-expanded")}>
           {collapsed ? (
             <button className="ui-iconbtn" title="New chat" onClick={handleNewTab}><Plus size={18} /></button>
           ) : (
-            <button className="ui-sidebar-new ui-btn ui-btn-secondary ui-btn-sm w-full" onClick={handleNewTab}>
+            <button className="ui-sidebar-new ui-btn ui-btn-secondary ui-btn-sm w-full ui-sidebar-label-fade" onClick={handleNewTab}>
               <Plus size={17} strokeWidth={2.2} /> New chat <span className="ml-auto ui-nav-shortcut">⌘N</span>
             </button>
           )}
@@ -358,13 +493,13 @@ export default function App() {
         <nav className="ui-sidebar-nav flex-1 min-h-0 overflow-y-auto flex flex-col">
           {NAV_GROUPS.map((g, gi) => (
             <div key={g.label} className="flex flex-col gap-0.5">
-              {!collapsed ? <div className="ui-navgroup-label">{g.label}</div> : renderCompactSectionDivider(gi)}
+              {!collapsed ? <div className="ui-navgroup-label ui-sidebar-label-fade">{g.label}</div> : renderCompactSectionDivider(gi)}
               {g.items.map(renderNav)}
             </div>
           ))}
 
           {!collapsed && (
-            <div className="ui-sidebar-recents flex flex-col gap-0.5">
+            <div className="ui-sidebar-recents flex flex-col gap-0.5 ui-sidebar-label-fade">
               <div className="ui-navgroup-label">Recent Sessions</div>
               {recentSessions.map(session => (
                 <button
@@ -388,7 +523,7 @@ export default function App() {
 
         <div className="ui-sidebar-footer">
           {!collapsed && (
-            <button className="ui-connection-card no-drag" onClick={() => setActiveScreen("gateway")}>
+            <button className="ui-connection-card no-drag ui-sidebar-label-fade" onClick={() => setActiveScreen("gateway")}>
               <span className="ui-connection-orb"><StatusDot color={connStatus.ok ? "var(--success)" : "var(--warning)"} pulse={connStatus.ok} /></span>
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-semibold text-[var(--text)] truncate leading-tight">{connStatus.ok ? "Connected" : "Disconnected"}</div>
@@ -398,11 +533,14 @@ export default function App() {
             </button>
           )}
           {collapsed ? (
-            <button className="ui-sidebar-expand no-drag" onClick={() => setCollapsed(false)} title="Expand sidebar">
-              <PanelLeft size={17} />
-            </button>
+            <div className="ui-sidebar-footer-compact no-drag">
+              {renderUpdateButton("dock")}
+              <button className="ui-sidebar-expand" onClick={() => setSidebarExpanded(true)} title="Expand sidebar">
+                <PanelLeft size={17} />
+              </button>
+            </div>
           ) : (
-            <div className="ui-sidebar-footer-actions no-drag">
+            <div className="ui-sidebar-footer-actions no-drag ui-sidebar-label-fade">
               <button onClick={() => setActiveScreen("settings")} title="Settings"><SlidersHorizontal size={17} /></button>
               <button onClick={() => setActiveScreen("schedules")} title="Activity"><Bell size={17} /></button>
               <button onClick={() => setActiveScreen("tools")} title="Help"><HelpCircle size={17} /></button>

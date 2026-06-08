@@ -7,6 +7,7 @@ import {
 } from "electron";
 import type { IpcMainInvokeEvent, Rectangle, WebContents } from "electron";
 import type {
+  AppMenuCommand,
   CronJobUpdateInput,
   DispatchMessageOptions,
   DispatchMessageResult,
@@ -180,7 +181,11 @@ import {
 import { OfficeViewManager } from "./office-view";
 import { createDarwinApplicationMenuTemplate } from "./app-menu";
 import { recordDispatchSessionMetadata } from "./session-metadata";
-import { registerAppUpdateIpc, scheduleInitialAppUpdateCheck } from "./app-updater";
+import {
+  checkForAppUpdates,
+  registerAppUpdateIpc,
+  scheduleInitialAppUpdateCheck,
+} from "./app-updater";
 
 import icon from "../../resources/icon.png?asset";
 
@@ -263,6 +268,41 @@ function createWindow(): BrowserWindow {
   }
 
   return mainWindow;
+}
+
+function getMainCommandWindow(): BrowserWindow {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed()) return focused;
+  if (retainedMainWindow && !retainedMainWindow.isDestroyed()) return retainedMainWindow;
+  const existing = BrowserWindow.getAllWindows().find(window => !window.isDestroyed());
+  if (existing) return existing;
+  return createWindow();
+}
+
+function sendAppMenuCommand(command: AppMenuCommand): void {
+  const target = getMainCommandWindow();
+  revealMainWindow(target);
+
+  const send = (): void => {
+    if (!target.isDestroyed()) target.webContents.send("app-menu-command", command);
+  };
+
+  if (target.webContents.isLoading()) {
+    target.webContents.once("did-finish-load", send);
+    return;
+  }
+
+  send();
+}
+
+function checkForUpdatesFromMenu(): void {
+  const target = getMainCommandWindow();
+  revealMainWindow(target);
+  void checkForAppUpdates();
+}
+
+function openHermesHomeFromMenu(): void {
+  void shell.openPath(getHermesHome());
 }
 
 // ─── IPC Handlers ─────────────────────────────────────
@@ -1308,7 +1348,16 @@ app.whenReady().then(() => {
   // macOS app menu
   if (process.platform === "darwin") {
     Menu.setApplicationMenu(
-      Menu.buildFromTemplate(createDarwinApplicationMenuTemplate(APP_NAME)),
+      Menu.buildFromTemplate(
+        createDarwinApplicationMenuTemplate(APP_NAME, {
+          sendCommand: sendAppMenuCommand,
+          checkForUpdates: checkForUpdatesFromMenu,
+          openExternal: url => {
+            void shell.openExternal(url);
+          },
+          openHermesHome: openHermesHomeFromMenu,
+        }),
+      ),
     );
   }
 

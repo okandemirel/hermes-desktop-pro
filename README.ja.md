@@ -167,6 +167,24 @@ npm run build:mac:x64
 
 その他の platform scripts は `npm run build:linux`、`npm run build:win`、`npm run build:all` で利用できます。
 
+## アプリ内アップデートボタンの条件
+
+アプリ内アップデートボタンは GitHub Releases を使います。`main`、npm、またはローカル build folder から更新をインストールするものではありません。Hermes Desktop Pro は `electron-updater` を使い、`okandemirel/hermes-desktop-pro` の GitHub release feed を参照するように設定されています。
+
+アップデートを実際にインストールできるのは、次の条件をすべて満たす場合だけです:
+
+- アプリが packaged app として実行されていること。`npm run dev` と `electron-vite preview` では updates は unsupported です。ローカルの `build:mac:app` bundle は手動確認には使えますが、それ自体は公開 update source ではありません。
+- インストール済みアプリの version が、最新 GitHub Release の version より低いこと。
+- release 公開前に `package.json` が新しい version に bump されていること。
+- `okandemirel/hermes-desktop-pro` に、その新しい version の GitHub Release が存在すること。
+- Release に `electron-builder` の update assets が含まれていること: `latest-mac.yml`、macOS `.dmg`、macOS `.zip`、生成された `.blockmap` files。
+- 公開配布するユーザー環境では、macOS artifacts が Developer ID Application certificate で署名され、notarization 済みであること。Release workflow には `CSC_LINK`、`CSC_KEY_PASSWORD`、`APPLE_API_KEY`、`APPLE_API_KEY_ID`、`APPLE_API_ISSUER` が必要です。
+- ユーザー環境から GitHub Releases に network access できること。
+
+ボタンを押すと Hermes は GitHub release feed を確認し、新しい version があれば asset を download します。Download が `downloaded` state になるまで install/restart は有効になりません。条件が欠けている場合、button は checking、error、unsupported、または up-to-date を表示することがありますが、何もインストールしません。
+
+この updater に npm upload は不要です。公開 update source は GitHub Releases です。Release flow の詳細は `docs/RELEASE.md` を参照してください。
+
 ## Office
 
 Hermes Office は Office page から start/stop します。Office view は Hermes Desktop Pro に embedded され、main Hermes navigation と app chrome を維持する必要があります。

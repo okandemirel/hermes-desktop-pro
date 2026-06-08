@@ -278,6 +278,39 @@ export interface AppUpdateStatus {
   canInstall: boolean;
 }
 
+// ─── Native app menu commands ──────────────────────────────────
+export type AppMenuCommand =
+  | "new-chat"
+  | "show-chat"
+  | "show-sessions"
+  | "show-profiles"
+  | "show-tools"
+  | "show-skills"
+  | "show-soul"
+  | "show-memory"
+  | "show-models"
+  | "show-providers"
+  | "show-gateway"
+  | "show-office"
+  | "show-schedules"
+  | "show-cron-jobs"
+  | "show-kanban"
+  | "show-settings"
+  | "show-settings-general"
+  | "show-settings-network"
+  | "show-settings-providers"
+  | "show-settings-appearance"
+  | "show-settings-backup"
+  | "show-settings-diagnostics"
+  | "toggle-sidebar"
+  | "set-theme-dark"
+  | "set-theme-light"
+  | "set-theme-system"
+  | "set-accent-gold"
+  | "set-accent-green"
+  | "set-accent-blue"
+  | "set-accent-purple";
+
 // ─── Memory types ───────────────────────────────────────────────
 export interface MemoryEntry {
   index: number;
