@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import {
   Square, Plus, Globe, Image, Code, Wrench, Brain, Activity, Terminal, Paperclip,
   ArrowUp, Search, FileText, Table2, Sparkles, SlidersHorizontal, Command,
@@ -34,6 +34,7 @@ import {
   voiceStatusLabel,
   type VoiceInputStatus,
 } from "../voiceInput";
+import { syncComposerTextareaHeight } from "../composerAutosize";
 
 interface ChatViewProps {
   tab: ChatTab; providers: ProviderInfo[]; allTabs: ChatTab[];
@@ -547,6 +548,11 @@ export default function ChatView({
       setShowCommands(false);
     }
   }, [input]);
+
+  useLayoutEffect(() => {
+    if (!inputRef.current) return;
+    syncComposerTextareaHeight(inputRef.current);
+  }, [input, tab.id]);
 
   useEffect(() => {
     if (!voiceNotice) return;

@@ -165,4 +165,54 @@ describe("updateCronJob", () => {
     expect(mockState.sshCalls[0]?.stdin).toContain('profile = "marketanalyst"');
     expect(mockState.sshCalls[0]?.stdin).toContain('profiles", profile');
   });
+
+  it("preserves declared job profile while tracking the source profile", async () => {
+    const cronDir = join(mockState.hermesHome, "cron");
+    mkdirSync(cronDir, { recursive: true });
+    const jobsFile = join(cronDir, "jobs.json");
+    writeFileSync(
+      jobsFile,
+      JSON.stringify(
+        {
+          jobs: [
+            {
+              id: "market-digest",
+              name: "Market digest",
+              profile: "marketanalyst",
+              schedule: { value: "0 9 * * *" },
+              prompt: "Prepare the market digest",
+              enabled: true,
+            },
+            {
+              id: "operator-report",
+              name: "Operator report",
+              profile_name: "chiefoperator",
+              schedule: { value: "0 10 * * *" },
+              prompt: "Prepare the operator report",
+              enabled: false,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const cronjobs = await import("./cronjobs");
+    const jobs = await cronjobs.listCronJobs(true, "default");
+
+    expect(jobs).toEqual([
+      expect.objectContaining({
+        id: "market-digest",
+        profile: "marketanalyst",
+        sourceProfile: "default",
+      }),
+      expect.objectContaining({
+        id: "operator-report",
+        profile: "chiefoperator",
+        sourceProfile: "default",
+        state: "paused",
+      }),
+    ]);
+  });
 });

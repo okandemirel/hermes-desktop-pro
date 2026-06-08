@@ -30,16 +30,37 @@ function ensureValidProfile(profile?: string): boolean {
   return profile === undefined || profile === "" || isValidProfileName(profile);
 }
 
-function normalizeJob(job: Record<string, unknown>): CronJob | null {
+function stringField(job: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = job[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function normalizeJob(
+  job: Record<string, unknown>,
+  sourceProfile = "default",
+): CronJob | null {
   if (!job.id) return null;
   const enabled = job.enabled !== false;
   let state: CronJob["state"] = "active";
   if (job.state === "paused" || !enabled) state = "paused";
   else if (job.state === "completed") state = "completed";
   const schedule = job.schedule as { value?: string } | string | undefined;
+  const safeSourceProfile = sourceProfile || "default";
+  const profile = stringField(job, [
+    "profile",
+    "profileName",
+    "profile_name",
+    "workspaceProfile",
+    "workspace_profile",
+  ]) || safeSourceProfile;
   return {
     id: String(job.id),
     name: (job.name as string) || "(unnamed)",
+    profile,
+    sourceProfile: safeSourceProfile,
     schedule:
       (job.schedule_display as string) ||
       (typeof schedule === "object" ? schedule?.value : schedule) ||
@@ -149,7 +170,7 @@ else:
     const raw = Array.isArray(parsed) ? parsed : parsed.jobs || [];
     const jobs: CronJob[] = [];
     for (const job of raw) {
-      const normalized = normalizeJob(job);
+      const normalized = normalizeJob(job, profile || "default");
       if (normalized) jobs.push(normalized);
     }
     return jobs;
@@ -291,8 +312,9 @@ export async function listCronJobs(
       const raw = body.jobs || [];
       const jobs: CronJob[] = [];
       for (const job of raw) {
-        const normalized = normalizeJob(job);
+        const normalized = normalizeJob(job, profile || "remote");
         if (!normalized) continue;
+        if (profile && normalized.profile && normalized.profile !== profile) continue;
         if (!includeDisabled && !normalized.enabled) continue;
         jobs.push(normalized);
       }
@@ -313,7 +335,7 @@ export async function listCronJobs(
     const jobs: CronJob[] = [];
 
     for (const job of raw) {
-      const normalized = normalizeJob(job);
+      const normalized = normalizeJob(job, profile || "default");
       if (!normalized) continue;
       if (!includeDisabled && !normalized.enabled) continue;
       jobs.push(normalized);

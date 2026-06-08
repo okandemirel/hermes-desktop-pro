@@ -215,6 +215,10 @@ export interface SessionSummary {
   model: string;
   title: string | null;
   preview: string;
+  profileName: string;
+  profileNames: string[];
+  dispatchMode?: DispatchMode;
+  primaryProfile?: string;
 }
 
 export interface SessionSearchResult {
@@ -225,6 +229,10 @@ export interface SessionSearchResult {
   messageCount: number;
   model: string;
   snippet: string;
+  profileName: string;
+  profileNames: string[];
+  dispatchMode?: DispatchMode;
+  primaryProfile?: string;
 }
 
 // ─── Profile types ──────────────────────────────────────────────
@@ -301,6 +309,8 @@ export interface ToolsetInfo {
 export interface CronJob {
   id: string;
   name: string;
+  profile: string | null;
+  sourceProfile?: string | null;
   schedule: string;
   prompt: string;
   state: "active" | "paused" | "completed";

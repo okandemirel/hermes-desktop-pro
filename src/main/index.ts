@@ -179,6 +179,7 @@ import {
 
 import { OfficeViewManager } from "./office-view";
 import { createDarwinApplicationMenuTemplate } from "./app-menu";
+import { recordDispatchSessionMetadata } from "./session-metadata";
 
 import icon from "../../resources/icon.png?asset";
 
@@ -923,7 +924,18 @@ function registerIpcHandlers(): void {
       };
 
       setImmediate(() => {
-        void executeDispatch();
+        void executeDispatch().finally(() => {
+          try {
+            recordDispatchSessionMetadata({
+              dispatchId,
+              mode: options.mode,
+              targets,
+              sessionIdsByProfile,
+            });
+          } catch {
+            // Metadata powers desktop session badges only; dispatch itself is done.
+          }
+        });
       });
       return { dispatchId, sessionIdsByProfile };
     },

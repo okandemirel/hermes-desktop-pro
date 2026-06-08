@@ -1,10 +1,15 @@
 import Database from "better-sqlite3";
 import { existsSync } from "fs";
-import { activeStateDbPath } from "./utils";
+import { activeStateDbPath, getActiveProfileNameSync } from "./utils";
 import type { Attachment } from "../shared/attachments";
 import { isImageMime } from "../shared/attachments";
 import { clearStagedAttachments } from "./attachment-staging";
 import { removeSessionFromCache } from "./session-cache";
+import {
+  readSessionRunMetadata,
+  sessionRunMetadataFor,
+} from "./session-metadata";
+import type { DispatchMode } from "@shared/types";
 
 // Sentinel prefix used by hermes-agent's hermes_state.py to mark
 // JSON-encoded multimodal content in the messages.content column.
@@ -20,6 +25,10 @@ export interface SessionSummary {
   model: string;
   title: string | null;
   preview: string;
+  profileName: string;
+  profileNames: string[];
+  dispatchMode?: DispatchMode;
+  primaryProfile?: string;
 }
 
 export interface SessionMessage {
@@ -167,6 +176,10 @@ export interface SearchResult {
   messageCount: number;
   model: string;
   snippet: string;
+  profileName: string;
+  profileNames: string[];
+  dispatchMode?: DispatchMode;
+  primaryProfile?: string;
 }
 
 export function dedupeSearchRowsBySession<T extends { session_id: string }>(
@@ -237,6 +250,8 @@ function getDb(readonly = true): Database.Database | null {
 export function listSessions(limit = 30, offset = 0): SessionSummary[] {
   const db = getDb();
   if (!db) return [];
+  const activeProfileName = getActiveProfileNameSync();
+  const metadata = readSessionRunMetadata();
 
   try {
     // Simple query without correlated subquery — titles come from session cache
@@ -264,16 +279,20 @@ export function listSessions(limit = 30, offset = 0): SessionSummary[] {
       title: string | null;
     }>;
 
-    return rows.map((r) => ({
-      id: r.id,
-      source: r.source,
-      startedAt: r.started_at,
-      endedAt: r.ended_at,
-      messageCount: r.message_count,
-      model: r.model || "",
-      title: r.title,
-      preview: "",
-    }));
+    return rows.map((r) => {
+      const runMeta = sessionRunMetadataFor(metadata, r.id, activeProfileName);
+      return {
+        id: r.id,
+        source: r.source,
+        startedAt: r.started_at,
+        endedAt: r.ended_at,
+        messageCount: r.message_count,
+        model: r.model || "",
+        title: r.title,
+        preview: "",
+        ...runMeta,
+      };
+    });
   } finally {
     db.close();
   }
@@ -282,6 +301,8 @@ export function listSessions(limit = 30, offset = 0): SessionSummary[] {
 export function searchSessions(query: string, limit = 20): SearchResult[] {
   const db = getDb();
   if (!db) return [];
+  const activeProfileName = getActiveProfileNameSync();
+  const metadata = readSessionRunMetadata();
 
   try {
     const trimmedQuery = query.trim();
@@ -368,15 +389,19 @@ export function searchSessions(query: string, limit = 20): SearchResult[] {
       [...titleMatches, ...ftsRows],
       limit,
     );
-    return uniqueRows.map((r) => ({
-      sessionId: r.session_id,
-      title: r.title,
-      startedAt: r.started_at,
-      source: r.source,
-      messageCount: r.message_count,
-      model: r.model || "",
-      snippet: r.snippet || "",
-    }));
+    return uniqueRows.map((r) => {
+      const runMeta = sessionRunMetadataFor(metadata, r.session_id, activeProfileName);
+      return {
+        sessionId: r.session_id,
+        title: r.title,
+        startedAt: r.started_at,
+        source: r.source,
+        messageCount: r.message_count,
+        model: r.model || "",
+        snippet: r.snippet || "",
+        ...runMeta,
+      };
+    });
   } catch {
     return [];
   } finally {

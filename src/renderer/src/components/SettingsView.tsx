@@ -2,13 +2,25 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Settings, Shield, Download, Upload, Moon, Sun, Laptop, Database, Terminal as TerminalIcon,
   Copy, Check, SlidersHorizontal, Globe, KeyRound, Palette,
-  CalendarClock, RefreshCw, Pencil, Pause, Play, Clock, Send, AlertCircle,
+  CalendarClock, RefreshCw, Pencil, Pause, Play, Clock, Send, AlertCircle, Trash2,
 } from "lucide-react";
 import type { CronJob, CronJobUpdateInput, ProfileInfo } from "@shared/types";
 import {
   Screen, Card, Button, Input, Textarea, Select, Badge, Toggle, Segment, SegmentItem,
   IconButton, Field, StatusDot, Modal, cx,
 } from "../ui";
+import {
+  ACCENT_OPTIONS,
+  applyAppearancePreferences,
+  readAppearancePreferences,
+  subscribeToSystemTheme,
+  type ThemePreference,
+} from "../themePreferences";
+import {
+  getCronJobOperationProfile,
+  groupCronJobsByProfile,
+  type CronProfileGroup,
+} from "../cronJobGrouping";
 
 type ConnMode = "local" | "remote" | "ssh";
 
@@ -66,8 +78,6 @@ const PROVIDER_KEYS: [string, string][] = [
   ["DeepSeek", "DEEPSEEK_API_KEY"],
 ];
 
-const ACCENTS = ["#E7B84E", "#FF453A", "#30D158", "#0A84FF", "#BF5AF2", "#FF9F0A"];
-
 const THEMES = [
   ["dark", "Dark", Moon],
   ["light", "Light", Sun],
@@ -81,12 +91,6 @@ const LOG_TABS: { id: LogTab; label: string }[] = [
 ];
 
 const CRON_DELIVERY_TARGETS = ["local", "telegram", "discord", "email", "slack"];
-
-interface CronProfileGroup {
-  profile: ProfileInfo;
-  jobs: CronJob[];
-  error?: string;
-}
 
 interface CronEditTarget {
   profileName: string;
@@ -165,8 +169,9 @@ export default function SettingsView({
   standaloneSection?: boolean;
 }) {
   const [section, setSection] = useState<SectionId>(initialSection);
-  const [theme, setTheme] = useState<"dark" | "light" | "system">("dark");
-  const [accent, setAccent] = useState("#E7B84E");
+  const initialAppearance = useMemo(() => readAppearancePreferences(), []);
+  const [theme, setTheme] = useState<ThemePreference>(initialAppearance.theme);
+  const [accent, setAccent] = useState(initialAppearance.accent);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [mode, setMode] = useState<ConnMode>("local");
   const [localPort, setLocalPort] = useState("8642");
@@ -186,6 +191,7 @@ export default function SettingsView({
   const [cronError, setCronError] = useState<string | null>(null);
   const [cronBusyKey, setCronBusyKey] = useState<string | null>(null);
   const [cronEditTarget, setCronEditTarget] = useState<CronEditTarget | null>(null);
+  const [cronDeleteTarget, setCronDeleteTarget] = useState<CronEditTarget | null>(null);
   const [cronForm, setCronForm] = useState<CronEditForm>({
     name: "",
     schedule: "",
@@ -193,6 +199,14 @@ export default function SettingsView({
     deliver: "local",
   });
   const [cronSaving, setCronSaving] = useState(false);
+
+  useEffect(() => {
+    applyAppearancePreferences({ theme, accent });
+  }, [theme, accent]);
+
+  useEffect(() => subscribeToSystemTheme(() => {
+    if (theme === "system") applyAppearancePreferences({ theme, accent });
+  }), [theme, accent]);
 
   // Seed local state from the real connection config on mount. The API key is
   // never returned — we only surface whether one is set via `hasApiKey`.
@@ -257,12 +271,13 @@ export default function SettingsView({
           }
         }),
       );
-      groups.sort((a: CronProfileGroup, b: CronProfileGroup) => {
+      const grouped = groupCronJobsByProfile(profileList, groups);
+      grouped.sort((a: CronProfileGroup, b: CronProfileGroup) => {
         if (a.profile.isActive !== b.profile.isActive) return a.profile.isActive ? -1 : 1;
         if (a.profile.isDefault !== b.profile.isDefault) return a.profile.isDefault ? -1 : 1;
         return a.profile.name.localeCompare(b.profile.name);
       });
-      setCronGroups(groups);
+      setCronGroups(grouped);
     } catch (err: any) {
       setCronGroups([]);
       setCronError(err?.message ? String(err.message) : "Cron jobs could not be loaded");
@@ -334,8 +349,9 @@ export default function SettingsView({
   }, [cronGroups]);
 
   const openCronEditor = (profileName: string, job: CronJob) => {
+    const operationProfile = getCronJobOperationProfile(profileName, job);
     setCronError(null);
-    setCronEditTarget({ profileName, job });
+    setCronEditTarget({ profileName: operationProfile, job });
     setCronForm({
       name: job.name,
       schedule: job.schedule,
@@ -353,13 +369,14 @@ export default function SettingsView({
   const toggleCronJob = async (profileName: string, job: CronJob) => {
     const state = cronState(job);
     if (state === "completed") return;
-    const key = `${profileName}:${job.id}:toggle`;
+    const operationProfile = getCronJobOperationProfile(profileName, job);
+    const key = `${operationProfile}:${job.id}:toggle`;
     setCronBusyKey(key);
     setCronError(null);
     try {
       const result = state === "active"
-        ? await window.hermes.pauseCronJob(job.id, profileName)
-        : await window.hermes.resumeCronJob(job.id, profileName);
+        ? await window.hermes.pauseCronJob(job.id, operationProfile)
+        : await window.hermes.resumeCronJob(job.id, operationProfile);
       if (!result.success) {
         setCronError(result.error || "Cron job could not be updated");
         return;
@@ -367,6 +384,43 @@ export default function SettingsView({
       await loadCronJobs();
     } catch (err: any) {
       setCronError(err?.message ? String(err.message) : "Cron job could not be updated");
+    } finally {
+      setCronBusyKey(null);
+    }
+  };
+
+  const openCronDelete = (profileName: string, job: CronJob) => {
+    setCronError(null);
+    setCronDeleteTarget({
+      profileName: getCronJobOperationProfile(profileName, job),
+      job,
+    });
+  };
+
+  const closeCronDelete = () => {
+    if (cronBusyKey?.endsWith(":delete")) return;
+    setCronDeleteTarget(null);
+    setCronError(null);
+  };
+
+  const deleteCronJob = async () => {
+    if (!cronDeleteTarget) return;
+    const key = `${cronDeleteTarget.profileName}:${cronDeleteTarget.job.id}:delete`;
+    setCronBusyKey(key);
+    setCronError(null);
+    try {
+      const result = await window.hermes.removeCronJob(
+        cronDeleteTarget.job.id,
+        cronDeleteTarget.profileName,
+      );
+      if (!result.success) {
+        setCronError(result.error || "Cron job could not be deleted");
+        return;
+      }
+      setCronDeleteTarget(null);
+      await loadCronJobs();
+    } catch (err: any) {
+      setCronError(err?.message ? String(err.message) : "Cron job could not be deleted");
     } finally {
       setCronBusyKey(null);
     }
@@ -663,7 +717,9 @@ export default function SettingsView({
                           <div className="ui-settings-cron-list">
                             {group.jobs.map(job => {
                               const state = cronState(job);
-                              const busy = cronBusyKey === `${group.profile.name}:${job.id}:toggle`;
+                              const operationProfile = getCronJobOperationProfile(group.profile.name, job);
+                              const busy = cronBusyKey === `${operationProfile}:${job.id}:toggle`;
+                              const deleting = cronBusyKey === `${operationProfile}:${job.id}:delete`;
                               return (
                                 <article key={job.id} className="ui-settings-cron-job" data-state={state}>
                                   <div className="ui-settings-cron-job-state">
@@ -704,6 +760,14 @@ export default function SettingsView({
                                     >
                                       {state === "active" ? <Pause size={15} /> : <Play size={15} />}
                                     </IconButton>
+                                    <IconButton
+                                      danger
+                                      disabled={deleting}
+                                      onClick={() => openCronDelete(group.profile.name, job)}
+                                      title="Delete cron job"
+                                    >
+                                      <Trash2 size={15} />
+                                    </IconButton>
                                   </div>
                                 </article>
                               );
@@ -719,6 +783,7 @@ export default function SettingsView({
           )}
 
           {section === "appearance" && (
+            <div className="ui-settings-appearance-stack">
             <Card className="ui-settings-card">
               <Row
                 title="Theme"
@@ -726,7 +791,7 @@ export default function SettingsView({
                 control={
                   <Segment>
                     {THEMES.map(([id, label, Icon]) => (
-                      <SegmentItem key={id} active={theme === id} onClick={() => setTheme(id)}>
+                      <SegmentItem key={id} active={theme === id} onClick={() => setTheme(id as ThemePreference)}>
                         <Icon size={14} />
                         {label}
                       </SegmentItem>
@@ -736,27 +801,47 @@ export default function SettingsView({
               />
               <Row
                 title="Accent Color"
-                desc="Used across buttons, highlights and status"
+                desc="Used across buttons, highlights, focus rings and status surfaces"
                 control={
                   <div className="ui-settings-swatches">
-                    {ACCENTS.map(c => (
+                    {ACCENT_OPTIONS.map(c => (
                       <button
                         key={c}
                         type="button"
                         onClick={() => setAccent(c)}
                         title={c}
-                        className={cx(
-                          "w-7 h-7 rounded-[8px] border-2 transition-all",
-                          accent === c ? "border-[var(--text)]" : "border-transparent",
-                        )}
+                        aria-pressed={accent === c}
+                        className="ui-settings-swatch"
                         style={{ backgroundColor: c }}
                       />
                     ))}
+                    <label className="ui-settings-color-picker" title="Custom accent color">
+                      <span>{accent}</span>
+                      <input
+                        type="color"
+                        value={accent}
+                        onChange={(event) => setAccent(event.currentTarget.value.toUpperCase())}
+                      />
+                    </label>
                   </div>
                 }
                 last
               />
             </Card>
+            <Card className="ui-settings-appearance-preview">
+              <div>
+                <span className="ui-eyebrow">Live Preview</span>
+                <strong>Hermes visual system</strong>
+                <p>Theme and accent are applied immediately and restored when the app opens.</p>
+              </div>
+              <div className="ui-settings-preview-actions">
+                <Button variant="primary" size="sm">Primary</Button>
+                <Button variant="secondary" size="sm">Secondary</Button>
+                <Badge variant="accent">Accent</Badge>
+                <Toggle on={true} onChange={() => {}} />
+              </div>
+            </Card>
+            </div>
           )}
 
           {section === "backup" && (
@@ -895,6 +980,42 @@ export default function SettingsView({
             />
           </Field>
         </div>
+      </Modal>
+      <Modal
+        open={!!cronDeleteTarget}
+        onClose={closeCronDelete}
+        title="Delete Cron Job"
+        kicker={cronDeleteTarget ? `Profile · ${cronDeleteTarget.profileName}` : "Cron Job"}
+        width={520}
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeCronDelete} disabled={cronBusyKey?.endsWith(":delete")}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={deleteCronJob} disabled={cronBusyKey?.endsWith(":delete")}>
+              {cronBusyKey?.endsWith(":delete") ? "Deleting…" : "Delete Cron"}
+            </Button>
+          </>
+        }
+      >
+        <div className="ui-confirm-panel ui-confirm-danger ui-settings-cron-delete">
+          <span className="ui-confirm-icon">
+            <Trash2 size={18} />
+          </span>
+          <div>
+            <strong>{cronDeleteTarget?.job.name || "Cron job"}</strong>
+            <p>
+              This removes the scheduled automation from the selected Hermes profile.
+              The action cannot be undone.
+            </p>
+            <code>{cronDeleteTarget?.job.schedule || "—"}</code>
+          </div>
+        </div>
+        {cronError && (
+          <div className="ui-modal-alert" role="alert">
+            {cronError}
+          </div>
+        )}
       </Modal>
     </Screen>
   );

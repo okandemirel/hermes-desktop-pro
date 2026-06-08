@@ -999,6 +999,7 @@ export async function sshListSessions(
 import sqlite3, json, os, sys
 payload = json.load(sys.stdin)
 profile = payload.get("profile")
+profile_name = profile if profile else "default"
 limit = max(1, min(200, int(payload.get("limit") or 30)))
 offset = max(0, int(payload.get("offset") or 0))
 db = os.path.expanduser(f"~/.hermes/profiles/{profile}/state.db" if profile and profile != "default" else "~/.hermes/state.db")
@@ -1017,7 +1018,8 @@ for r in rows:
         "id": r["id"], "source": r["source"] or "cli",
         "startedAt": r["started_at"], "endedAt": r["ended_at"],
         "messageCount": r["message_count"] or 0, "model": r["model"] or "",
-        "title": r["title"], "preview": ""
+        "title": r["title"], "preview": "", "profileName": profile_name,
+        "profileNames": [profile_name]
     })
 print(json.dumps(result))
 conn.close()
@@ -1180,6 +1182,7 @@ export async function sshSearchSessions(
 import sqlite3, json, os, sys
 payload = json.load(sys.stdin)
 profile = payload.get("profile")
+profile_name = profile if profile else "default"
 query = payload.get("query") or ""
 limit = max(1, min(200, int(payload.get("limit") or 20)))
 db = os.path.expanduser(f"~/.hermes/profiles/{profile}/state.db" if profile and profile != "default" else "~/.hermes/state.db")
@@ -1194,7 +1197,7 @@ try:
         "WHERE m.content LIKE ? ORDER BY s.started_at DESC LIMIT ?",
         (f"%{query}%", limit)
     ).fetchall()
-    print(json.dumps([{"sessionId": r["id"], "title": r["title"], "startedAt": r["started_at"], "source": r["source"] or "cli", "messageCount": r["message_count"] or 0, "model": r["model"] or "", "snippet": (r["snippet"] or "")[:200]} for r in rows]))
+    print(json.dumps([{"sessionId": r["id"], "title": r["title"], "startedAt": r["started_at"], "source": r["source"] or "cli", "messageCount": r["message_count"] or 0, "model": r["model"] or "", "snippet": (r["snippet"] or "")[:200], "profileName": profile_name, "profileNames": [profile_name]} for r in rows]))
 except Exception as e:
     print("[]")
 conn.close()

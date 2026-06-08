@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { MessageSquare, Clock, ArrowRight, Trash2, Plus, Search, History, Database } from "lucide-react";
+import { MessageSquare, Clock, ArrowRight, Trash2, Plus, Search, History, Database, Users } from "lucide-react";
 import { Screen, SearchInput, SectionLabel, Card, Badge, Button, IconButton, EmptyState } from "../ui";
 
 // Structural shapes returned by the preload bridge. The list path mirrors
@@ -14,6 +14,10 @@ type SummaryShape = {
   messageCount: number;
   model: string;
   title: string | null;
+  profileName?: string;
+  profileNames?: string[];
+  dispatchMode?: string;
+  primaryProfile?: string;
 };
 type SearchShape = {
   sessionId: string;
@@ -23,6 +27,10 @@ type SearchShape = {
   messageCount: number;
   model: string;
   snippet: string;
+  profileName?: string;
+  profileNames?: string[];
+  dispatchMode?: string;
+  primaryProfile?: string;
 };
 
 interface SessionsViewProps {
@@ -41,6 +49,10 @@ interface SessionRow {
   messageCount: number;
   startedAt: number; // unix seconds (agent state.db)
   snippet: string;
+  profileName: string;
+  profileNames: string[];
+  dispatchMode?: string;
+  primaryProfile?: string;
 }
 
 function titleFor(id: string, title: string | null): string {
@@ -49,7 +61,33 @@ function titleFor(id: string, title: string | null): string {
   return `Session ${id.slice(-6)}`;
 }
 
+function shortSessionId(id: string): string {
+  return id.slice(-6);
+}
+
+function normalizeProfiles(profileName?: string, profileNames?: string[]): string[] {
+  const names = [
+    ...(profileNames || []),
+    profileName || "",
+  ].map((name) => name.trim()).filter(Boolean);
+  const unique = Array.from(new Set(names));
+  return unique.length > 0 ? unique : ["default"];
+}
+
+function profileSummaryLabel(profiles: string[]): string {
+  if (profiles.length <= 1) return profiles[0] || "default";
+  if (profiles.length === 2) return `${profiles[0]} + ${profiles[1]}`;
+  return `${profiles[0]} +${profiles.length - 1}`;
+}
+
+function profileSummaryTitle(profiles: string[], dispatchMode?: string, primaryProfile?: string): string {
+  const mode = dispatchMode ? `${dispatchMode} run` : "Session profile";
+  const primary = primaryProfile ? `Primary: ${primaryProfile}. ` : "";
+  return `${mode}. ${primary}Profiles: ${profiles.join(", ")}`;
+}
+
 function fromSummary(s: SummaryShape): SessionRow {
+  const profileNames = normalizeProfiles(s.profileName, s.profileNames);
   return {
     id: s.id,
     title: titleFor(s.id, s.title),
@@ -58,10 +96,15 @@ function fromSummary(s: SummaryShape): SessionRow {
     messageCount: s.messageCount,
     startedAt: s.startedAt,
     snippet: "",
+    profileName: s.profileName || profileNames[0],
+    profileNames,
+    dispatchMode: s.dispatchMode,
+    primaryProfile: s.primaryProfile,
   };
 }
 
 function fromSearch(r: SearchShape): SessionRow {
+  const profileNames = normalizeProfiles(r.profileName, r.profileNames);
   return {
     id: r.sessionId,
     title: titleFor(r.sessionId, r.title),
@@ -70,6 +113,10 @@ function fromSearch(r: SearchShape): SessionRow {
     messageCount: r.messageCount,
     startedAt: r.startedAt,
     snippet: r.snippet || "",
+    profileName: r.profileName || profileNames[0],
+    profileNames,
+    dispatchMode: r.dispatchMode,
+    primaryProfile: r.primaryProfile,
   };
 }
 
@@ -265,6 +312,16 @@ export default function SessionsView({ onResumeSession, onNewSession }: Sessions
               <div className="ui-sessions-meta">
                 <Badge variant="neutral">{hero.source}</Badge>
                 {hero.model && <Badge variant="accent" className="font-mono">{hero.model}</Badge>}
+                <span className="ui-sessions-id-chip">#{shortSessionId(hero.id)}</span>
+                <span
+                  className="ui-sessions-profile-chip"
+                  title={profileSummaryTitle(hero.profileNames, hero.dispatchMode, hero.primaryProfile)}
+                >
+                  <Users size={12} />
+                  <strong>{hero.profileNames.length > 1 ? "Team" : "Profile"}</strong>
+                  <em>{profileSummaryLabel(hero.profileNames)}</em>
+                </span>
+                {hero.dispatchMode && hero.profileNames.length > 1 && <Badge variant="neutral" className="font-mono">{hero.dispatchMode}</Badge>}
                 <span className="flex items-center gap-1.5"><MessageSquare size={12} /> {hero.messageCount} messages</span>
                 <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {dateLabel(hero.startedAt)}</span>
               </div>
@@ -293,6 +350,7 @@ export default function SessionsView({ onResumeSession, onNewSession }: Sessions
                     <div className="ui-sessions-row-copy">
                       <div className="ui-sessions-row-title">
                         <h3>{s.title}</h3>
+                        <span className="ui-sessions-id-chip">#{shortSessionId(s.id)}</span>
                         <Badge variant="neutral">{s.source}</Badge>
                         {s.model && <Badge variant="neutral" className="font-mono">{s.model}</Badge>}
                       </div>
@@ -300,6 +358,15 @@ export default function SessionsView({ onResumeSession, onNewSession }: Sessions
                     <Snippet text={s.snippet} />
                   ) : null}
                       <div className="ui-sessions-meta">
+                        <span
+                          className="ui-sessions-profile-chip"
+                          title={profileSummaryTitle(s.profileNames, s.dispatchMode, s.primaryProfile)}
+                        >
+                          <Users size={12} />
+                          <strong>{s.profileNames.length > 1 ? "Team" : "Profile"}</strong>
+                          <em>{profileSummaryLabel(s.profileNames)}</em>
+                        </span>
+                        {s.dispatchMode && s.profileNames.length > 1 && <Badge variant="neutral" className="font-mono">{s.dispatchMode}</Badge>}
                         <span className="flex items-center gap-1.5"><MessageSquare size={12} /> {s.messageCount} messages</span>
                         <span className="flex items-center gap-1.5 font-mono"><Clock size={12} /> {dateLabel(s.startedAt)}</span>
                       </div>

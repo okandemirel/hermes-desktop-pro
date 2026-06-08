@@ -327,6 +327,10 @@ const api = {
       messageCount: number;
       model: string;
       title: string | null;
+      profileName: string;
+      profileNames: string[];
+      dispatchMode?: string;
+      primaryProfile?: string;
     }>
   > => ipcRenderer.invoke("list-sessions", limit, offset),
 
@@ -342,6 +346,10 @@ const api = {
       messageCount: number;
       model: string;
       snippet: string;
+      profileName: string;
+      profileNames: string[];
+      dispatchMode?: string;
+      primaryProfile?: string;
     }>
   > => ipcRenderer.invoke("search-sessions", query, limit),
 
