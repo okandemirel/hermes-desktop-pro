@@ -4,6 +4,7 @@ import {
   ipcMain,
   shell,
   Menu,
+  dialog,
 } from "electron";
 import type { IpcMainInvokeEvent, Rectangle, WebContents } from "electron";
 import type {
@@ -138,7 +139,11 @@ import {
   setActiveProfile,
 } from "./profiles";
 
-import type { Attachment } from "../shared/attachments";
+import { MAX_ATTACHMENTS_PER_MESSAGE, type Attachment } from "../shared/attachments";
+import {
+  selectedAttachmentsFromPaths,
+  type SelectAttachmentsResult,
+} from "./attachment-picker";
 
 import {
   getClaw3dStatus,
@@ -812,6 +817,36 @@ function registerIpcHandlers(): void {
   ipcMain.handle("delete-session", (_event, sessionId: string) => {
     return deleteSession(sessionId);
   });
+
+  ipcMain.handle(
+    "select-attachments",
+    async (event, limit = MAX_ATTACHMENTS_PER_MESSAGE): Promise<SelectAttachmentsResult> => {
+      const safeLimit = Math.max(0, Math.min(MAX_ATTACHMENTS_PER_MESSAGE, Number(limit) || 0));
+      if (safeLimit <= 0) {
+        return {
+          attachments: [],
+          errors: [`Too many attachments (max ${MAX_ATTACHMENTS_PER_MESSAGE} per message)`],
+        };
+      }
+
+      const owner = BrowserWindow.fromWebContents(event.sender) || retainedMainWindow || undefined;
+      const result = owner
+        ? await dialog.showOpenDialog(owner, {
+            title: "Attach files",
+            properties: ["openFile", "multiSelections"],
+          })
+        : await dialog.showOpenDialog({
+            title: "Attach files",
+            properties: ["openFile", "multiSelections"],
+          });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { attachments: [], errors: [] };
+      }
+
+      return selectedAttachmentsFromPaths(result.filePaths, safeLimit);
+    },
+  );
 
   // ── Chat streaming ────────────────────────────────────
   ipcMain.handle(

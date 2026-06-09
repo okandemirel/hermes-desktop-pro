@@ -11,6 +11,7 @@ import type {
   AgentRunEvent,
   AgentRunEventKind,
   AgentRunState,
+  Attachment,
   ChatMessage,
   ChatTab,
   DispatchMode,
@@ -22,6 +23,7 @@ import type {
   TokenUsage,
   ToolsetInfo,
 } from "@shared/types";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@shared/attachments";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { BrandMark, BrandMedallion } from "./BrandMark";
 import { useChatStream } from "../hooks/useChatStream";
@@ -106,6 +108,14 @@ function formatDuration(startedAt?: number, endedAt?: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return `${minutes}m ${rest}s`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb >= 10 ? 0 : 1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
 }
 
 function runStatusLabel(status: AgentRunState["status"]): string {
@@ -391,6 +401,9 @@ export default function ChatView({
   const [profilePickerOpen, setProfilePickerOpen] = useState(false);
   const [dispatchMode, setDispatchMode] = useState<DispatchMode>(tab.dispatchMode || "single");
   const [dispatchTargets, setDispatchTargets] = useState<ProfileDispatchTarget[]>(tab.dispatchTargets || []);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [attachmentNotice, setAttachmentNotice] = useState("");
   const [voiceStatus, setVoiceStatus] = useState<VoiceInputStatus>("idle");
   const [voiceNotice, setVoiceNotice] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -757,16 +770,19 @@ export default function ChatView({
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
-    if (!trimmed || isStreaming) return;
-    if (trimmed.startsWith("/")) {
+    const queuedAttachments = attachments;
+    if ((!trimmed && queuedAttachments.length === 0) || isStreaming) return;
+    if (trimmed.startsWith("/") && queuedAttachments.length === 0) {
       const cmd = trimmed.split(" ")[0].toLowerCase();
       if (cmd === "/new") { onNewTab(); setInput(""); return; }
       if (cmd === "/clear") { sendMessage("/new"); setInput(""); return; }
     }
-    sendMessage(trimmed);
+    void sendMessage(trimmed, { attachments: queuedAttachments });
     setInput("");
+    setAttachments([]);
+    setAttachmentNotice("");
     setShowCommands(false);
-  }, [input, isStreaming, sendMessage, onNewTab]);
+  }, [attachments, input, isStreaming, sendMessage, onNewTab]);
 
   const handleVoiceInput = useCallback(async () => {
     if (voiceStatus === "recording") {
@@ -815,6 +831,37 @@ export default function ChatView({
       stopVoiceTracks();
     }
   }, [finishVoiceRecording, stopVoiceTracks, voiceStatus]);
+
+  const handleAttachFiles = useCallback(async () => {
+    if (attachmentBusy) return;
+    const remaining = MAX_ATTACHMENTS_PER_MESSAGE - attachments.length;
+    if (remaining <= 0) {
+      setAttachmentNotice(`Too many attachments (max ${MAX_ATTACHMENTS_PER_MESSAGE} per message)`);
+      return;
+    }
+
+    setAttachmentBusy(true);
+    setAttachmentNotice("");
+    try {
+      const result = await window.hermes.selectAttachments(remaining);
+      if (result.attachments.length > 0) {
+        setAttachments(current => [...current, ...result.attachments].slice(0, MAX_ATTACHMENTS_PER_MESSAGE));
+      }
+      if (result.errors.length > 0) {
+        setAttachmentNotice(result.errors.join("\n"));
+      }
+    } catch {
+      setAttachmentNotice("Attachment picker could not be opened.");
+    } finally {
+      setAttachmentBusy(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  }, [attachmentBusy, attachments.length]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments(current => current.filter(attachment => attachment.id !== id));
+    setAttachmentNotice("");
+  }, []);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1158,13 +1205,49 @@ export default function ChatView({
         </div>
       )}
       <div className="ui-compose-box">
+        {attachments.length > 0 && (
+          <div className="ui-attachment-tray" aria-label="Attachments">
+            {attachments.map(attachment => {
+              const AttachmentIcon = attachment.kind === "image" ? Image : FileText;
+              return (
+                <span key={attachment.id} className="ui-attachment-chip" title={`${attachment.name} · ${formatFileSize(attachment.size)}`}>
+                  <span className="ui-attachment-chip-icon"><AttachmentIcon size={14} /></span>
+                  <span className="ui-attachment-chip-label">{attachment.name}</span>
+                  <em>{formatFileSize(attachment.size)}</em>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(attachment.id)}
+                    aria-label={`Remove ${attachment.name}`}
+                    title="Remove attachment"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        {attachmentNotice && (
+          <div className="ui-attachment-notice" role="status" aria-live="polite">
+            {attachmentNotice}
+          </div>
+        )}
         <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
           placeholder="Ask Hermes..." rows={1}
           className="ui-compose-input" />
         <div className="ui-compose-tools">
           <div className="flex items-center gap-2">
             {COMPOSER_TOOLS.map(t => (
-              <button key={t.label} className="ui-compose-tool" onClick={() => focusCommand(t.cmd)} title={t.label}>
+              <button
+                key={t.label}
+                className="ui-compose-tool"
+                onClick={() => {
+                  if (t.label === "Attach") void handleAttachFiles();
+                  else focusCommand(t.cmd);
+                }}
+                disabled={t.label === "Attach" && (attachmentBusy || attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE)}
+                title={t.label === "Attach" && attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE ? "Attachment limit reached" : t.label}
+              >
                 <t.icon size={17} />
               </button>
             ))}
@@ -1187,7 +1270,7 @@ export default function ChatView({
                 <Square size={13} fill="currentColor" />
               </button>
             ) : (
-              <button onClick={handleSend} disabled={!input.trim()} className="ui-send-button" title={sendButtonLabel} aria-label={sendButtonLabel}>
+              <button onClick={handleSend} disabled={!input.trim() && attachments.length === 0} className="ui-send-button" title={sendButtonLabel} aria-label={sendButtonLabel}>
                 <ArrowUp size={18} />
               </button>
             )}

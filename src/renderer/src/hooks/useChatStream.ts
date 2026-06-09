@@ -4,6 +4,7 @@ import type {
   AgentRunEventKind,
   AgentRunEventStatus,
   AgentRunState,
+  Attachment,
   ChatMessage,
   DispatchMode,
   DispatchRunState,
@@ -36,7 +37,7 @@ interface UseChatStreamReturn {
   isStreaming: boolean;
   runState: AgentRunState | null;
   dispatchRunState: DispatchRunState | null;
-  sendMessage: (text: string) => Promise<void>;
+  sendMessage: (text: string, options?: { attachments?: Attachment[] }) => Promise<void>;
   abortStream: () => void;
   abortDispatch: (runId?: string) => void;
 }
@@ -319,10 +320,17 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     return unsubscribe;
   }, []);
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, messageOptions: { attachments?: Attachment[] } = {}) => {
     const key = conversationKey;
     const currentState = stateByKeyRef.current[key] || createConversationState(options);
-    const userMsg: ChatMessage = { id: `${key}-msg-${++msgIdCounter.current}`, role: "user", content: text, timestamp: Date.now() };
+    const attachments = messageOptions.attachments?.length ? messageOptions.attachments : undefined;
+    const userMsg: ChatMessage = {
+      id: `${key}-msg-${++msgIdCounter.current}`,
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+      ...(attachments ? { attachments } : {}),
+    };
     const assistantId = `${key}-msg-${++msgIdCounter.current}`;
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "", timestamp: Date.now() };
     const runId = `${assistantId}-run`;
@@ -364,6 +372,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
           targets,
           resumeSessionByProfile: currentState.sessionId ? { [selectedProfileName]: currentState.sessionId } : {},
           history,
+          attachments,
           temperature: options.temperature,
         });
       } catch (err: any) {
@@ -427,6 +436,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
         profile: selectedProfileName,
         resumeSessionId: currentState.sessionId,
         history,
+        attachments,
         temperature: options.temperature,
       });
       if (result?.sessionId) {

@@ -284,6 +284,10 @@ const api = {
     ),
 
   // Chat streaming
+  selectAttachments: (
+    limit?: number,
+  ): Promise<{ attachments: Attachment[]; errors: string[] }> =>
+    ipcRenderer.invoke("select-attachments", limit),
   sendMessage: (
     message: string,
     options: {
