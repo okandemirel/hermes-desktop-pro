@@ -111,7 +111,7 @@ const MENU_ACCENT_COMMANDS: Partial<Record<AppMenuCommand, string>> = {
   "set-accent-purple": "#BF5AF2",
 };
 
-const SIDEBAR_WIDTH_MS = 340;
+const SIDEBAR_LABEL_FADE_IN_DELAY_MS = 80;
 
 let tabCounter = 1;
 function createTab(providerId: ProviderId = "opencode-zen"): ChatTab {
@@ -142,7 +142,6 @@ export default function App() {
   const [activeTabId, setActiveTabId] = useState(tabs[0].id);
   const [providers] = useState<ProviderInfo[]>(getAllProviders);
   const [collapsed, setCollapsed] = useState(false);
-  const [sidebarLabelsMounted, setSidebarLabelsMounted] = useState(true);
   const [sidebarLabelsVisible, setSidebarLabelsVisible] = useState(true);
   const [connStatus, setConnStatus] = useState<{ ok: boolean; mode: string }>({ ok: false, mode: "local" });
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
@@ -170,15 +169,13 @@ export default function App() {
     clearSidebarTimers();
     if (expanded) {
       setCollapsed(false);
-      setSidebarLabelsMounted(true);
       setSidebarLabelsVisible(false);
-      scheduleSidebarTimer(() => setSidebarLabelsVisible(true), 24);
+      scheduleSidebarTimer(() => setSidebarLabelsVisible(true), SIDEBAR_LABEL_FADE_IN_DELAY_MS);
       return;
     }
 
     setSidebarLabelsVisible(false);
     setCollapsed(true);
-    scheduleSidebarTimer(() => setSidebarLabelsMounted(false), SIDEBAR_WIDTH_MS);
   }, [clearSidebarTimers, scheduleSidebarTimer]);
 
   const toggleSidebar = useCallback(() => {
@@ -372,7 +369,7 @@ export default function App() {
       <button
         className={cx("ui-sidebar-update no-drag", placement === "dock" && "is-compact", active && "is-active", phase === "downloaded" && "is-ready", phase === "error" && "is-error")}
         onClick={handleAppUpdate}
-        title={title}
+        title={placement === "dock" ? undefined : title}
         disabled={busy || !canInteract}
         aria-label={title}
       >
@@ -451,7 +448,7 @@ export default function App() {
     return (
       <button key={item.id} className={cx("ui-nav no-drag", collapsed && "is-compact")} data-active={active}
         ref={node => { navRefs.current[item.id] = node; }}
-        onClick={() => setActiveScreen(item.id)} title={collapsed ? item.label : undefined}>
+        onClick={() => setActiveScreen(item.id)} aria-label={collapsed ? item.label : undefined}>
         <item.icon size={17} className="shrink-0" strokeWidth={active ? 2.2 : 1.9} />
         <span className="ui-nav-label truncate">{item.label}</span>
         {item.shortcut && <span className="ui-nav-shortcut">{item.shortcut}</span>}
@@ -463,30 +460,23 @@ export default function App() {
     <div className="ui-shell flex overflow-hidden">
       <div className="ui-window-title drag">Hermes Desktop Pro</div>
       <aside
-        className={cx("ui-sidebar flex flex-col shrink-0", collapsed ? "w-[96px] is-collapsed" : "w-[276px]")}
+        className={cx("ui-sidebar flex flex-col shrink-0", collapsed ? "w-[72px] is-collapsed" : "w-[276px]")}
         data-labels-visible={sidebarLabelsVisible ? "true" : "false"}
-        data-labels-mounted={sidebarLabelsMounted ? "true" : "false"}
       >
         <div className="h-[30px] shrink-0 drag" />
-        <div className={cx("ui-sidebar-brand drag", !sidebarLabelsMounted ? "is-compact" : "is-expanded")}>
+        <div className="ui-sidebar-brand drag is-expanded">
           <BrandMark size={25} />
-          {sidebarLabelsMounted && <span className="ui-sidebar-label-fade ui-sidebar-wordmark"><HermesWordmark size={22} /></span>}
-          {sidebarLabelsMounted && <span className="ml-auto ui-tag ui-tag-gold no-drag ui-sidebar-label-fade">PRO</span>}
-          {sidebarLabelsMounted && (
-            <button className="ui-sidebar-collapse no-drag ui-sidebar-label-fade" onClick={() => setSidebarExpanded(false)} title="Collapse">
-              <PanelLeftClose size={17} />
-            </button>
-          )}
+          <span className="ui-sidebar-label-fade ui-sidebar-wordmark"><HermesWordmark size={22} /></span>
+          <span className="ml-auto ui-tag ui-tag-gold no-drag ui-sidebar-label-fade">PRO</span>
+          <button className="ui-sidebar-collapse no-drag ui-sidebar-label-fade" onClick={() => setSidebarExpanded(false)} aria-label="Collapse sidebar">
+            <PanelLeftClose size={17} />
+          </button>
         </div>
 
-        <div className={cx("no-drag ui-sidebar-new-wrap", !sidebarLabelsMounted ? "is-compact" : "is-expanded")}>
-          {!sidebarLabelsMounted ? (
-            <button className="ui-iconbtn" title="New chat" onClick={handleNewTab}><Plus size={18} /></button>
-          ) : (
-            <button className="ui-sidebar-new ui-btn ui-btn-secondary ui-btn-sm w-full ui-sidebar-label-fade" onClick={handleNewTab}>
-              <Plus size={17} strokeWidth={2.2} /> New chat <span className="ml-auto ui-nav-shortcut">⌘N</span>
-            </button>
-          )}
+        <div className={cx("no-drag ui-sidebar-new-wrap", collapsed ? "is-compact" : "is-expanded")}>
+          <button className="ui-sidebar-new ui-btn ui-btn-secondary ui-btn-sm w-full" onClick={handleNewTab} aria-label="New chat">
+            <Plus size={17} strokeWidth={2.2} /> <span className="ui-sidebar-label-fade">New chat</span> <span className="ml-auto ui-nav-shortcut ui-sidebar-label-fade">⌘N</span>
+          </button>
         </div>
 
         <nav className="ui-sidebar-nav flex-1 min-h-0 overflow-y-auto flex flex-col">
@@ -497,7 +487,7 @@ export default function App() {
             </div>
           ))}
 
-          {sidebarLabelsMounted && (
+          {!collapsed && (
             <div className="ui-sidebar-recents flex flex-col gap-0.5 ui-sidebar-label-fade">
               <div className="ui-navgroup-label">Recent Sessions</div>
               {recentSessions.map(session => (
@@ -521,7 +511,7 @@ export default function App() {
         </nav>
 
         <div className="ui-sidebar-footer">
-          {sidebarLabelsMounted && (
+          {!collapsed && (
             <button className="ui-connection-card no-drag ui-sidebar-label-fade" onClick={() => setActiveScreen("gateway")}>
               <span className="ui-connection-orb"><StatusDot color={connStatus.ok ? "var(--success)" : "var(--warning)"} pulse={connStatus.ok} /></span>
               <div className="min-w-0 flex-1">
@@ -531,20 +521,20 @@ export default function App() {
               <StatusDot color={connStatus.ok ? "var(--success)" : "var(--error)"} />
             </button>
           )}
-          {!sidebarLabelsMounted ? (
+          {collapsed ? (
             <div className="ui-sidebar-footer-compact no-drag">
               {renderUpdateButton("dock")}
-              <button className="ui-sidebar-expand" onClick={() => setSidebarExpanded(true)} title="Expand sidebar">
+              <button className="ui-sidebar-expand" onClick={() => setSidebarExpanded(true)} aria-label="Expand sidebar">
                 <PanelLeft size={17} />
               </button>
             </div>
           ) : (
             <div className="ui-sidebar-footer-actions no-drag ui-sidebar-label-fade">
               {renderUpdateButton("dock")}
-              <button onClick={() => setActiveScreen("settings")} title="Settings"><SlidersHorizontal size={17} /></button>
-              <button onClick={() => setActiveScreen("schedules")} title="Activity"><Bell size={17} /></button>
-              <button onClick={() => setActiveScreen("tools")} title="Help"><HelpCircle size={17} /></button>
-              <button className="ui-footer-identity" onClick={() => setActiveScreen("chat")} title="Hermes">H</button>
+              <button onClick={() => setActiveScreen("settings")} aria-label="Settings"><SlidersHorizontal size={17} /></button>
+              <button onClick={() => setActiveScreen("schedules")} aria-label="Activity"><Bell size={17} /></button>
+              <button onClick={() => setActiveScreen("tools")} aria-label="Help"><HelpCircle size={17} /></button>
+              <button className="ui-footer-identity" onClick={() => setActiveScreen("chat")} aria-label="Hermes">H</button>
             </div>
           )}
         </div>
