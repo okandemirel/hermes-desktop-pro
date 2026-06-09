@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatTab, ProviderInfo } from "@shared/types";
@@ -74,7 +74,7 @@ function installHermesMock() {
   return hermes;
 }
 
-function renderChatView(): { container: HTMLDivElement; root: Root } {
+function renderChatView(overrides: Partial<ComponentProps<typeof ChatView>> = {}): { container: HTMLDivElement; root: Root } {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -90,6 +90,7 @@ function renderChatView(): { container: HTMLDivElement; root: Root } {
         onSelectTab={vi.fn()}
         onUpdateProvider={vi.fn()}
         onUpdateModel={vi.fn()}
+        {...overrides}
       />,
     );
   });
@@ -153,5 +154,37 @@ describe("ChatView attachments", () => {
     expect(hookMocks.sendMessage).toHaveBeenCalledWith("", {
       attachments: [expect.objectContaining({ id: "att-1", name: "notes.txt" })],
     });
+  });
+
+  it("opens tools management instead of writing the /tools command", async () => {
+    installHermesMock();
+    const onOpenTools = vi.fn();
+    ({ container, root } = renderChatView({ onOpenTools }));
+
+    const toolsButton = container.querySelector<HTMLButtonElement>('button[title="Tools"]');
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea");
+
+    await act(async () => {
+      toolsButton?.click();
+    });
+
+    expect(onOpenTools).toHaveBeenCalledOnce();
+    expect(textarea?.value).toBe("");
+  });
+
+  it("opens context settings instead of writing the /context command", async () => {
+    installHermesMock();
+    const onOpenSettings = vi.fn();
+    ({ container, root } = renderChatView({ onOpenSettings }));
+
+    const contextButton = container.querySelector<HTMLButtonElement>('button[title="Context"]');
+    const textarea = container.querySelector<HTMLTextAreaElement>("textarea");
+
+    await act(async () => {
+      contextButton?.click();
+    });
+
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+    expect(textarea?.value).toBe("");
   });
 });

@@ -1243,6 +1243,8 @@ export default function ChatView({
                 className="ui-compose-tool"
                 onClick={() => {
                   if (t.label === "Attach") void handleAttachFiles();
+                  else if (t.label === "Tools") openToolsManagement();
+                  else if (t.label === "Context") openSettingsManagement();
                   else focusCommand(t.cmd);
                 }}
                 disabled={t.label === "Attach" && (attachmentBusy || attachments.length >= MAX_ATTACHMENTS_PER_MESSAGE)}
