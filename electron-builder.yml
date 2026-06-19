@@ -11,6 +11,12 @@ files:
   - "out/**/*"
   - "resources/**/*"
 
+extraResources:
+  - from: resources/mcp-bridge
+    to: mcp-bridge
+    filter:
+      - "**/*"
+
 publish:
   provider: github
   owner: okandemirel
