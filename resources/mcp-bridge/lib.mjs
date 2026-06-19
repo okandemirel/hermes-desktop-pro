@@ -26,7 +26,7 @@ export const TOOLS = [
   },
 ];
 
-const ANSI_RE = /\[[0-9;]*[A-Za-z]/g;
+const ANSI_RE = /\x1b?\[[0-9;]*[A-Za-z]/g;
 const NOISE_RE = [/^[╭╰│╮╯─┌┐└┘┤├┬┴┼]/, /⚕\s*Hermes/];
 
 // Strip ANSI + the CLI's TUI chrome from one-shot stdout (mirrors the desktop's

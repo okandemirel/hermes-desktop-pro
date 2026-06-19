@@ -12,6 +12,9 @@ describe("cleanCliOutput", () => {
     const raw = "[32m╭─ box\nsession_id: abc123\n⚕ Hermes\nHello there[0m\n";
     expect(cleanCliOutput(raw)).toBe("Hello there");
   });
+  it("strips real ESC-prefixed ANSI sequences", () => {
+    expect(cleanCliOutput("\x1b[32mHello\x1b[0m")).toBe("Hello");
+  });
   it("returns empty string for empty input", () => {
     expect(cleanCliOutput("")).toBe("");
   });
