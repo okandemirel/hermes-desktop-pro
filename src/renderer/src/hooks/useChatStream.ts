@@ -41,7 +41,7 @@ interface UseChatStreamReturn {
   isStreaming: boolean;
   runState: AgentRunState | null;
   dispatchRunState: DispatchRunState | null;
-  sendMessage: (text: string, options?: { attachments?: Attachment[] }) => Promise<void>;
+  sendMessage: (text: string, options?: { attachments?: Attachment[]; overrideProfile?: string }) => Promise<void>;
   abortStream: () => void;
   abortDispatch: (runId?: string) => void;
 }
@@ -347,19 +347,21 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     return unsubscribe;
   }, []);
 
-  const sendMessage = useCallback(async (text: string, messageOptions: { attachments?: Attachment[] } = {}) => {
+  const sendMessage = useCallback(async (text: string, messageOptions: { attachments?: Attachment[]; overrideProfile?: string } = {}) => {
     const key = conversationKey;
     const currentState = stateByKeyRef.current[key] || createConversationState(options);
     const attachments = messageOptions.attachments?.length ? messageOptions.attachments : undefined;
+    const overrideProfile = messageOptions.overrideProfile;
     const userMsg: ChatMessage = {
       id: `${key}-msg-${++msgIdCounter.current}`,
       role: "user",
       content: text,
       timestamp: Date.now(),
       ...(attachments ? { attachments } : {}),
+      ...(overrideProfile ? { viaProfile: overrideProfile } : {}),
     };
     const assistantId = `${key}-msg-${++msgIdCounter.current}`;
-    const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "", timestamp: Date.now() };
+    const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "", timestamp: Date.now(), ...(overrideProfile ? { viaProfile: overrideProfile } : {}) };
     const runId = `${assistantId}-run`;
 
     // Build history from prior messages (before this turn) — user/assistant only.
@@ -372,7 +374,8 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     const dispatchMode = options.dispatchMode || "single";
     const targets = normalizeDispatchTargets(options.dispatchTargets || [], options.activeProfileName || "default");
     const selectedProfileName = targets[0]?.profileName || options.activeProfileName || "default";
-    const shouldUseDispatch = dispatchMode !== "single" && targets.length > 1;
+    // A cross-profile ask is always a single send to the override profile.
+    const shouldUseDispatch = !overrideProfile && dispatchMode !== "single" && targets.length > 1;
 
     if (shouldUseDispatch) {
       const dispatchId = createDispatchId();
@@ -460,9 +463,11 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
 
     try {
       const result = await window.hermes.sendMessage(text, {
-        profile: selectedProfileName,
-        resumeSessionId: currentState.sessionId,
-        history,
+        profile: overrideProfile || selectedProfileName,
+        // One-shot for cross-profile asks: don't resume the tab's main session
+        // (it belongs to the active profile, not the asked-of profile).
+        resumeSessionId: overrideProfile ? undefined : currentState.sessionId,
+        history: overrideProfile ? [] : history,
         attachments,
         temperature: options.temperature,
       });

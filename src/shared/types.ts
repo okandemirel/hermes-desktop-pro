@@ -71,6 +71,9 @@ export interface ChatMessage {
    *  message can show a collapsible inline "Activity" disclosure (the steps that
    *  produced it) instead of a single global timeline pinned to the bottom. */
   run?: AgentRunState;
+  /** Set when this turn was routed to another profile via a cross-profile ask
+   *  (/ask or @mention); the bubble shows a "via <profile>" badge. */
+  viaProfile?: string;
 }
 
 export type AgentRunEventKind = "start" | "context" | "reasoning" | "tool" | "output" | "usage" | "done" | "error" | "abort";
