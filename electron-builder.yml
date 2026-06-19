@@ -48,12 +48,11 @@ mac:
 
 # ── Linux ──────────────────────────────────────────
 linux:
+  # AppImage only — it is the format electron-updater can auto-update. deb/rpm
+  # are not auto-updatable and require a public maintainer email; add them back
+  # with a `maintainer` here if distro packages are needed later.
   target:
     - target: AppImage
-      arch: [x64]
-    - target: deb
-      arch: [x64]
-    - target: rpm
       arch: [x64]
   category: Utility
   icon: "resources/icon.png"
