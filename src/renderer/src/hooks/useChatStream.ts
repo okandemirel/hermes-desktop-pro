@@ -30,6 +30,10 @@ interface UseChatStreamOptions {
   dispatchTargets?: ProfileDispatchTarget[];
   activeProfileName?: string;
   onTokenUsage?: (usage: TokenUsage) => void;
+  /** Fired when the backend resolves/confirms a session id for this
+   *  conversation, so the parent can write it back onto the tab (enables
+   *  resume + de-dup of an already-open conversation). */
+  onSessionId?: (sessionId: string) => void;
 }
 
 interface UseChatStreamReturn {
@@ -115,6 +119,9 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   const onTokenUsageRef = useRef(options.onTokenUsage);
   useEffect(() => { onTokenUsageRef.current = options.onTokenUsage; }, [options.onTokenUsage]);
 
+  const onSessionIdRef = useRef(options.onSessionId);
+  useEffect(() => { onSessionIdRef.current = options.onSessionId; }, [options.onSessionId]);
+
   const stateByKeyRef = useRef(stateByKey);
   useEffect(() => { stateByKeyRef.current = stateByKey; }, [stateByKey]);
 
@@ -123,16 +130,22 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
       const existing = prev[conversationKey];
       if (!existing) return { ...prev, [conversationKey]: createConversationState(options) };
       const initialMessages = options.initialMessages || [];
-      if (
-        (options.sessionId && existing.sessionId !== options.sessionId) ||
-        (initialMessages.length > 0 && existing.messages.length === 0)
-      ) {
+      const sessionChanged = !!options.sessionId && existing.sessionId !== options.sessionId;
+      // Adopt freshly-loaded history whenever a NEW non-empty initialMessages
+      // array arrives. Its reference changes only when the parent re-seeds the
+      // tab (e.g. resuming a session), so this won't clobber a live stream. The
+      // old guard adopted only when our own copy was empty, so re-opening an
+      // already-visited tab silently dropped the reloaded transcript — the
+      // intermittent "session seçilince yüklenmiyor" bug.
+      const hasFreshHistory =
+        initialMessages.length > 0 && initialMessages !== existing.messages;
+      if (sessionChanged || hasFreshHistory) {
         return {
           ...prev,
           [conversationKey]: {
             ...existing,
             sessionId: options.sessionId || existing.sessionId,
-            messages: initialMessages.length > 0 ? initialMessages : existing.messages,
+            messages: hasFreshHistory ? initialMessages : existing.messages,
           },
         };
       }
@@ -231,25 +244,34 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     });
     const unsubError = window.hermes.onStreamError((error: string) => {
       const key = activeConversationKey.current;
-      patchActive(key, m => ({ ...m, content: m.content || `Error: ${error}` }));
-      patchRunState(key, run => {
-        if (!run) return run;
-        const endedAt = Date.now();
-        return {
-          ...run,
-          status: "error",
-          endedAt,
-          events: [
-            ...completeRunningEvents(run.events, endedAt),
-            createRunEvent(`${run.id}-error`, "error", "Run stopped with error", "error", error),
-          ],
-        };
-      });
       if (key) {
         setStateByKey(prev => {
           const state = prev[key];
           if (!state) return prev;
-          return { ...prev, [key]: { ...state, activeAssistantId: null, isStreaming: false } };
+          const endedAt = Date.now();
+          const aid = state.activeAssistantId;
+          const errorRun: AgentRunState | null = state.runState ? {
+            ...state.runState,
+            status: "error",
+            endedAt,
+            events: [
+              ...completeRunningEvents(state.runState.events, endedAt),
+              createRunEvent(`${state.runState.id}-error`, "error", "Run stopped with error", "error", error),
+            ],
+          } : null;
+          return {
+            ...prev,
+            [key]: {
+              ...state,
+              runState: errorRun,
+              messages: state.messages.map(m => {
+                if (m.id !== aid) return m;
+                return { ...m, content: m.content || `Error: ${error}`, ...(errorRun ? { run: errorRun } : {}) };
+              }),
+              activeAssistantId: null,
+              isStreaming: false,
+            },
+          };
         });
       }
       activeConversationKey.current = null;
@@ -257,26 +279,30 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     const unsubDone = window.hermes.onStreamDone((sessionId?: string) => {
       const key = activeConversationKey.current;
       if (key) {
-        patchRunState(key, run => {
-          if (!run) return run;
-          const endedAt = Date.now();
-          return {
-            ...run,
-            status: "done",
-            endedAt,
-            events: [
-              ...completeRunningEvents(run.events, endedAt),
-              createRunEvent(`${run.id}-done`, "done", "Run complete", "done", "Final response delivered"),
-            ],
-          };
-        });
         setStateByKey(prev => {
           const state = prev[key];
           if (!state) return prev;
+          const endedAt = Date.now();
+          const finalRun: AgentRunState | null = state.runState ? {
+            ...state.runState,
+            status: "done",
+            endedAt,
+            events: [
+              ...completeRunningEvents(state.runState.events, endedAt),
+              createRunEvent(`${state.runState.id}-done`, "done", "Run complete", "done", "Final response delivered"),
+            ],
+          } : null;
+          const aid = state.activeAssistantId;
           return {
             ...prev,
             [key]: {
               ...state,
+              runState: finalRun,
+              // Persist the run onto its assistant message so the inline
+              // Activity disclosure survives after streaming ends.
+              messages: aid && finalRun
+                ? state.messages.map(m => (m.id === aid ? { ...m, run: finalRun } : m))
+                : state.messages,
               sessionId: sessionId || state.sessionId,
               activeAssistantId: null,
               isStreaming: false,
@@ -284,6 +310,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
           };
         });
       }
+      if (sessionId) onSessionIdRef.current?.(sessionId);
       activeConversationKey.current = null;
     });
 
@@ -445,6 +472,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
           if (!state) return prev;
           return { ...prev, [key]: { ...state, sessionId: result.sessionId } };
         });
+        onSessionIdRef.current?.(result.sessionId);
       }
     } catch (err: any) {
       // Honest error — no simulated fallback. onStreamError may have already
@@ -454,22 +482,23 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
         const state = prev[key];
         if (!state) return prev;
         const endedAt = Date.now();
+        const errorRun: AgentRunState | null = state.runState ? {
+          ...state.runState,
+          status: "error",
+          endedAt,
+          events: [
+            ...completeRunningEvents(state.runState.events, endedAt),
+            createRunEvent(`${state.runState.id}-error-local`, "error", "Send failed", "error", message),
+          ],
+        } : state.runState;
         return {
           ...prev,
           [key]: {
             ...state,
-            messages: state.messages.map(m => (m.id === assistantId && !m.content ? { ...m, content: `Error: ${message}` } : m)),
+            messages: state.messages.map(m => (m.id === assistantId && !m.content ? { ...m, content: `Error: ${message}`, ...(errorRun ? { run: errorRun } : {}) } : m)),
             activeAssistantId: null,
             isStreaming: false,
-            runState: state.runState ? {
-              ...state.runState,
-              status: "error",
-              endedAt,
-              events: [
-                ...completeRunningEvents(state.runState.events, endedAt),
-                createRunEvent(`${state.runState.id}-error-local`, "error", "Send failed", "error", message),
-              ],
-            } : state.runState,
+            runState: errorRun,
           },
         };
       });
@@ -485,21 +514,26 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
       const state = prev[key];
       if (!state) return prev;
       const endedAt = Date.now();
+      const aid = state.activeAssistantId;
+      const abortedRun: AgentRunState | null = state.runState ? {
+        ...state.runState,
+        status: "aborted",
+        endedAt,
+        events: [
+          ...completeRunningEvents(state.runState.events, endedAt),
+          createRunEvent(`${state.runState.id}-abort`, "abort", "Run aborted", "error", "Stopped by the user"),
+        ],
+      } : state.runState;
       return {
         ...prev,
         [key]: {
           ...state,
           activeAssistantId: null,
           isStreaming: false,
-          runState: state.runState ? {
-            ...state.runState,
-            status: "aborted",
-            endedAt,
-            events: [
-              ...completeRunningEvents(state.runState.events, endedAt),
-              createRunEvent(`${state.runState.id}-abort`, "abort", "Run aborted", "error", "Stopped by the user"),
-            ],
-          } : state.runState,
+          runState: abortedRun,
+          messages: aid && abortedRun
+            ? state.messages.map(m => (m.id === aid ? { ...m, run: abortedRun } : m))
+            : state.messages,
         },
       };
     });

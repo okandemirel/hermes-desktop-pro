@@ -567,6 +567,15 @@ const api = {
     };
   }) => ipcRenderer.invoke("set-connection-config", input),
   testConnection: () => ipcRenderer.invoke("test-connection"),
+  getChatReadiness: (
+    profile?: string,
+  ): Promise<{
+    ready: boolean;
+    via: "gateway" | "direct" | "remote" | "none";
+    reason: string;
+  }> => ipcRenderer.invoke("chat-readiness", profile),
+  setThemeSource: (theme: "system" | "light" | "dark"): Promise<boolean> =>
+    ipcRenderer.invoke("set-theme-source", theme),
 
   // Application updates
   getAppUpdateStatus: (): Promise<AppUpdateStatus> =>
@@ -588,6 +597,13 @@ const api = {
     const handler = (_: any, command: AppMenuCommand) => callback(command);
     ipcRenderer.on("app-menu-command", handler);
     return () => ipcRenderer.removeListener("app-menu-command", handler);
+  },
+  // Active-profile changes broadcast from the main process (set-active-profile),
+  // so any view caching the profile list can refresh instead of going stale.
+  onProfileSwitched: (callback: (name: string) => void): (() => void) => {
+    const handler = (_: unknown, name: string) => callback(name);
+    ipcRenderer.on("profile-switched", handler);
+    return () => ipcRenderer.removeListener("profile-switched", handler);
   },
 
   // Gateway

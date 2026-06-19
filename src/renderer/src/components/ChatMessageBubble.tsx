@@ -1,21 +1,88 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import type { ChatMessage } from "@shared/types";
+import { ChevronDown, ChevronRight, Activity } from "lucide-react";
+import type { AgentRunState, ChatMessage } from "@shared/types";
 
-interface Props { message: ChatMessage; isStreaming?: boolean }
+interface Props {
+  message: ChatMessage;
+  isStreaming?: boolean;
+  /** Live run for the turn currently streaming into this bubble. When present it
+   *  drives the inline Activity disclosure (auto-expanded); once the run ends the
+   *  final snapshot lives on message.run and the disclosure collapses. */
+  liveRun?: AgentRunState | null;
+}
 
-export function ChatMessageBubble({ message }: Props) {
+function runStatusWord(status: AgentRunState["status"]): string {
+  if (status === "running") return "Working";
+  if (status === "error") return "Error";
+  if (status === "aborted") return "Stopped";
+  return "Done";
+}
+
+/**
+ * Inline, collapsible "what the agent did" disclosure attached to the assistant
+ * message it belongs to — replaces the always-on global run timeline that used
+ * to sit pinned at the bottom of every conversation. Auto-expanded while the
+ * turn streams, collapsed once it completes.
+ */
+function ActivityDisclosure({ run, live }: { run: AgentRunState; live: boolean }) {
+  const [open, setOpen] = useState(live);
+  useEffect(() => {
+    if (live) setOpen(true);
+  }, [live]);
+
+  const steps = run.events;
+  const toolCount = steps.filter((event) => event.kind === "tool").length;
+
+  return (
+    <div className="ui-activity-inline" data-status={run.status} data-live={live ? "true" : "false"}>
+      <button
+        type="button"
+        className="ui-activity-inline-toggle"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <Activity size={13} />
+        <span>Activity</span>
+        <em>
+          {runStatusWord(run.status)} · {steps.length} step{steps.length === 1 ? "" : "s"}
+          {toolCount ? ` · ${toolCount} tool${toolCount === 1 ? "" : "s"}` : ""}
+        </em>
+      </button>
+      {open && (
+        <div className="ui-activity-inline-steps">
+          {steps.map((event) => (
+            <div key={event.id} className="ui-activity-inline-step" data-status={event.status}>
+              <span className="ui-activity-inline-dot" />
+              <div className="ui-activity-inline-step-text">
+                <strong>{event.label}</strong>
+                {event.detail && <small>{event.detail}</small>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ChatMessageBubble({ message, isStreaming, liveRun }: Props) {
   const [showReasoning, setShowReasoning] = useState(true);
   const [showTools, setShowTools] = useState(true);
   const isUser = message.role === "user";
+  const run = liveRun || message.run || null;
 
   return (
     <div className="ui-chat-row">
       <div className={`ui-chat-avatar ${isUser ? "ui-chat-avatar-user" : "ui-chat-avatar-agent"}`}>{isUser ? "U" : "H"}</div>
 
       <div className="flex-1 min-w-0">
+        {!isUser && run && run.events.length > 0 && (
+          <ActivityDisclosure run={run} live={!!liveRun && !!isStreaming} />
+        )}
+
         {!isUser && message.reasoning && (
           <div className="mb-2">
             <button onClick={() => setShowReasoning(v => !v)} className="ui-btn ui-btn-ghost ui-btn-sm mb-1.5">

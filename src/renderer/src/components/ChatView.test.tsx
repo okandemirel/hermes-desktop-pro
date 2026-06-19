@@ -49,6 +49,9 @@ const tab: ChatTab = {
 function installHermesMock() {
   const hermes = {
     listProfiles: vi.fn().mockResolvedValue([]),
+    onProfileSwitched: vi.fn(() => () => {}),
+    setActiveProfile: vi.fn().mockResolvedValue(true),
+    getChatReadiness: vi.fn().mockResolvedValue({ ready: true, via: "gateway", reason: "" }),
     getToolsets: vi.fn().mockResolvedValue([]),
     getConfigValue: vi.fn().mockResolvedValue(0.3),
     setToolsetEnabled: vi.fn().mockResolvedValue(true),

@@ -5,6 +5,7 @@ import {
   shell,
   Menu,
   dialog,
+  nativeTheme,
 } from "electron";
 import type { IpcMainInvokeEvent, Rectangle, WebContents } from "electron";
 import type {
@@ -48,7 +49,15 @@ import {
   testRemoteConnection,
   isRemoteMode,
   notifyProfileSwitched,
+  getChatReadiness,
 } from "./hermes";
+import {
+  isDesktopSessionId,
+  desktopSessionHistory,
+  desktopSessionSummaries,
+  searchDesktopSessions,
+  deleteDesktopSession,
+} from "./desktop-sessions";
 
 import {
   isSshTunnelActive,
@@ -610,6 +619,13 @@ function registerIpcHandlers(): void {
         startGateway(name);
       }
     }
+    // Tell every renderer the active profile changed so views that cache it
+    // (ChatView's profile list + derived activeProfileName) refresh instead of
+    // going stale — otherwise an activation here never reflects into an open
+    // chat, which read as "profil seçilmiyor".
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send("profile-switched", name);
+    }
     return true;
   });
 
@@ -790,21 +806,37 @@ function registerIpcHandlers(): void {
   );
 
   // ── Sessions (state.db readonly + FTS) ────────────────
-  ipcMain.handle("list-sessions", (_event, limit?: number, offset?: number) => {
+  ipcMain.handle("list-sessions", async (_event, limit?: number, offset?: number) => {
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh)
-      return sshListSessions(conn.ssh, limit, offset);
-    return listSessions(limit, offset);
+    const base =
+      conn.mode === "ssh" && conn.ssh
+        ? await sshListSessions(conn.ssh, limit, offset)
+        : listSessions(limit, offset);
+    // Merge direct-mode (desktop-local) sessions so BYO-key chats — which never
+    // touch the gateway state.db — still list and resume.
+    const desktop = desktopSessionSummaries();
+    if (desktop.length === 0) return base;
+    const seen = new Set(base.map((r) => r.id));
+    const merged = [...base, ...desktop.filter((d) => !seen.has(d.id))];
+    merged.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+    return typeof limit === "number" ? merged.slice(0, limit) : merged;
   });
 
-  ipcMain.handle("search-sessions", (_event, query: string, limit?: number) => {
+  ipcMain.handle("search-sessions", async (_event, query: string, limit?: number) => {
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh)
-      return sshSearchSessions(conn.ssh, query, limit);
-    return searchSessions(query, limit);
+    const base =
+      conn.mode === "ssh" && conn.ssh
+        ? await sshSearchSessions(conn.ssh, query, limit)
+        : searchSessions(query, limit);
+    const desktop = searchDesktopSessions(query);
+    if (desktop.length === 0) return base;
+    const seen = new Set(base.map((r) => r.sessionId));
+    return [...base, ...desktop.filter((d) => !seen.has(d.sessionId))];
   });
 
   ipcMain.handle("get-session-messages", (_event, sessionId: string) => {
+    // Direct-mode sessions live in the desktop-local store, not the gateway DB.
+    if (isDesktopSessionId(sessionId)) return desktopSessionHistory(sessionId);
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh)
       return sshGetSessionMessages(conn.ssh, sessionId);
@@ -815,6 +847,7 @@ function registerIpcHandlers(): void {
   // matches reference semantics; remote/ssh modes simply no-op against the
   // local cache when the row isn't present).
   ipcMain.handle("delete-session", (_event, sessionId: string) => {
+    if (isDesktopSessionId(sessionId)) return deleteDesktopSession(sessionId);
     return deleteSession(sessionId);
   });
 
@@ -1126,6 +1159,24 @@ function registerIpcHandlers(): void {
   );
 
   // ── Gateway ───────────────────────────────────────────
+  ipcMain.handle("chat-readiness", (_event, profile?: string) =>
+    getChatReadiness(profile),
+  );
+
+  ipcMain.handle(
+    "set-theme-source",
+    (_event, theme: "system" | "light" | "dark") => {
+      // Drive the native window appearance (incl. the macOS vibrancy material)
+      // from the in-app theme. Without this, the "under-window" vibrancy stays
+      // in the OS appearance, so light mode looked broken — dark vibrancy bled
+      // through the translucent surfaces.
+      if (theme === "light" || theme === "dark" || theme === "system") {
+        nativeTheme.themeSource = theme;
+      }
+      return true;
+    },
+  );
+
   ipcMain.handle("gateway-status", async () => {
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh) {

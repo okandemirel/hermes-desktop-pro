@@ -1,10 +1,11 @@
 import { useState } from "react";
 import {
   Zap, Globe, Monitor, Cpu, HardDrive, MemoryStick, Wifi,
-  ArrowRight, Server, Key, Shield, Terminal, Download
+  ArrowRight, Server, Key, Shield, Terminal, Download, KeyRound, Sparkles
 } from "lucide-react";
-import { Badge, Button, Card, Field, IconChip, Input, Screen, cx } from "../../ui";
+import { Badge, Button, Card, Field, IconChip, Input, Screen, Select, cx } from "../../ui";
 import { BrandMark } from "../../components/BrandMark";
+import { getAllProviders } from "@shared/providers";
 
 // ─── WelcomeView ────────────────────────────────────────────────────────
 
@@ -13,14 +14,26 @@ interface WelcomeViewProps {
   onContinueLocal?: () => void;
   /** Saved a remote connection — skip install and enter the app. */
   onContinueRemote?: () => void;
+  /** Connected a direct provider (BYO key) — skip install and enter the app. */
+  onContinueProvider?: () => void;
+  /** Dismiss onboarding without finishing setup and enter the app. */
+  onSkip?: () => void;
 }
 
-export default function WelcomeView({ onContinueLocal, onContinueRemote }: WelcomeViewProps) {
-  const [mode, setMode] = useState<"local" | "remote" | null>(null);
+const PROVIDERS = getAllProviders();
+
+export default function WelcomeView({ onContinueLocal, onContinueRemote, onContinueProvider, onSkip }: WelcomeViewProps) {
+  const [mode, setMode] = useState<"local" | "remote" | "provider" | null>(null);
   const [remoteUrl, setRemoteUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState("");
+  const [providerId, setProviderId] = useState<string>("");
+  const [providerKey, setProviderKey] = useState("");
+  const [providerModel, setProviderModel] = useState("");
+
+  const selectedProvider = PROVIDERS.find(p => p.id === providerId);
+  const providerModelPlaceholder = selectedProvider?.models[0]?.id || "default model";
 
   async function handleConnectRemote(): Promise<void> {
     if (!remoteUrl || !apiKey) return;
@@ -33,6 +46,23 @@ export default function WelcomeView({ onContinueLocal, onContinueRemote }: Welco
         apiKey: apiKey.trim(),
       });
       onContinueRemote?.();
+    } catch (err) {
+      setConnectError((err as Error).message || "Failed to save connection.");
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function handleConnectProvider(): Promise<void> {
+    if (!selectedProvider || !providerKey.trim()) return;
+    setConnecting(true);
+    setConnectError("");
+    try {
+      const model = providerModel.trim() || selectedProvider.models[0]?.id || "";
+      await window.hermes.setConnectionConfig({ mode: "local" });
+      await window.hermes.setModelConfig(model, selectedProvider.id, selectedProvider.baseUrl || "");
+      await window.hermes.setEnvValue(selectedProvider.apiKeyEnv || "", providerKey.trim());
+      onContinueProvider?.();
     } catch (err) {
       setConnectError((err as Error).message || "Failed to save connection.");
     } finally {
@@ -147,6 +177,34 @@ export default function WelcomeView({ onContinueLocal, onContinueRemote }: Welco
               </div>
               {mode === "remote" && <span className="ui-welcome-selected">Selected</span>}
             </button>
+
+            <button
+              onClick={() => setMode("provider")}
+              className={cx("ui-welcome-mode-card", mode === "provider" && "is-active")}
+            >
+              <div className="ui-welcome-mode-head">
+                <IconChip>
+                  <KeyRound size={20} className="text-[var(--accent-text)]" />
+                </IconChip>
+                <div>
+                  <h3>Connect a Provider</h3>
+                  <p>Bring your own API key — chat instantly.</p>
+                </div>
+              </div>
+              <div className="ui-welcome-remote-copy">
+                <p>Talk directly to any language model provider. No agent install, no server — just your key.</p>
+                <ul>
+                  {[
+                    "Instant - works the moment you add a key",
+                    "No install - skip the local runtime entirely",
+                    "Any provider - OpenAI, Anthropic, OpenRouter & more",
+                  ].map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              {mode === "provider" && <span className="ui-welcome-selected">Selected</span>}
+            </button>
           </div>
         </section>
 
@@ -175,8 +233,45 @@ export default function WelcomeView({ onContinueLocal, onContinueRemote }: Welco
           </Card>
         )}
 
+        {mode === "provider" && (
+          <Card pad className="ui-welcome-remote-form fade-in">
+            <div className="ui-welcome-form-head">
+              <Sparkles size={15} />
+              <strong>Provider Connection</strong>
+            </div>
+            <Field label="Provider">
+              <Select
+                value={providerId}
+                onChange={e => { setProviderId(e.target.value); setProviderModel(""); }}
+                aria-label="Provider"
+              >
+                <option value="" disabled>Select a provider…</option>
+                {PROVIDERS.map(p => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="API Key" hint={<span><Key size={10} /> Stored locally in ~/.hermes/.env</span>}>
+              <Input
+                type="password"
+                value={providerKey}
+                onChange={e => setProviderKey(e.target.value)}
+                placeholder="sk-..."
+              />
+            </Field>
+            <Field label="Model" hint={<span>Optional — defaults to the provider's recommended model</span>}>
+              <Input
+                type="text"
+                value={providerModel}
+                onChange={e => setProviderModel(e.target.value)}
+                placeholder={providerModelPlaceholder}
+              />
+            </Field>
+          </Card>
+        )}
+
         <div className="ui-welcome-action-row">
-          {mode === "remote" && connectError && (
+          {(mode === "remote" || mode === "provider") && connectError && (
             <p className="ui-welcome-error">{connectError}</p>
           )}
           {mode === "local" && (
@@ -196,7 +291,23 @@ export default function WelcomeView({ onContinueLocal, onContinueRemote }: Welco
               <ArrowRight size={14} />
             </Button>
           )}
+          {mode === "provider" && (
+            <Button
+              variant="primary"
+              disabled={!selectedProvider || !providerKey.trim() || connecting}
+              onClick={handleConnectProvider}
+              leftIcon={<KeyRound size={16} />}
+            >
+              {connecting ? "Connecting..." : "Connect Provider"}
+              <ArrowRight size={14} />
+            </Button>
+          )}
           {!mode && <p className="ui-welcome-idle">Select a setup mode above to continue</p>}
+          {onSkip && (
+            <Button variant="ghost" size="sm" onClick={onSkip}>
+              Skip for now
+            </Button>
+          )}
         </div>
       </div>
     </Screen>

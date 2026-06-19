@@ -43,7 +43,18 @@ import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { type Attachment, escapeXmlAttr } from "../shared/attachments";
 import { parseSseBlock, processCustomEvent } from "./sse-parser";
 import { readModels } from "./models";
-import { OPENAI_COMPAT_PROVIDERS, URL_KEY_MAP } from "../shared/url-key-map";
+import {
+  OPENAI_COMPAT_PROVIDERS,
+  URL_KEY_MAP,
+  expectedEnvKeyForUrl,
+  isLocalBaseUrl,
+} from "../shared/url-key-map";
+import { providerApiKeyEnv, providerBaseUrl } from "../shared/providers";
+import type { ProviderId } from "../shared/types";
+import {
+  saveDesktopSession,
+  type DesktopSessionMessage,
+} from "./desktop-sessions";
 
 /**
  * Resolve which profile a gateway call targets. An explicit profile always
@@ -371,6 +382,539 @@ export function contextFolderSystemMessage(
   };
 }
 
+// ────────────────────────────────────────────────────
+//  Direct-to-provider transport (hybrid mode)
+// ────────────────────────────────────────────────────
+
+/**
+ * A resolved direct-provider endpoint: the OpenAI-compatible base URL to POST
+ * to and the bearer key to authenticate with. Built from the active profile's
+ * model config + .env when no local gateway is available, so BYO-key users can
+ * chat without installing the ~2GB hermes-agent backend.
+ */
+export interface DirectTarget {
+  baseUrl: string;
+  apiKey: string;
+  protocol: "openai" | "anthropic" | "gemini";
+}
+
+/**
+ * Anthropic's Messages API and Google's Gemini API are NOT OpenAI
+ * `/chat/completions` compatible — only the gateway can translate to them.
+ * Everything else in the registry (OpenRouter, OpenAI, Groq, DeepSeek,
+ * Together, Fireworks, Cerebras, Mistral, OpenCode, local servers) speaks the
+ * OpenAI streaming protocol implemented in sendMessageViaApi.
+ */
+export function isOpenAiCompatibleEndpoint(baseUrl: string): boolean {
+  return !/anthropic\.com|generativelanguage\.googleapis\.com/i.test(baseUrl);
+}
+
+/**
+ * Resolve the provider API key for a direct base URL from a profile env map.
+ * Precedence: the provider's registry env key → the URL-derived env key →
+ * generic CUSTOM_API_KEY / OPENAI_API_KEY fallbacks. Pure (no I/O) so it can be
+ * unit-tested without touching the filesystem.
+ */
+export function resolveDirectApiKey(
+  baseUrl: string,
+  provider: string | undefined,
+  env: Record<string, string>,
+): string {
+  const providerKeyEnv =
+    provider && provider !== "auto" && provider !== "custom"
+      ? providerApiKeyEnv(provider as ProviderId)
+      : "";
+  if (providerKeyEnv && env[providerKeyEnv]) return env[providerKeyEnv];
+  const urlKeyEnv = expectedEnvKeyForUrl(baseUrl);
+  if (env[urlKeyEnv]) return env[urlKeyEnv];
+  return env.CUSTOM_API_KEY || env.OPENAI_API_KEY || "";
+}
+
+/**
+ * Build a DirectTarget from the active profile's model config, or null when a
+ * direct path isn't viable (no endpoint, no model id, a non-OpenAI protocol,
+ * or a remote endpoint with no key). Used as the hybrid fallback in
+ * sendMessage() when no local gateway is reachable.
+ */
+/** Pick the wire protocol for a direct endpoint from its base URL. */
+function directProtocol(baseUrl: string): DirectTarget["protocol"] {
+  if (/anthropic\.com/i.test(baseUrl)) return "anthropic";
+  if (/generativelanguage\.googleapis\.com/i.test(baseUrl)) return "gemini";
+  return "openai";
+}
+
+function resolveDirectTarget(profile?: string): DirectTarget | null {
+  const mc = getModelConfig(profile);
+  let baseUrl = (mc.baseUrl || "").trim();
+  if (!baseUrl && mc.provider && mc.provider !== "auto") {
+    baseUrl = providerBaseUrl(mc.provider as ProviderId);
+  }
+  if (!baseUrl) return null;
+  baseUrl = baseUrl.replace(/\/+$/, "");
+  if (!mc.model) return null;
+  const apiKey = resolveDirectApiKey(
+    baseUrl,
+    mc.provider,
+    readProfileEnvFile(profile),
+  );
+  if (!apiKey && !isLocalBaseUrl(baseUrl)) return null;
+  return { baseUrl, apiKey, protocol: directProtocol(baseUrl) };
+}
+
+export interface ChatReadiness {
+  ready: boolean;
+  via: "gateway" | "direct" | "remote" | "none";
+  reason: string;
+}
+
+/**
+ * Can the active profile chat right now, and through which transport? Mirrors
+ * the routing in sendMessage() so the renderer can show an honest connection
+ * status and an actionable setup prompt instead of letting a send hang or fail
+ * cryptically. `ready` means a path is configured — live reachability of a
+ * remote/gateway endpoint is a separate testConnection() concern.
+ */
+export function getChatReadiness(profile?: string): ChatReadiness {
+  const conn = getConnectionConfig();
+  if (conn.mode === "remote") {
+    return conn.remoteUrl
+      ? { ready: true, via: "remote", reason: "" }
+      : {
+          ready: false,
+          via: "none",
+          reason: "Remote mode is selected but no server URL is configured.",
+        };
+  }
+  if (conn.mode === "ssh") {
+    return conn.ssh.host
+      ? { ready: true, via: "remote", reason: "" }
+      : {
+          ready: false,
+          via: "none",
+          reason: "SSH mode is selected but no host is configured.",
+        };
+  }
+  // Local mode: prefer a local gateway install/process, else a direct provider.
+  if (
+    (existsSync(HERMES_PYTHON) && existsSync(HERMES_REPO)) ||
+    isGatewayRunning(profile)
+  ) {
+    return { ready: true, via: "gateway", reason: "" };
+  }
+  if (resolveDirectTarget(profile)) {
+    return { ready: true, via: "direct", reason: "" };
+  }
+  return {
+    ready: false,
+    via: "none",
+    reason:
+      "No model connected. Add a provider and API key in Settings, or install the local Hermes agent.",
+  };
+}
+
+/**
+ * Re-write a direct-mode conversation to the desktop-local store (overwrite by
+ * id). Direct providers are stateless, so the full conversation is persisted
+ * each turn from the replayed history + the just-finished turn.
+ */
+function persistDirectSession(
+  sessionId: string,
+  model: string,
+  history: Array<{ role: string; content: string }> | undefined,
+  userMessage: string,
+  assistantText: string,
+): void {
+  if (!sessionId || !assistantText) return;
+  const messages: DesktopSessionMessage[] = [];
+  for (const h of history || []) {
+    const role = h.role === "agent" ? "assistant" : h.role;
+    if (role === "user" || role === "assistant") {
+      messages.push({ role, content: h.content });
+    }
+  }
+  messages.push({ role: "user", content: userMessage });
+  messages.push({ role: "assistant", content: assistantText });
+  saveDesktopSession(sessionId, model, messages);
+}
+
+function clampTemperature(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(1, Math.max(0, value))
+    : undefined;
+}
+
+/**
+ * Compose the user-turn text for non-OpenAI direct protocols: the message plus
+ * inlined text-file attachments and path references. Mirrors buildUserContent's
+ * text composition (images are handled per-protocol by the caller).
+ */
+function composeDirectText(text: string, attachments?: Attachment[]): string {
+  if (!attachments || attachments.length === 0) return text;
+  const parts: string[] = [];
+  if (text.trim()) parts.push(text);
+  for (const f of attachments) {
+    if (f.kind === "text-file" && typeof f.text === "string") {
+      parts.push(
+        `<file name="${escapeXmlAttr(f.name)}" mime="${escapeXmlAttr(f.mime || "text/plain")}">\n${f.text}\n</file>`,
+      );
+    }
+  }
+  const pathRefs = attachments.filter(
+    (a) => a.kind === "path-ref" && typeof a.path === "string" && a.path,
+  );
+  if (pathRefs.length > 0) {
+    parts.push(pathRefs.map((f) => `[Attached file: ${f.path}]`).join("\n"));
+  }
+  return parts.join("\n\n");
+}
+
+type AnthropicContent =
+  | string
+  | Array<
+      | { type: "text"; text: string }
+      | {
+          type: "image";
+          source: { type: "base64"; media_type: string; data: string };
+        }
+    >;
+
+function buildAnthropicUserContent(
+  text: string,
+  attachments?: Attachment[],
+): AnthropicContent {
+  const composed = composeDirectText(text, attachments);
+  const images = (attachments || []).filter(
+    (a) => a.kind === "image" && typeof a.dataUrl === "string" && a.dataUrl,
+  );
+  if (images.length === 0) return composed;
+  const blocks: Exclude<AnthropicContent, string> = [];
+  if (composed) blocks.push({ type: "text", text: composed });
+  for (const img of images) {
+    const m = /^data:([^;]+);base64,(.*)$/.exec(img.dataUrl!);
+    if (m) {
+      blocks.push({
+        type: "image",
+        source: { type: "base64", media_type: m[1], data: m[2] },
+      });
+    }
+  }
+  return blocks.length > 0 ? blocks : composed;
+}
+
+/**
+ * Stream a chat turn directly to Anthropic's Messages API (no gateway). System
+ * messages become the top-level `system` param; reasoning arrives as
+ * `thinking_delta`. Persists to the desktop session store on completion.
+ */
+function sendMessageViaAnthropic(
+  message: string,
+  cb: ChatCallbacks,
+  profile: string | undefined,
+  history: Array<{ role: string; content: string }> | undefined,
+  attachments: Attachment[] | undefined,
+  runtimeOptions: ChatRuntimeOptions | undefined,
+  direct: DirectTarget,
+): ChatHandle {
+  const mc = getModelConfig(profile);
+  const controller = new AbortController();
+  const url = `${direct.baseUrl}/messages`;
+
+  const systemParts: string[] = [];
+  const messages: Array<{ role: string; content: AnthropicContent }> = [];
+  for (const h of history || []) {
+    if (h.role === "system") {
+      systemParts.push(h.content);
+      continue;
+    }
+    const role = h.role === "agent" ? "assistant" : h.role;
+    if (role === "user" || role === "assistant") {
+      messages.push({ role, content: h.content });
+    }
+  }
+  messages.push({
+    role: "user",
+    content: buildAnthropicUserContent(message, attachments),
+  });
+
+  const temperature = clampTemperature(runtimeOptions?.temperature);
+  const body = JSON.stringify({
+    model: mc.model,
+    max_tokens: 4096,
+    stream: true,
+    ...(systemParts.length > 0 ? { system: systemParts.join("\n\n") } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+    messages,
+  });
+  const bodyBuf = Buffer.from(body, "utf-8");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Content-Length": String(bodyBuf.length),
+    "x-api-key": direct.apiKey,
+    "anthropic-version": "2023-06-01",
+  };
+
+  const sessionId = `desk-${Date.now()}-${randomUUID()}`;
+  let assistantText = "";
+  let finished = false;
+  let lastError = "";
+
+  function finish(error?: string): void {
+    if (finished) return;
+    finished = true;
+    if (error) {
+      cb.onError(error);
+    } else {
+      persistDirectSession(sessionId, mc.model || "", history, message, assistantText);
+      cb.onDone(sessionId);
+    }
+  }
+
+  // Returns true when the stream signals completion (message_stop).
+  function handleAnthropicEvent(data: string): boolean {
+    if (!data || data === "[DONE]") return false;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      return false;
+    }
+    const type = parsed?.type;
+    if (type === "error") {
+      lastError = parsed?.error?.message || "Anthropic stream error";
+      return false;
+    }
+    if (type === "content_block_delta") {
+      const d = parsed.delta;
+      if (d?.type === "text_delta" && typeof d.text === "string") {
+        assistantText += d.text;
+        cb.onChunk(d.text);
+      } else if (d?.type === "thinking_delta" && typeof d.thinking === "string") {
+        cb.onReasoningChunk?.(d.thinking);
+      }
+      return false;
+    }
+    if (type === "message_delta" && parsed.usage && cb.onUsage) {
+      const inTok = parsed.usage.input_tokens || 0;
+      const outTok = parsed.usage.output_tokens || 0;
+      cb.onUsage({
+        promptTokens: inTok,
+        completionTokens: outTok,
+        totalTokens: inTok + outTok,
+      });
+      return false;
+    }
+    return type === "message_stop";
+  }
+
+  const requester = url.startsWith("https") ? https.request : http.request;
+  const req = requester(
+    url,
+    { method: "POST", headers, signal: controller.signal, timeout: 120000 },
+    (res) => {
+      if (res.statusCode !== 200) {
+        let errBody = "";
+        res.on("data", (d) => (errBody += d.toString()));
+        res.on("end", () => {
+          try {
+            const e = JSON.parse(errBody);
+            finish(e.error?.message || `Anthropic error ${res.statusCode}`);
+          } catch {
+            finish(`Anthropic returned ${res.statusCode}: ${errBody.slice(0, 200)}`);
+          }
+        });
+        return;
+      }
+      let buffer = "";
+      res.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString();
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() || "";
+        for (const block of blocks) {
+          let dataStr = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+          }
+          if (handleAnthropicEvent(dataStr)) {
+            finish(assistantText ? undefined : lastError || undefined);
+            return;
+          }
+        }
+      });
+      res.on("end", () =>
+        finish(
+          assistantText ? undefined : lastError || "No response from Anthropic.",
+        ),
+      );
+      res.on("error", (err) => {
+        if (err.message === "aborted" || err.name === "AbortError") return;
+        finish(`Stream error: ${err.message}`);
+      });
+    },
+  );
+  req.on("error", (err) => {
+    if (err.name === "AbortError") return;
+    finish(`Anthropic request failed: ${err.message}`);
+  });
+  req.on("timeout", () => {
+    req.destroy();
+    finish("Anthropic request timed out.");
+  });
+  req.write(bodyBuf);
+  req.end();
+  return { abort: () => controller.abort() };
+}
+
+/**
+ * Stream a chat turn directly to Google's Gemini API (no gateway). System
+ * messages become `systemInstruction`; the assistant role maps to "model".
+ * Images are not inlined in this MVP path (text + text-file attachments only).
+ */
+function sendMessageViaGemini(
+  message: string,
+  cb: ChatCallbacks,
+  profile: string | undefined,
+  history: Array<{ role: string; content: string }> | undefined,
+  attachments: Attachment[] | undefined,
+  runtimeOptions: ChatRuntimeOptions | undefined,
+  direct: DirectTarget,
+): ChatHandle {
+  const mc = getModelConfig(profile);
+  const controller = new AbortController();
+  const url = `${direct.baseUrl}/models/${encodeURIComponent(mc.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(direct.apiKey)}`;
+
+  const systemParts: string[] = [];
+  const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+  for (const h of history || []) {
+    if (h.role === "system") {
+      systemParts.push(h.content);
+      continue;
+    }
+    const role = h.role === "assistant" || h.role === "agent" ? "model" : "user";
+    contents.push({ role, parts: [{ text: h.content }] });
+  }
+  contents.push({
+    role: "user",
+    parts: [{ text: composeDirectText(message, attachments) }],
+  });
+
+  const temperature = clampTemperature(runtimeOptions?.temperature);
+  const body = JSON.stringify({
+    contents,
+    ...(systemParts.length > 0
+      ? { systemInstruction: { parts: [{ text: systemParts.join("\n\n") }] } }
+      : {}),
+    ...(temperature !== undefined ? { generationConfig: { temperature } } : {}),
+  });
+  const bodyBuf = Buffer.from(body, "utf-8");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Content-Length": String(bodyBuf.length),
+  };
+
+  const sessionId = `desk-${Date.now()}-${randomUUID()}`;
+  let assistantText = "";
+  let finished = false;
+  let lastError = "";
+
+  function finish(error?: string): void {
+    if (finished) return;
+    finished = true;
+    if (error) {
+      cb.onError(error);
+    } else {
+      persistDirectSession(sessionId, mc.model || "", history, message, assistantText);
+      cb.onDone(sessionId);
+    }
+  }
+
+  function handleGeminiData(data: string): void {
+    if (!data || data === "[DONE]") return;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (parsed?.error) {
+      lastError = parsed.error.message || "Gemini error";
+      return;
+    }
+    const parts = parsed?.candidates?.[0]?.content?.parts;
+    if (Array.isArray(parts)) {
+      for (const p of parts) {
+        if (typeof p?.text === "string" && p.text) {
+          assistantText += p.text;
+          cb.onChunk(p.text);
+        }
+      }
+    }
+    if (parsed?.usageMetadata && cb.onUsage) {
+      cb.onUsage({
+        promptTokens: parsed.usageMetadata.promptTokenCount || 0,
+        completionTokens: parsed.usageMetadata.candidatesTokenCount || 0,
+        totalTokens: parsed.usageMetadata.totalTokenCount || 0,
+      });
+    }
+  }
+
+  const requester = url.startsWith("https") ? https.request : http.request;
+  const req = requester(
+    url,
+    { method: "POST", headers, signal: controller.signal, timeout: 120000 },
+    (res) => {
+      if (res.statusCode !== 200) {
+        let errBody = "";
+        res.on("data", (d) => (errBody += d.toString()));
+        res.on("end", () => {
+          try {
+            const e = JSON.parse(errBody);
+            finish(e.error?.message || `Gemini error ${res.statusCode}`);
+          } catch {
+            finish(`Gemini returned ${res.statusCode}: ${errBody.slice(0, 200)}`);
+          }
+        });
+        return;
+      }
+      let buffer = "";
+      res.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString();
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() || "";
+        for (const block of blocks) {
+          for (const line of block.split("\n")) {
+            if (line.startsWith("data:")) handleGeminiData(line.slice(5).trim());
+          }
+        }
+      });
+      res.on("end", () => {
+        if (buffer.trim()) {
+          for (const line of buffer.split("\n")) {
+            if (line.startsWith("data:")) handleGeminiData(line.slice(5).trim());
+          }
+        }
+        finish(
+          assistantText ? undefined : lastError || "No response from Gemini.",
+        );
+      });
+      res.on("error", (err) => {
+        if (err.message === "aborted" || err.name === "AbortError") return;
+        finish(`Stream error: ${err.message}`);
+      });
+    },
+  );
+  req.on("error", (err) => {
+    if (err.name === "AbortError") return;
+    finish(`Gemini request failed: ${err.message}`);
+  });
+  req.on("timeout", () => {
+    req.destroy();
+    finish("Gemini request timed out.");
+  });
+  req.write(bodyBuf);
+  req.end();
+  return { abort: () => controller.abort() };
+}
+
 function sendMessageViaApi(
   message: string,
   cb: ChatCallbacks,
@@ -380,9 +924,19 @@ function sendMessageViaApi(
   attachments?: Attachment[],
   contextFolder?: string,
   runtimeOptions?: ChatRuntimeOptions,
+  direct?: DirectTarget,
 ): ChatHandle {
   const mc = getModelConfig(profile);
   const controller = new AbortController();
+
+  // Endpoint: a direct provider posts to `<base>/chat/completions` (its base
+  // URL already carries `/v1`); the gateway/remote path appends `/v1/...` to
+  // the resolved gateway URL. Computed once and reused by the stream request
+  // and the non-streaming error probe.
+  const apiBase = direct ? direct.baseUrl.replace(/\/+$/, "") : "";
+  const chatEndpoint = direct
+    ? `${apiBase}/chat/completions`
+    : `${getApiUrl(profile)}/v1/chat/completions`;
 
   // Build full conversation from history + current message (standard OpenAI format).
   // History items are kept text-only — attachments from prior turns live in
@@ -418,7 +972,9 @@ function sendMessageViaApi(
     messages,
     stream: true,
     ...(temperature !== undefined ? { temperature } : {}),
-    ...(_resumeSessionId ? { session_id: _resumeSessionId } : {}),
+    // Gateway sessions resume via `session_id`; direct providers are stateless
+    // (history is replayed in `messages`) and may reject the unknown field.
+    ...(!direct && _resumeSessionId ? { session_id: _resumeSessionId } : {}),
   });
 
   // Encode the body up-front into a Buffer so we can:
@@ -437,13 +993,20 @@ function sendMessageViaApi(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Content-Length": String(bodyBuf.length),
-    ...getRemoteAuthHeader(),
+    // Direct provider authenticates with its own bearer key; gateway/remote
+    // use the remote auth header (empty in local-gateway mode, filled below).
+    ...(direct
+      ? direct.apiKey
+        ? { Authorization: `Bearer ${direct.apiKey}` }
+        : {}
+      : getRemoteAuthHeader()),
   };
   // Local API server key (API_SERVER_KEY in the profile's .env /
-  // config.yaml) only applies in local mode — in remote/SSH mode the
-  // remote endpoint's own auth header (set above) is authoritative and
-  // must not be overwritten.
-  if (!isRemoteMode()) {
+  // config.yaml) only applies to the local *gateway* path — never to a direct
+  // provider (it has its own bearer above) and never in remote/SSH mode (the
+  // remote endpoint's own auth header is authoritative and must not be
+  // overwritten).
+  if (!direct && !isRemoteMode()) {
     const apiServerKey = getApiServerKey(profile);
     if (apiServerKey) {
       headers.Authorization = `Bearer ${apiServerKey}`;
@@ -475,14 +1038,20 @@ function sendMessageViaApi(
   // local install degrades to the pre-fix (fingerprint) behaviour
   // rather than 403-looping.
   const hasAuth = "Authorization" in headers;
+  // Mint a client-side id so the renderer can group the turn. Direct providers
+  // don't understand the gateway's `X-Hermes-Session-Id` (and some reject
+  // unknown headers), so keep the id local and never send it upstream. The
+  // gateway path keeps its existing auth-gated header behaviour.
   let sessionId =
-    _resumeSessionId || (hasAuth ? `desk-${Date.now()}-${randomUUID()}` : "");
-  if (sessionId) {
+    _resumeSessionId ||
+    (direct || hasAuth ? `desk-${Date.now()}-${randomUUID()}` : "");
+  if (sessionId && !direct) {
     headers["X-Hermes-Session-Id"] = sessionId;
   }
   let hasContent = false;
   let finished = false; // guard against double callbacks
   let lastError = ""; // capture embedded error messages
+  let directAssistant = ""; // accumulated assistant text for direct-mode persistence
   // Tool progress pattern: `emoji tool_name` or `emoji description`
   const toolProgressRe = /^`([^\s`]+)\s+([^`]+)`$/;
 
@@ -492,6 +1061,9 @@ function sendMessageViaApi(
     if (error) {
       cb.onError(error);
     } else {
+      if (direct) {
+        persistDirectSession(sessionId, mc.model || "", history, message, directAssistant);
+      }
       cb.onDone(sessionId || undefined);
     }
   }
@@ -513,7 +1085,7 @@ function sendMessageViaApi(
       ...headers,
       "Content-Length": String(probeBodyBuf.length),
     };
-    const probeUrl = `${getApiUrl(profile)}/v1/chat/completions`;
+    const probeUrl = chatEndpoint;
     const probeMod = probeUrl.startsWith("https") ? https : http;
     const probeReq = probeMod.request(
       probeUrl,
@@ -627,6 +1199,7 @@ function sendMessageViaApi(
           cb.onToolProgress(`${match[1]} ${match[2]}`);
         } else {
           hasContent = true;
+          if (direct) directAssistant += delta.content;
           cb.onChunk(delta.content);
         }
       }
@@ -636,7 +1209,7 @@ function sendMessageViaApi(
     return false;
   }
 
-  const chatUrl = `${getApiUrl(profile)}/v1/chat/completions`;
+  const chatUrl = chatEndpoint;
   const requester = chatUrl.startsWith("https") ? https.request : http.request;
   const req = requester(
     chatUrl,
@@ -1036,22 +1609,58 @@ export async function sendMessage(
     );
   }
 
-  // Check API server availability. In local mode, a running gateway process
-  // can still be in its startup window (or the cached ready state can be stale
-  // after an external stop/start), so verify health before taking the API path.
-  const localGatewayRunning = !isRemoteMode() && isGatewayRunning(profile);
-  if (
-    apiServerAvailable === null ||
-    apiServerAvailable === false ||
-    localGatewayRunning
-  ) {
-    apiServerAvailable = await isApiServerReady(profile);
-    if (!apiServerAvailable && localGatewayRunning) {
-      apiServerAvailable = await waitForApiServerReady(8000, profile);
+  // Local mode. Prefer a running local gateway (full agent: tools, skills,
+  // memory, server-side session persistence). Only probe health when a gateway
+  // is actually installed or already running — otherwise every send from a
+  // BYO-key user who never installed hermes-agent would burn the health
+  // timeout before falling through to the direct path.
+  const gatewayInstalled =
+    existsSync(HERMES_PYTHON) && existsSync(HERMES_REPO);
+  const localGatewayRunning = isGatewayRunning(profile);
+  if (gatewayInstalled || localGatewayRunning) {
+    // A running gateway can still be in its startup window (or the cached ready
+    // state can be stale after an external stop/start), so verify health
+    // before taking the API path.
+    if (
+      apiServerAvailable === null ||
+      apiServerAvailable === false ||
+      localGatewayRunning
+    ) {
+      apiServerAvailable = await isApiServerReady(profile);
+      if (!apiServerAvailable && localGatewayRunning) {
+        apiServerAvailable = await waitForApiServerReady(8000, profile);
+      }
+    }
+    if (apiServerAvailable) {
+      return sendMessageViaApi(
+        message,
+        cb,
+        profile,
+        resumeSessionId,
+        history,
+        attachments,
+        contextFolder,
+        runtimeOptions,
+      );
     }
   }
 
-  if (apiServerAvailable) {
+  // Hybrid fallback: no local gateway reachable. If the active profile has a
+  // direct OpenAI-compatible provider configured (base_url + key, or a known
+  // provider with its key in .env), stream straight to it — no agent install
+  // required. This is what makes chat work out of the box for BYO-key users.
+  const direct = resolveDirectTarget(profile);
+  if (direct) {
+    if (direct.protocol === "anthropic") {
+      return sendMessageViaAnthropic(
+        message, cb, profile, history, attachments, runtimeOptions, direct,
+      );
+    }
+    if (direct.protocol === "gemini") {
+      return sendMessageViaGemini(
+        message, cb, profile, history, attachments, runtimeOptions, direct,
+      );
+    }
     return sendMessageViaApi(
       message,
       cb,
@@ -1061,11 +1670,11 @@ export async function sendMessage(
       attachments,
       contextFolder,
       runtimeOptions,
+      direct,
     );
   }
 
-  // Local mode, API server unreachable: fall back to spawning the bundled
-  // CLI directly. Remote/SSH never reach here (handled above). The CLI itself
+  // Nothing reachable: spawn the bundled CLI as a last resort. The CLI itself
   // surfaces an honest error via cb.onError if Python/the agent isn't
   // available — no fake stream.
   return sendMessageViaCli(message, cb, profile, resumeSessionId, attachments);

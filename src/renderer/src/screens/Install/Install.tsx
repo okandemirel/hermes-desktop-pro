@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Check, LoaderCircle, XCircle, ArrowRight, RotateCcw,
-  Terminal, Monitor, Download, Package, Cog, ShieldCheck,
+  Terminal, Monitor, Download, Package, Cog, ShieldCheck, ArrowLeft,
 } from "lucide-react";
 import { Badge, Button, Card, Screen, cx } from "../../ui";
 
@@ -104,9 +104,11 @@ function StepIndicator({ step, status, isLast }: { step: Step; status: StepStatu
 interface InstallViewProps {
   /** Called when the agent is installed/verified and the user continues. */
   onComplete?: () => void;
+  /** Return to the setup chooser (Welcome). Hidden while installing. */
+  onBack?: () => void;
 }
 
-export default function InstallView({ onComplete }: InstallViewProps) {
+export default function InstallView({ onComplete, onBack }: InstallViewProps) {
   const [phase, setPhase] = useState<Phase>("checking");
   const [activeBucket, setActiveBucket] = useState(0);
   const [log, setLog] = useState("");
@@ -308,6 +310,12 @@ export default function InstallView({ onComplete }: InstallViewProps) {
               {phase === "done" && onComplete && (
                 <Button variant="primary" onClick={onComplete} leftIcon={<ArrowRight size={15} />}>
                   Continue
+                </Button>
+              )}
+
+              {onBack && phase !== "installing" && (
+                <Button variant="ghost" size="sm" onClick={onBack} leftIcon={<ArrowLeft size={15} />}>
+                  Back
                 </Button>
               )}
             </div>

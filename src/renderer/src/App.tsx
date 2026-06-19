@@ -18,6 +18,8 @@ import SchedulesView from "./screens/Schedules/Schedules";
 import GatewayView from "./screens/Gateway/Gateway";
 import KanbanView from "./screens/Kanban/Kanban";
 import OfficeView from "./screens/Office/Office";
+import WelcomeView from "./screens/Welcome/Welcome";
+import InstallView from "./screens/Install/Install";
 import { BrandMark, HermesWordmark } from "./components/BrandMark";
 import { cx, StatusDot } from "./ui";
 import type { AppMenuCommand, AppUpdateStatus, ChatTab, DispatchMode, ProfileDispatchTarget, ProviderId, ProviderInfo } from "@shared/types";
@@ -113,6 +115,24 @@ const MENU_ACCENT_COMMANDS: Partial<Record<AppMenuCommand, string>> = {
 
 const SIDEBAR_LABEL_FADE_IN_DELAY_MS = 80;
 
+const ONBOARDED_KEY = "hermes:onboarded";
+type ChatReadiness = Awaited<ReturnType<typeof window.hermes.getChatReadiness>>;
+type OnboardStep = "welcome" | "install";
+
+function readOnboardedFlag(): boolean {
+  try {
+    return window.localStorage.getItem(ONBOARDED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markOnboardedFlag(): void {
+  try {
+    window.localStorage.setItem(ONBOARDED_KEY, "1");
+  } catch { /* ignore storage failures */ }
+}
+
 let tabCounter = 1;
 function createTab(providerId: ProviderId = "opencode-zen"): ChatTab {
   return { id: `tab-${tabCounter++}`, name: `Chat ${tabCounter - 1}`, providerId, modelId: "" };
@@ -145,12 +165,21 @@ export default function App() {
   const [sidebarLabelsVisible, setSidebarLabelsVisible] = useState(true);
   const [connStatus, setConnStatus] = useState<{ ok: boolean; mode: string }>({ ok: false, mode: "local" });
   const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
+  // First-run onboarding gate: null until readiness resolves (no flash).
+  const [readiness, setReadiness] = useState<ChatReadiness | null>(null);
+  const [onboardDismissed, setOnboardDismissed] = useState(readOnboardedFlag);
+  const [onboardStep, setOnboardStep] = useState<OnboardStep>("welcome");
   const [recentSessions, setRecentSessions] = useState<SidebarSession[]>([]);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("general");
   const navRefs = useRef<Record<NavScreen, HTMLButtonElement | null>>({} as Record<NavScreen, HTMLButtonElement | null>);
   const sidebarTimers = useRef<number[]>([]);
+  // Latest committed tabs (read after awaits to avoid stale-closure misrouting)
+  // and a monotonic token so only the most recent resume commits.
+  const tabsRef = useRef(tabs);
+  const resumeTokenRef = useRef(0);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
 
   const clearSidebarTimers = useCallback(() => {
     sidebarTimers.current.forEach(timer => window.clearTimeout(timer));
@@ -200,6 +229,35 @@ export default function App() {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
+  // First-run gate: resolve chat readiness on mount. Re-checked after any setup
+  // action so a successful config dismisses the gate automatically.
+  const recheckReadiness = useCallback(async () => {
+    try {
+      const r = await window.hermes.getChatReadiness();
+      setReadiness(r);
+      return r;
+    } catch {
+      const fallback: ChatReadiness = { ready: false, via: "none", reason: "Readiness check failed." };
+      setReadiness(fallback);
+      return fallback;
+    }
+  }, []);
+
+  useEffect(() => { void recheckReadiness(); }, [recheckReadiness]);
+
+  const dismissOnboarding = useCallback(() => {
+    markOnboardedFlag();
+    setOnboardDismissed(true);
+  }, []);
+
+  // Remote / provider setup, or a finished local install: persist the flag,
+  // re-check readiness, and drop into the app.
+  const finishOnboarding = useCallback(() => {
+    markOnboardedFlag();
+    setOnboardDismissed(true);
+    void recheckReadiness();
+  }, [recheckReadiness]);
+
   useEffect(() => {
     if (collapsed) return;
     const node = navRefs.current[activeScreen];
@@ -212,22 +270,19 @@ export default function App() {
     }
   }, [activeScreen, collapsed]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshRecents = useCallback(() => {
     window.hermes.listSessions(5, 0)
       .then((rows: SidebarSessionSource[]) => {
-        if (cancelled) return;
         setRecentSessions((rows || []).map(row => ({
           id: row.id,
           title: sidebarSessionTitle(row.id, row.title),
           startedAt: row.startedAt,
         })));
       })
-      .catch(() => {
-        if (!cancelled) setRecentSessions([]);
-      });
-    return () => { cancelled = true; };
+      .catch(() => { /* keep last known recents */ });
   }, []);
+
+  useEffect(() => { refreshRecents(); }, [refreshRecents]);
 
   useEffect(() => {
     let cancelled = false;
@@ -287,6 +342,14 @@ export default function App() {
   const handleUpdateDispatch = useCallback((tabId: string, mode: DispatchMode, targets: ProfileDispatchTarget[]) => {
     setTabs(prev => prev.map(t => t.id === tabId ? { ...t, dispatchMode: mode, dispatchTargets: targets } : t));
   }, []);
+
+  // Write a freshly-resolved backend session id back onto its tab so resuming
+  // the same conversation focuses this live tab instead of opening a duplicate,
+  // and refresh the sidebar so new chats show up under Recent Sessions.
+  const handleUpdateSession = useCallback((tabId: string, sessionId: string) => {
+    setTabs(prev => prev.map(t => (t.id === tabId && t.sessionId !== sessionId ? { ...t, sessionId } : t)));
+    refreshRecents();
+  }, [refreshRecents]);
 
   const openSettings = useCallback((section: SettingsSectionId = "general") => {
     setSettingsSection(section);
@@ -381,19 +444,15 @@ export default function App() {
   // Open a stored session in Chat: open a fresh tab seeded with the session id
   // (useChatStream resumes from tab.sessionId) and switch to the Chat screen.
   const handleResumeSession = useCallback(async (sessionId: string, title?: string) => {
-    const existing = tabs.find(t => t.sessionId === sessionId);
-    if (existing?.messages?.length) {
-      setActiveTabId(existing.id);
-      setActiveScreen("chat");
-      return;
-    }
+    setActiveScreen("chat");
+    // Already open with content → just focus it, no reload needed.
+    const open = tabsRef.current.find(t => t.sessionId === sessionId && t.messages?.length);
+    if (open) { setActiveTabId(open.id); return; }
 
-    const providerId = activeTab.providerId;
-    if (existing) {
-      setActiveTabId(existing.id);
-      setActiveScreen("chat");
-    }
-
+    // Guard against out-of-order IPC resolution: only the most recent resume
+    // commits. Without this, clicking session B while A's load is in flight let
+    // whichever read resolved LAST win the active tab ("sometimes doesn't load").
+    const token = ++resumeTokenRef.current;
     let messages: ChatTab["messages"] = [];
     try {
       const history = await window.hermes.getSessionMessages(sessionId);
@@ -401,30 +460,29 @@ export default function App() {
     } catch {
       messages = [];
     }
+    if (token !== resumeTokenRef.current) return;
 
+    // Re-derive the target from the LATEST tabs (not the pre-await snapshot) and
+    // de-dup by sessionId so rapid clicks can't spawn duplicate tabs.
+    const existing = tabsRef.current.find(t => t.sessionId === sessionId);
     if (existing) {
-      setTabs(prev => prev.map(t => (
-        t.id === existing.id
-          ? { ...t, name: title || t.name, messages }
-          : t
-      )));
+      setTabs(prev => prev.map(t => (t.id === existing.id ? { ...t, name: title || t.name, messages } : t)));
+      setActiveTabId(existing.id);
       return;
     }
-
     const tab: ChatTab = {
-      ...createTab(providerId),
+      ...createTab(activeTab.providerId),
       sessionId,
       name: title || "Resumed chat",
       messages,
     };
-    setTabs(prev => [...prev, tab]);
+    setTabs(prev => (prev.some(t => t.sessionId === sessionId) ? prev : [...prev, tab]));
     setActiveTabId(tab.id);
-    setActiveScreen("chat");
-  }, [activeTab.providerId, tabs]);
+  }, [activeTab.providerId]);
 
   const renderScreen = () => {
     switch (activeScreen) {
-      case "chat": return <ChatView tab={activeTab} providers={providers} allTabs={tabs} onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId} onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} onUpdateDispatch={handleUpdateDispatch} onOpenTools={() => setActiveScreen("tools")} onOpenMemory={() => setActiveScreen("memory")} onOpenModels={() => setActiveScreen("models")} onOpenSessions={() => setActiveScreen("sessions")} onOpenSettings={() => setActiveScreen("settings")} />;
+      case "chat": return <ChatView tab={activeTab} providers={providers} allTabs={tabs} onClose={handleCloseTab} onNewTab={handleNewTab} onSelectTab={setActiveTabId} onUpdateProvider={handleUpdateProvider} onUpdateModel={handleUpdateModel} onUpdateDispatch={handleUpdateDispatch} onUpdateSession={handleUpdateSession} onOpenTools={() => setActiveScreen("tools")} onOpenMemory={() => setActiveScreen("memory")} onOpenModels={() => setActiveScreen("models")} onOpenSessions={() => setActiveScreen("sessions")} onOpenSettings={() => setActiveScreen("settings")} />;
       case "sessions": return <SessionsView onResumeSession={handleResumeSession} onNewSession={handleNewTab} />;
       case "profiles": return <ProfilesView />;
       case "providers": return <ProvidersView providers={providers} />;
@@ -455,6 +513,32 @@ export default function App() {
       </button>
     );
   };
+
+  // First-run onboarding gate. Only mounts once readiness has resolved AND the
+  // backend isn't chat-ready AND the user hasn't dismissed it — so the shell
+  // never flashes before readiness loads.
+  if (readiness !== null && !readiness.ready && !onboardDismissed) {
+    return (
+      <div className="ui-shell flex overflow-hidden">
+        <div className="ui-window-title drag">Hermes Desktop Pro</div>
+        <main className="ui-main flex-1 min-w-0 overflow-hidden">
+          {onboardStep === "install" ? (
+            <InstallView
+              onComplete={finishOnboarding}
+              onBack={() => setOnboardStep("welcome")}
+            />
+          ) : (
+            <WelcomeView
+              onContinueLocal={() => setOnboardStep("install")}
+              onContinueRemote={finishOnboarding}
+              onContinueProvider={finishOnboarding}
+              onSkip={dismissOnboarding}
+            />
+          )}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="ui-shell flex overflow-hidden">

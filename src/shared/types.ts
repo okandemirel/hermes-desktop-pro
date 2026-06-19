@@ -67,6 +67,10 @@ export interface ChatMessage {
   reasoning?: string;
   toolCalls?: ToolCall[];
   usage?: TokenUsage;
+  /** Final agent-run snapshot for this turn, persisted when the run ends so the
+   *  message can show a collapsible inline "Activity" disclosure (the steps that
+   *  produced it) instead of a single global timeline pinned to the bottom. */
+  run?: AgentRunState;
 }
 
 export type AgentRunEventKind = "start" | "context" | "reasoning" | "tool" | "output" | "usage" | "done" | "error" | "abort";

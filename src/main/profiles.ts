@@ -15,6 +15,7 @@ import {
   isValidNamedProfileName,
   isValidProfileName,
   pidIsAliveAs,
+  safeWriteFile,
   PROFILE_NAME_ERROR,
 } from "./utils";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
@@ -262,25 +263,49 @@ export function deleteProfile(name: string): {
   }
 }
 
-export function setActiveProfile(name: string): void {
+export function setActiveProfile(name: string): boolean {
   if (!isValidProfileName(name)) {
     throw new Error(PROFILE_NAME_ERROR);
   }
 
+  // Persist the active profile ourselves. The desktop reads
+  // ~/.hermes/active_profile (getActiveProfileNameSync), so writing it here is
+  // what actually makes the switch take effect. Previously this only shelled
+  // out to the Python CLI inside an empty catch, so on any install without the
+  // agent the switch silently no-opped — the root cause of "profil seçilmiyor".
+  // The name is validated above, so it's safe to use as a path-free file body.
   try {
-    execFileSync(HERMES_PYTHON, hermesCliArgs(["profile", "use", "--", name]), {
-      cwd: join(HERMES_HOME, "hermes-agent"),
-      env: {
-        ...process.env,
-        PATH: getEnhancedPath(),
-        HOME: homedir(),
-        HERMES_HOME,
-      },
-      stdio: "pipe",
-      timeout: 10000,
-      ...HIDDEN_SUBPROCESS_OPTIONS,
-    });
-  } catch {
-    // ignore
+    safeWriteFile(join(HERMES_HOME, "active_profile"), `${name}\n`);
+  } catch (err) {
+    throw new Error(
+      `Could not save the active profile: ${commandErrorMessage(err)}`,
+    );
   }
+
+  // Best-effort: keep the bundled CLI's own notion of the active profile in
+  // sync when it's installed. Failure here is non-fatal — the file write above
+  // is the source of truth the desktop reads.
+  if (existsSync(HERMES_PYTHON)) {
+    try {
+      execFileSync(
+        HERMES_PYTHON,
+        hermesCliArgs(["profile", "use", "--", name]),
+        {
+          cwd: join(HERMES_HOME, "hermes-agent"),
+          env: {
+            ...process.env,
+            PATH: getEnhancedPath(),
+            HOME: homedir(),
+            HERMES_HOME,
+          },
+          stdio: "pipe",
+          timeout: 10000,
+          ...HIDDEN_SUBPROCESS_OPTIONS,
+        },
+      );
+    } catch {
+      // non-fatal — the file write above already persisted the switch
+    }
+  }
+  return true;
 }

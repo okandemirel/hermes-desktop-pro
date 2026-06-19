@@ -116,6 +116,16 @@ export function applyAppearancePreferences(preferences = readAppearancePreferenc
   );
   root.style.setProperty("--gold-sheen", "linear-gradient(112deg, transparent 30%, rgba(255,255,255,0.62) 49%, rgba(255,255,255,0.18) 55%, transparent 70%)");
 
+  // Sync the native window appearance (macOS vibrancy material + Chromium
+  // prefers-color-scheme) with the chosen theme. Guarded: this also runs at
+  // startup before the bridge is guaranteed, and in unit tests where there is
+  // no window.hermes.
+  try {
+    window.hermes?.setThemeSource?.(normalized.theme);
+  } catch {
+    /* bridge unavailable — the root attributes above already applied */
+  }
+
   return normalized;
 }
 

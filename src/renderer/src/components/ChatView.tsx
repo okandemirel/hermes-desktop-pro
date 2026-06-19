@@ -2,8 +2,8 @@ import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, typ
 import {
   Square, Plus, Globe, Image, Code, Wrench, Brain, Activity, Terminal, Paperclip,
   ArrowUp, Search, FileText, Table2, Sparkles, SlidersHorizontal, Command,
-  Database, BookOpen, Settings2, ChevronDown, CheckCircle2, Copy, ExternalLink,
-  ThumbsUp, ThumbsDown, Share2, X, Mic, Box, Users,
+  Database, BookOpen, Settings2, ChevronDown, CheckCircle2,
+  X, Mic, Box, Users,
   BarChart3, Lightbulb, Play, Clock, Star, Layers, Bookmark, ShieldCheck, Grid2X2,
   Check, MessageSquare,
 } from "lucide-react";
@@ -12,7 +12,6 @@ import type {
   AgentRunEventKind,
   AgentRunState,
   Attachment,
-  ChatMessage,
   ChatTab,
   DispatchMode,
   DispatchRunState,
@@ -49,6 +48,7 @@ interface ChatViewProps {
   onOpenSessions?: () => void;
   onOpenSettings?: () => void;
   onUpdateDispatch?: (tabId: string, mode: DispatchMode, targets: ProfileDispatchTarget[]) => void;
+  onUpdateSession?: (tabId: string, sessionId: string) => void;
 }
 
 type InspectorTab = "inspector" | "context" | "activity" | "pinned";
@@ -84,9 +84,9 @@ const QUICK_ACTIONS = [
 const INSPECTOR_TOOL_ORDER = ["web", "file", "code_execution", "image_gen", "memory"];
 
 const MEMORY_ROWS = [
-  { icon: Database, label: "Project Knowledge", meta: "120 items", active: true },
-  { icon: Sparkles, label: "User Preferences", meta: "24 items", active: true },
-  { icon: Activity, label: "Conversation History", meta: "85 items", active: true },
+  { icon: Database, label: "Project Knowledge", active: true },
+  { icon: Sparkles, label: "User Preferences", active: true },
+  { icon: Activity, label: "Conversation History", active: true },
 ];
 
 function truncateText(value: string, max = 130): string {
@@ -149,133 +149,10 @@ function iconForToolset(key: string) {
   return Wrench;
 }
 
-function createHistoricalRunState(messages: ChatMessage[]): AgentRunState | null {
-  const lastUser = [...messages].reverse().find(message => message.role === "user");
-  const lastAssistant = [...messages].reverse().find(message => message.role === "assistant");
-  if (!lastUser && !lastAssistant) return null;
-
-  const startedAt = lastUser?.timestamp || lastAssistant?.timestamp || Date.now();
-  const endedAt = lastAssistant?.timestamp && lastAssistant.timestamp >= startedAt ? lastAssistant.timestamp : undefined;
-  const prompt = lastUser?.content || "Session activity";
-  const assistantHasError = !!lastAssistant?.content?.toLowerCase().startsWith("error:");
-  const baseId = lastAssistant?.id || lastUser?.id || `run-${startedAt}`;
-  const events: AgentRunEvent[] = [
-    {
-      id: `${baseId}-historical-start`,
-      kind: "start",
-      label: "Run started",
-      detail: "Loaded from this chat session",
-      status: "done",
-      timestamp: startedAt,
-    },
-    {
-      id: `${baseId}-historical-context`,
-      kind: "context",
-      label: "Context restored",
-      detail: `${messages.length} messages available`,
-      status: "done",
-      timestamp: startedAt,
-    },
-    {
-      id: `${baseId}-historical-output`,
-      kind: assistantHasError ? "error" : "done",
-      label: assistantHasError ? "Run stopped with error" : "Response available",
-      detail: lastAssistant?.content ? truncateText(lastAssistant.content, 96) : "No assistant output yet",
-      status: assistantHasError ? "error" : "done",
-      timestamp: endedAt || startedAt,
-    },
-  ];
-
-  return {
-    id: `${baseId}-historical-run`,
-    assistantMessageId: lastAssistant?.id || null,
-    prompt,
-    startedAt,
-    endedAt,
-    status: assistantHasError ? "error" : "done",
-    events,
-    usage: lastAssistant?.usage,
-  };
-}
-
-function AgentRunTimeline({
-  runState,
-  providerLabel,
-  modelName,
-  assistantPreview,
-  tokenUsage,
-  activeToolCount,
-  onOpenActivity,
-  onOpenTools,
-}: {
-  runState: AgentRunState;
-  providerLabel: string;
-  modelName: string;
-  assistantPreview: string;
-  tokenUsage: TokenUsage;
-  activeToolCount: number;
-  onOpenActivity: () => void;
-  onOpenTools: () => void;
-}) {
-  const status = runStatusLabel(runState.status);
-  const duration = formatDuration(runState.startedAt, runState.endedAt);
-  const toolEvents = runState.events.filter(event => event.kind === "tool").length;
-  const latestEvents = runState.events.slice(-6);
-  const preview = assistantPreview || (runState.status === "running" ? "Hermes is preparing the first visible output." : "No assistant output captured for this run yet.");
-
-  return (
-    <section className="ui-agent-run-timeline" data-status={runState.status} aria-label="Agent run timeline">
-      <div className="ui-agent-run-head">
-        <BrandMedallion size={38} className="ui-agent-run-brand" />
-        <div className="ui-agent-run-title">
-          <span>Agent Run</span>
-          <h2>{truncateText(runState.prompt || "Hermes run", 92)}</h2>
-          <p>{providerLabel} · {modelName} · started {formatClock(runState.startedAt)}</p>
-        </div>
-        <div className="ui-agent-run-state">
-          <span><StatusDot color={runState.status === "running" ? "var(--success)" : runState.status === "error" || runState.status === "aborted" ? "var(--error)" : "var(--accent-text)"} pulse={runState.status === "running"} /> {status}</span>
-          <em>{duration}</em>
-        </div>
-      </div>
-
-      <div className="ui-agent-run-steps">
-        {latestEvents.map((event, index) => (
-          <div key={event.id} className="ui-agent-run-step" data-status={event.status}>
-            <div className="ui-agent-run-node">
-              <span>{runEventIcon(event.kind, event.status)}</span>
-              {index < latestEvents.length - 1 && <i />}
-            </div>
-            <div className="ui-agent-run-step-card">
-              <div className="ui-agent-run-step-main">
-                <strong>{event.label}</strong>
-                <small>{formatClock(event.timestamp)}{event.durationMs ? ` · ${formatDuration(event.timestamp, event.timestamp + event.durationMs)}` : ""}{event.tokens ? ` · ${event.tokens.toLocaleString()} tokens` : ""}</small>
-              </div>
-              {event.detail && <p>{truncateText(event.detail, 118)}</p>}
-              <span className="ui-agent-run-step-badge">{event.status}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="ui-agent-run-output">
-        <div>
-          <span>Partial output</span>
-          <p>{truncateText(preview, 170)}</p>
-        </div>
-        <button type="button" onClick={onOpenActivity}>
-          <Activity size={14} /> Inspect
-        </button>
-      </div>
-
-      <div className="ui-agent-run-footer">
-        <span><Activity size={13} /> Tokens <strong>{tokenUsage.totalTokens.toLocaleString()}</strong></span>
-        <span><Wrench size={13} /> Tools <strong>{toolEvents || activeToolCount}</strong></span>
-        <span><BookOpen size={13} /> Context <strong>128K</strong></span>
-        <button type="button" onClick={onOpenTools}>Manage tools</button>
-      </div>
-    </section>
-  );
-}
+// The always-on bottom AgentRunTimeline and the synthetic createHistoricalRunState
+// recap were removed: activity is now shown inline + collapsible on each assistant
+// message (ChatMessageBubble's ActivityDisclosure), so it's no longer a mandatory
+// panel pinned under every conversation.
 
 function ProfileDispatchTimeline({
   dispatchRun,
@@ -380,6 +257,7 @@ export default function ChatView({
   onOpenSessions,
   onOpenSettings,
   onUpdateDispatch,
+  onUpdateSession,
 }: ChatViewProps) {
   const [input, setInput] = useState("");
   const [showCommands, setShowCommands] = useState(false);
@@ -398,6 +276,7 @@ export default function ChatView({
   const [temperatureError, setTemperatureError] = useState("");
   const [profiles, setProfiles] = useState<ProfileInfo[]>([]);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
+  const [readiness, setReadiness] = useState<{ ready: boolean; via: string; reason: string } | null>(null);
   const [profilePickerOpen, setProfilePickerOpen] = useState(false);
   const [dispatchMode, setDispatchMode] = useState<DispatchMode>(tab.dispatchMode || "single");
   const [dispatchTargets, setDispatchTargets] = useState<ProfileDispatchTarget[]>(tab.dispatchTargets || []);
@@ -433,6 +312,7 @@ export default function ChatView({
     dispatchMode,
     dispatchTargets: normalizedDispatchTargets,
     activeProfileName,
+    onSessionId: (sessionId: string) => onUpdateSession?.(tab.id, sessionId),
   });
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -441,24 +321,43 @@ export default function ChatView({
     setDispatchMode(tab.dispatchMode || "single");
     setDispatchTargets(tab.dispatchTargets || []);
     setProfilePickerOpen(false);
+    // Per-tab composer state must not leak across tabs — ChatView is a single
+    // persistent instance (not remounted per tab), so reset draft + attachments
+    // when the active tab changes.
+    setInput("");
+    setAttachments([]);
+    setAttachmentNotice("");
   }, [tab.id]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshProfiles = useCallback(() => {
     setProfilesLoaded(false);
     window.hermes.listProfiles()
-      .then((rows: ProfileInfo[]) => {
-        if (cancelled) return;
-        setProfiles(rows || []);
-      })
-      .catch(() => {
-        if (!cancelled) setProfiles([]);
-      })
-      .finally(() => {
-        if (!cancelled) setProfilesLoaded(true);
-      });
-    return () => { cancelled = true; };
+      .then((rows: ProfileInfo[]) => setProfiles(rows || []))
+      .catch(() => setProfiles([]))
+      .finally(() => setProfilesLoaded(true));
   }, []);
+
+  // Load on mount, and refresh whenever the active profile changes anywhere
+  // (main broadcasts 'profile-switched' from set-active-profile) or the picker
+  // opens — so the chat's notion of the active profile never goes stale.
+  useEffect(() => { refreshProfiles(); }, [refreshProfiles]);
+  useEffect(() => window.hermes.onProfileSwitched(() => refreshProfiles()), [refreshProfiles]);
+  useEffect(() => { if (profilePickerOpen) refreshProfiles(); }, [profilePickerOpen, refreshProfiles]);
+
+  // Live chat readiness: drives the honest connection chip + the setup banner
+  // instead of a hardcoded "Connected". Re-checks when the active profile
+  // changes and every 10s.
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      window.hermes.getChatReadiness(activeProfileName)
+        .then((r: { ready: boolean; via: string; reason: string }) => { if (!cancelled) setReadiness(r); })
+        .catch(() => { /* keep last known readiness */ });
+    };
+    check();
+    const id = window.setInterval(check, 10000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [activeProfileName]);
 
   useEffect(() => {
     if (!tabMenuOpen) return;
@@ -619,16 +518,15 @@ export default function ChatView({
       .filter((toolset): toolset is ToolsetInfo => Boolean(toolset));
     return ordered.length > 0 ? ordered : inspectorToolsets.slice(0, 5);
   }, [inspectorToolsets]);
-  const sessionTitle = tab.name && tab.name !== "New chat" ? tab.name : "Q2 Market Report";
+  const sessionTitle = tab.name && tab.name !== "New chat" ? tab.name : "New chat";
   const activeTabIndex = Math.max(0, allTabs.findIndex(t => t.id === tab.id));
   const activeTabPosition = activeTabIndex + 1;
+  // Live/last run for THIS conversation only — no synthetic "historical" recap.
+  // Past activity now lives inline on each assistant message (message.run); this
+  // value only feeds the opt-in right-rail inspector, never a pinned bottom panel.
   const displayRunState = useMemo(() => (
-    dispatchRunState ? null : runState || createHistoricalRunState(messages)
-  ), [dispatchRunState, runState, messages]);
-  const assistantPreview = useMemo(() => {
-    const lastAssistant = [...messages].reverse().find(message => message.role === "assistant");
-    return truncateText(lastAssistant?.content || lastAssistant?.reasoning || "", 220);
-  }, [messages]);
+    dispatchRunState ? null : runState
+  ), [dispatchRunState, runState]);
   const displayedUsage = useMemo<TokenUsage>(() => {
     const messageUsage = [...messages].reverse().find(message => message.role === "assistant" && message.usage)?.usage;
     if (dispatchRunState) {
@@ -693,6 +591,29 @@ export default function ChatView({
       normalized.map(target => ({ ...target, isPrimary: target.profileName === profileName })),
     );
   }, [activeProfileName, dispatchMode, dispatchTargets, persistDispatchSelection]);
+
+  const applyActiveProfile = useCallback(async (name: string) => {
+    try {
+      await window.hermes.setActiveProfile(name);
+      // main broadcasts 'profile-switched' (which already refreshes via the
+      // listener), but refresh here too for immediate feedback.
+      refreshProfiles();
+    } catch {
+      // activation failed (e.g. invalid name) — the unchanged list reflects it
+    }
+  }, [refreshProfiles]);
+
+  // The in-chat picker is mode-aware: in single mode, clicking a profile
+  // switches the ACTIVE profile (like the Profiles screen) AND makes it the
+  // sole send target; in dispatch/multi modes it toggles that profile as a send
+  // target without changing the active profile. (Per product note: the action
+  // legitimately differs by mode — there's no single global behaviour.)
+  const selectProfileInChat = useCallback((profile: ProfileInfo) => {
+    if (dispatchMode === "single") {
+      void applyActiveProfile(profile.name);
+    }
+    toggleDispatchTarget(profile);
+  }, [applyActiveProfile, dispatchMode, toggleDispatchTarget]);
 
   const focusCommand = useCallback((cmd: string) => {
     suppressCommandMenuRef.current = true;
@@ -764,10 +685,6 @@ export default function ChatView({
     focusCommand(`/${label.toLowerCase().replace(/\s+/g, "-")} `);
   }, [focusCommand, onOpenSessions, openSettingsManagement]);
 
-  const copyPreview = useCallback(() => {
-    void navigator.clipboard?.writeText("Key insights copied from Hermes agent preview.");
-  }, []);
-
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
     const queuedAttachments = attachments;
@@ -775,7 +692,9 @@ export default function ChatView({
     if (trimmed.startsWith("/") && queuedAttachments.length === 0) {
       const cmd = trimmed.split(" ")[0].toLowerCase();
       if (cmd === "/new") { onNewTab(); setInput(""); return; }
-      if (cmd === "/clear") { sendMessage("/new"); setInput(""); return; }
+      // "/clear" starts a fresh session (new tab) rather than posting the literal
+      // text "/new" to the model as a real turn (which cleared nothing).
+      if (cmd === "/clear") { onNewTab(); setInput(""); return; }
     }
     void sendMessage(trimmed, { attachments: queuedAttachments });
     setInput("");
@@ -1040,7 +959,7 @@ export default function ChatView({
                     <button
                       type="button"
                       className="ui-profile-dispatch-select"
-                      onClick={() => toggleDispatchTarget(profile)}
+                      onClick={() => selectProfileInChat(profile)}
                     >
                       <span className="ui-profile-dispatch-check">{selected ? <Check size={13} /> : null}</span>
                       <span className="ui-profile-dispatch-name">
@@ -1066,6 +985,15 @@ export default function ChatView({
       </div>
     );
   };
+
+  const chatReady = readiness?.ready ?? false;
+  const chipLabel = chatReady
+    ? readiness?.via === "direct" ? "Direct" : readiness?.via === "remote" ? "Remote" : "Connected"
+    : "Not connected";
+  const chipColor = chatReady ? "var(--success)" : "var(--warning)";
+  const chipTitle = chatReady
+    ? `Chat ready · ${readiness?.via}`
+    : readiness?.reason || "No model connected";
 
   const topbarEl = (
     <header className="ui-commandbar drag">
@@ -1161,9 +1089,9 @@ export default function ChatView({
       </div>
 
       <div className="ui-commandbar-right no-drag">
-        <button className="ui-agent-chip" onClick={() => focusCommand("/status ")} title="Connection status">
-          <StatusDot color="var(--success)" pulse />
-          <span><strong>Connected</strong></span>
+        <button className="ui-agent-chip" onClick={() => (chatReady ? focusCommand("/status ") : onOpenSettings?.())} title={chipTitle}>
+          <StatusDot color={chipColor} pulse={chatReady} />
+          <span><strong>{chipLabel}</strong></span>
           <ChevronDown size={14} />
         </button>
         <IconButton title="Activity" onClick={() => toggleInspector("activity")}><Activity size={16} /></IconButton>
@@ -1202,6 +1130,12 @@ export default function ChatView({
           <button type="button" onClick={() => setVoiceNotice("")} aria-label="Dismiss voice notice">
             <X size={14} />
           </button>
+        </div>
+      )}
+      {readiness && !readiness.ready && (
+        <div className="ui-readiness-banner slide-up" role="status" aria-live="polite">
+          <span><ShieldCheck size={14} /> {readiness.reason}</span>
+          <button type="button" onClick={() => onOpenSettings?.()}>Set up</button>
         </div>
       )}
       <div className="ui-compose-box">
@@ -1329,9 +1263,7 @@ export default function ChatView({
       ]
     : inspectorTab === "pinned"
       ? [
-          { icon: Star, label: "Pinned notes", meta: "3 saved" },
-          { icon: Bookmark, label: "Saved context", meta: "Workspace" },
-          { icon: FileText, label: "Recent brief", meta: "Q2 Market" },
+          { icon: Star, label: "No pinned items yet", meta: "" },
         ]
     : [
         { icon: BookOpen, label: "Workspace", meta: "Hermes" },
@@ -1426,7 +1358,6 @@ export default function ChatView({
                 <button key={row.label} className="ui-inspector-row" onClick={openMemoryManagement}>
                   <row.icon size={16} className="text-[var(--text-2)]" />
                   <span>{row.label}</span>
-                  <span className="ml-auto text-[11.5px] text-[var(--text-3)]">{row.meta}</span>
                   <StatusDot color={row.active ? "var(--success)" : "var(--text-3)"} />
                 </button>
               ))}
@@ -1442,13 +1373,13 @@ export default function ChatView({
               <div className="ui-model-card-head">
                 <BrandMedallion size={32} className="!shadow-none" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-semibold text-[var(--text)] truncate">{modelName === "Auto" ? "Hermes 4 Pro" : modelName}</div>
+                  <div className="text-[14px] font-semibold text-[var(--text)] truncate">{modelName}</div>
                   <div className="text-[11.5px] text-[var(--text-3)]">{providerLabel}</div>
                 </div>
                 <span className="ui-tag">Default</span>
               </div>
               <div className="ui-model-stats">
-                <div><span>Context Window</span><strong>128K</strong></div>
+                <div><span>Context Window</span><strong>{activeProvider?.capabilities?.maxContextTokens ? `${Math.round(activeProvider.capabilities.maxContextTokens / 1000)}K` : "—"}</strong></div>
                 <div><span>Tools</span><strong>{activeToolCount} enabled</strong></div>
               </div>
               <label className="ui-model-range">
@@ -1528,8 +1459,7 @@ export default function ChatView({
               <ChevronDown size={15} />
             </button>
             <div className="ui-session-status">
-              <span className="ui-status-label ui-status-success"><CheckCircle2 size={12} /> Connected</span>
-              <span className="ui-status-label">128K</span>
+              <span className={cx("ui-status-label", chatReady && "ui-status-success")}><CheckCircle2 size={12} /> {chipLabel}</span>
             </div>
           </div>}
 
@@ -1541,7 +1471,17 @@ export default function ChatView({
             <>
               <div className="ui-thread-canvas overflow-y-auto">
                 <div className="ui-transcript-rail">
-                  {messages.map((msg, i) => <ChatMessageBubble key={i} message={msg} isStreaming={isStreaming && i === messages.length - 1 && msg.role === "assistant"} />)}
+                  {messages.map((msg, i) => {
+                    const streamingThis = isStreaming && i === messages.length - 1 && msg.role === "assistant";
+                    return (
+                      <ChatMessageBubble
+                        key={i}
+                        message={msg}
+                        isStreaming={streamingThis}
+                        liveRun={streamingThis ? runState : null}
+                      />
+                    );
+                  })}
                   {dispatchRunState && (
                     <ProfileDispatchTimeline
                       dispatchRun={dispatchRunState}
@@ -1550,32 +1490,6 @@ export default function ChatView({
                       onAbortDispatch={abortDispatch}
                     />
                   )}
-                  {displayRunState && (
-                    <AgentRunTimeline
-                      runState={displayRunState}
-                      providerLabel={providerLabel}
-                      modelName={modelName}
-                      assistantPreview={assistantPreview}
-                      tokenUsage={displayedUsage}
-                      activeToolCount={activeToolCount}
-                      onOpenActivity={() => toggleInspector("activity")}
-                      onOpenTools={openToolsManagement}
-                    />
-                  )}
-                  <div className="ui-run-controls-card">
-                    <div className="flex items-center gap-2">
-                      <Sparkles size={15} className="text-[var(--accent-text)]" />
-                      <span className="font-semibold text-[13px]">Run controls</span>
-                      <span className="ui-status-label ui-status-success ml-auto">Live</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-3">
-                      <button className="ui-iconbtn" title="Like" onClick={() => focusCommand("/feedback like ")}><ThumbsUp size={15} /></button>
-                      <button className="ui-iconbtn" title="Dislike" onClick={() => focusCommand("/feedback revise ")}><ThumbsDown size={15} /></button>
-                      <button className="ui-iconbtn" title="Copy" onClick={copyPreview}><Copy size={15} /></button>
-                      <button className="ui-iconbtn" title="Share" onClick={() => focusCommand("/share ")}><Share2 size={15} /></button>
-                      <button className="ui-iconbtn ml-auto" title="Open" onClick={() => focusCommand("/tools open result ")}><ExternalLink size={15} /></button>
-                    </div>
-                  </div>
                   <div ref={messagesEndRef} />
                 </div>
               </div>
