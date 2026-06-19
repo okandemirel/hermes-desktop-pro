@@ -18,6 +18,7 @@ import {
   createDispatchRunState,
   normalizeDispatchTargets,
 } from "../chatDispatch";
+import { buildSendHistory } from "../chatHistory";
 
 interface UseChatStreamOptions {
   providerId: ProviderId;
@@ -370,9 +371,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
     // Build history from prior messages (before this turn) — user/assistant only.
     // currentState.messages reflects the last-rendered messages, captured before
     // the setMessages push below, so history never includes the new bubbles.
-    const history = currentState.messages
-      .filter(m => m.role === "user" || m.role === "assistant")
-      .map(m => ({ role: m.role, content: m.content }));
+    const history = buildSendHistory(currentState.messages);
 
     const dispatchMode = options.dispatchMode || "single";
     const targets = normalizeDispatchTargets(options.dispatchTargets || [], options.activeProfileName || "default");
