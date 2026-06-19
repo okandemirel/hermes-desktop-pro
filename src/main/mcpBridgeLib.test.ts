@@ -56,6 +56,6 @@ describe("TOOLS", () => {
   it("exposes exactly list_profiles and ask_profile", () => {
     expect(TOOLS.map((t) => t.name)).toEqual(["list_profiles", "ask_profile"]);
     const ask = TOOLS.find((t) => t.name === "ask_profile");
-    expect(ask.inputSchema.required).toEqual(["profile", "message"]);
+    expect(ask!.inputSchema.required).toEqual(["profile", "message"]);
   });
 });
