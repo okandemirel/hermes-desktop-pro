@@ -27,9 +27,11 @@ function runStatusWord(status: AgentRunState["status"]): string {
  * turn streams, collapsed once it completes.
  */
 function ActivityDisclosure({ run, live }: { run: AgentRunState; live: boolean }) {
+  // Open while the turn streams; collapse once it completes. A manual toggle
+  // survives because `live` only changes on stream start/end, not on click.
   const [open, setOpen] = useState(live);
   useEffect(() => {
-    if (live) setOpen(true);
+    setOpen(live);
   }, [live]);
 
   const steps = run.events;
