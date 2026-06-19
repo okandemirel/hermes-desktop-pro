@@ -780,7 +780,9 @@ function sendMessageViaGemini(
 ): ChatHandle {
   const mc = getModelConfig(profile);
   const controller = new AbortController();
-  const url = `${direct.baseUrl}/models/${encodeURIComponent(mc.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(direct.apiKey)}`;
+  // Key goes in the x-goog-api-key header, NOT the query string — a key in the
+  // URL leaks into request logs and error messages.
+  const url = `${direct.baseUrl}/models/${encodeURIComponent(mc.model)}:streamGenerateContent?alt=sse`;
 
   const systemParts: string[] = [];
   const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
@@ -809,6 +811,7 @@ function sendMessageViaGemini(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Content-Length": String(bodyBuf.length),
+    "x-goog-api-key": direct.apiKey,
   };
 
   const sessionId = `desk-${Date.now()}-${randomUUID()}`;
