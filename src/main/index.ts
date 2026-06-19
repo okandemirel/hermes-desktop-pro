@@ -60,6 +60,12 @@ import {
 } from "./desktop-sessions";
 
 import {
+  enableAskProfileBridge,
+  disableAskProfileBridge,
+  isAskProfileBridgeEnabled,
+} from "./mcp-bridge";
+
+import {
   isSshTunnelActive,
   startSshTunnel,
   stopSshTunnel,
@@ -1161,6 +1167,18 @@ function registerIpcHandlers(): void {
   // ── Gateway ───────────────────────────────────────────
   ipcMain.handle("chat-readiness", (_event, profile?: string) =>
     getChatReadiness(profile),
+  );
+
+  ipcMain.handle("get-ask-profile-bridge", (_event, profile?: string) =>
+    isAskProfileBridgeEnabled(profile),
+  );
+  ipcMain.handle(
+    "set-ask-profile-bridge",
+    (_event, enabled: boolean, profile?: string) => {
+      if (enabled) enableAskProfileBridge(profile);
+      else disableAskProfileBridge(profile);
+      return isAskProfileBridgeEnabled(profile);
+    },
   );
 
   ipcMain.handle(

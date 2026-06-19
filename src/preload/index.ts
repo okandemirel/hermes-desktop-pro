@@ -574,6 +574,10 @@ const api = {
     via: "gateway" | "direct" | "remote" | "none";
     reason: string;
   }> => ipcRenderer.invoke("chat-readiness", profile),
+  getAskProfileBridgeEnabled: (profile?: string): Promise<boolean> =>
+    ipcRenderer.invoke("get-ask-profile-bridge", profile),
+  setAskProfileBridge: (enabled: boolean, profile?: string): Promise<boolean> =>
+    ipcRenderer.invoke("set-ask-profile-bridge", enabled, profile),
   setThemeSource: (theme: "system" | "light" | "dark"): Promise<boolean> =>
     ipcRenderer.invoke("set-theme-source", theme),
 
