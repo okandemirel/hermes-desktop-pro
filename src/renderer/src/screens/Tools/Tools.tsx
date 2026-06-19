@@ -10,6 +10,7 @@ import {
   Power,
   PackageOpen,
   ShieldCheck,
+  Users,
 } from "lucide-react";
 import type { ToolsetInfo } from "@shared/types";
 import {
@@ -72,6 +73,7 @@ export default function ToolsView() {
   const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [bridgeEnabled, setBridgeEnabled] = useState(false);
 
   // Load the real toolsets from the backend on mount. The enabled flags come
   // straight from platform_toolsets.cli in config.yaml (all enabled when no
@@ -90,6 +92,21 @@ export default function ToolsView() {
         if (active) setLoaded(true);
       }
     })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    window.hermes
+      .getAskProfileBridgeEnabled()
+      .then((on: boolean) => {
+        if (active) setBridgeEnabled(on);
+      })
+      .catch(() => {
+        /* leave off on read failure */
+      });
     return () => {
       active = false;
     };
@@ -122,6 +139,19 @@ export default function ToolsView() {
       setToolsets((prev) =>
         prev.map((t) => (t.key === key ? { ...t, enabled: !next } : t)),
       );
+    }
+  };
+
+  // Optimistic toggle for the desktop-managed ask_profile MCP bridge. The IPC
+  // returns the authoritative new state; revert to the previous value on error.
+  const toggleBridge = async () => {
+    const next = !bridgeEnabled;
+    setBridgeEnabled(next);
+    try {
+      const result = await window.hermes.setAskProfileBridge(next);
+      setBridgeEnabled(result);
+    } catch {
+      setBridgeEnabled(!next);
     }
   };
 
@@ -201,6 +231,24 @@ export default function ToolsView() {
               <Info size={12} /> Restart required
             </Badge>
           )}
+        </Card>
+
+        <Card pad className="ui-tools-bridge mint-in mint-in-2" data-enabled={bridgeEnabled}>
+          <div className="ui-tools-card-head">
+            <div className="ui-tools-card-title">
+              <IconChip className="ui-tools-card-icon ui-tools-card-icon-automation">
+                <Users size={18} className="ui-tools-card-glyph" />
+              </IconChip>
+              <div>
+                <h3>Cross-profile delegation</h3>
+                <span>ask_profile · MCP bridge</span>
+              </div>
+            </div>
+            <Toggle on={bridgeEnabled} onChange={toggleBridge} />
+          </div>
+          <p>
+            Let this profile&apos;s agent call another profile with the <strong>ask_profile</strong> tool, via the desktop MCP bridge. Off by default. Works in local mode; cron &amp; delegation tools are in the list below.
+          </p>
         </Card>
 
         <div className="ui-tools-toolbar mint-in mint-in-2">
