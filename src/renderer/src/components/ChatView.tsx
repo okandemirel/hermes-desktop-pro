@@ -452,6 +452,10 @@ export default function ChatView({
       setShowCommands(false);
       return;
     }
+    if (detectProfileMention(input)) {
+      setShowCommands(false);
+      return;
+    }
     if (input.startsWith("/")) {
       const q = input.slice(1).toLowerCase();
       const matches = q ? SLASH_COMMANDS.filter(c => c.cmd.toLowerCase().includes(q)) : SLASH_COMMANDS;
@@ -1120,6 +1124,17 @@ export default function ChatView({
     </header>
   );
 
+  const profileMention = detectProfileMention(input);
+  const mentionProfiles = profileMention
+    ? profiles.filter(p => p.name.toLowerCase().includes(profileMention.query.toLowerCase())).slice(0, 8)
+    : [];
+  const insertMention = (name: string) => {
+    suppressCommandMenuRef.current = true;
+    setInput(profileMention?.mode === "ask" ? `/ask ${name} ` : `@${name} `);
+    setShowCommands(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
   const composerEl = (
     <div className="ui-compose-wrap no-drag">
       {showCommands && (
@@ -1133,6 +1148,17 @@ export default function ChatView({
             </button>
           ))}
           {filteredCommands.length === 0 && <div className="px-3 py-3 text-[12.5px] text-[var(--text-3)] text-center">No commands</div>}
+        </div>
+      )}
+      {profileMention && mentionProfiles.length > 0 && (
+        <div className="ui-command-menu slide-up">
+          {mentionProfiles.map(p => (
+            <button key={p.name} className="ui-menu-item" onClick={() => insertMention(p.name)}>
+              <Users size={14} className="shrink-0" />
+              <span className="font-medium">{p.name}</span>
+              <span className="ml-auto text-[12px] text-[var(--text-3)]">{p.isActive ? "active" : p.provider}</span>
+            </button>
+          ))}
         </div>
       )}
       {voiceNotice && (
