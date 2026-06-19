@@ -115,6 +115,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   // Incoming IPC chunks do not carry tab metadata. Track the tab that started
   // the active stream so switching the visible tab cannot leak chunks into it.
   const activeConversationKey = useRef<string | null>(null);
+  const activeOverrideRef = useRef(false);
 
   const onTokenUsageRef = useRef(options.onTokenUsage);
   useEffect(() => { onTokenUsageRef.current = options.onTokenUsage; }, [options.onTokenUsage]);
@@ -275,6 +276,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
         });
       }
       activeConversationKey.current = null;
+      activeOverrideRef.current = false;
     });
     const unsubDone = window.hermes.onStreamDone((sessionId?: string) => {
       const key = activeConversationKey.current;
@@ -303,15 +305,16 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
               messages: aid && finalRun
                 ? state.messages.map(m => (m.id === aid ? { ...m, run: finalRun } : m))
                 : state.messages,
-              sessionId: sessionId || state.sessionId,
+              sessionId: activeOverrideRef.current ? state.sessionId : (sessionId || state.sessionId),
               activeAssistantId: null,
               isStreaming: false,
             },
           };
         });
       }
-      if (sessionId) onSessionIdRef.current?.(sessionId);
+      if (sessionId && !activeOverrideRef.current) onSessionIdRef.current?.(sessionId);
       activeConversationKey.current = null;
+      activeOverrideRef.current = false;
     });
 
     return () => {
@@ -460,6 +463,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
       };
     });
     activeConversationKey.current = key;
+    activeOverrideRef.current = !!overrideProfile;
 
     try {
       const result = await window.hermes.sendMessage(text, {
@@ -471,7 +475,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
         attachments,
         temperature: options.temperature,
       });
-      if (result?.sessionId) {
+      if (result?.sessionId && !overrideProfile) {
         setStateByKey(prev => {
           const state = prev[key];
           if (!state) return prev;
