@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronDown, ChevronRight, Activity } from "lucide-react";
+import { ChevronDown, ChevronRight, Activity, AtSign } from "lucide-react";
 import type { AgentRunState, ChatMessage } from "@shared/types";
 
 interface Props {
@@ -81,6 +81,10 @@ export function ChatMessageBubble({ message, isStreaming, liveRun }: Props) {
       <div className={`ui-chat-avatar ${isUser ? "ui-chat-avatar-user" : "ui-chat-avatar-agent"}`}>{isUser ? "U" : "H"}</div>
 
       <div className="flex-1 min-w-0">
+        {message.viaProfile && (
+          <div className="ui-via-profile-badge"><AtSign size={11} /> via {message.viaProfile}</div>
+        )}
+
         {!isUser && run && run.events.length > 0 && (
           <ActivityDisclosure run={run} live={!!liveRun && !!isStreaming} />
         )}
