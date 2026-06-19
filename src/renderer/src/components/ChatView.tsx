@@ -27,6 +27,7 @@ import { ChatMessageBubble } from "./ChatMessageBubble";
 import { BrandMark, BrandMedallion } from "./BrandMark";
 import { useChatStream } from "../hooks/useChatStream";
 import { normalizeDispatchTargets, sendLabelForDispatch } from "../chatDispatch";
+import { parseCrossProfileAsk, detectProfileMention } from "../crossProfileAsk";
 import { IconButton, StatusDot, Toggle, cx } from "../ui";
 import {
   mergeVoiceTranscript,
@@ -56,6 +57,7 @@ type InspectorTab = "inspector" | "context" | "activity" | "pinned";
 const SLASH_COMMANDS = [
   { cmd: "/new", desc: "New conversation", icon: Plus },
   { cmd: "/clear", desc: "Clear and new session", icon: Plus },
+  { cmd: "/ask", desc: "Ask another profile", icon: Users },
   { cmd: "/web", desc: "Web search", icon: Globe },
   { cmd: "/image", desc: "Generate image", icon: Image },
   { cmd: "/code", desc: "Code execution", icon: Code },
@@ -696,12 +698,25 @@ export default function ChatView({
       // text "/new" to the model as a real turn (which cleared nothing).
       if (cmd === "/clear") { onNewTab(); setInput(""); return; }
     }
+    const ask = parseCrossProfileAsk(trimmed, profiles.map(p => p.name));
+    if (ask) {
+      void sendMessage(ask.message, { attachments: queuedAttachments, overrideProfile: ask.profile });
+      setInput("");
+      setAttachments([]);
+      setAttachmentNotice("");
+      setShowCommands(false);
+      return;
+    }
+    if (/^\/ask\b/i.test(trimmed)) {
+      setAttachmentNotice("Unknown profile — use /ask <profile> <message>.");
+      return;
+    }
     void sendMessage(trimmed, { attachments: queuedAttachments });
     setInput("");
     setAttachments([]);
     setAttachmentNotice("");
     setShowCommands(false);
-  }, [attachments, input, isStreaming, sendMessage, onNewTab]);
+  }, [attachments, input, isStreaming, sendMessage, onNewTab, profiles]);
 
   const handleVoiceInput = useCallback(async () => {
     if (voiceStatus === "recording") {
