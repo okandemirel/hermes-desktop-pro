@@ -1,9 +1,12 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { autoUpdater } from "electron-updater";
 import type { ProgressInfo, UpdateInfo } from "electron-updater";
 import type { AppUpdateStatus } from "@shared/types";
 
 const UPDATE_STATUS_CHANNEL = "app-update-status";
+const GH_OWNER = "okandemirel";
+const GH_REPO = "hermes-desktop-pro";
+const RELEASES_URL = `https://github.com/${GH_OWNER}/${GH_REPO}/releases/latest`;
 
 let initialized = false;
 let checkPromise: Promise<AppUpdateStatus> | null = null;
@@ -46,6 +49,14 @@ function messageFromError(error: unknown): string {
   return "Update check failed.";
 }
 
+// macOS auto-update (Squirrel.Mac) requires a signed + notarized build. These
+// builds are unsigned (no Apple Developer certificate), so macOS cannot self-
+// install — we surface a download link instead. Linux (AppImage) and Windows
+// install through electron-updater normally.
+function canSelfInstall(): boolean {
+  return process.platform !== "darwin";
+}
+
 function configureUpdater(): void {
   if (initialized) return;
   initialized = true;
@@ -55,8 +66,8 @@ function configureUpdater(): void {
   autoUpdater.allowPrerelease = false;
   autoUpdater.setFeedURL({
     provider: "github",
-    owner: "okandemirel",
-    repo: "hermes-desktop-pro",
+    owner: GH_OWNER,
+    repo: GH_REPO,
   });
 
   autoUpdater.on("checking-for-update", () => {
@@ -64,6 +75,7 @@ function configureUpdater(): void {
     publishStatus({
       phase: "checking",
       percent: undefined,
+      downloadUrl: undefined,
       canCheck: false,
       canInstall: false,
       message: "Checking for updates...",
@@ -76,7 +88,7 @@ function configureUpdater(): void {
       availableVersion: info.version,
       canCheck: false,
       canInstall: false,
-      message: `Version ${info.version} is available. Downloading...`,
+      message: `Version ${info.version} is available.`,
     });
   });
 
@@ -156,6 +168,22 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
     try {
       const result = await autoUpdater.checkForUpdates();
       if (!result?.isUpdateAvailable) return status;
+      if (!canSelfInstall()) {
+        // Unsigned macOS build: surface the update with a download link instead
+        // of attempting a Squirrel install that will fail signature checks.
+        const version = result.updateInfo?.version;
+        return publishStatus({
+          phase: "manual-download",
+          availableVersion: version,
+          downloadUrl: RELEASES_URL,
+          percent: undefined,
+          canCheck: true,
+          canInstall: false,
+          message: version
+            ? `Version ${version} is available — click to download.`
+            : "An update is available — click to download.",
+        });
+      }
       publishStatus({
         phase: "downloading",
         canCheck: false,
@@ -207,9 +235,16 @@ export async function installAppUpdate(): Promise<AppUpdateStatus> {
   return status;
 }
 
+export async function openAppUpdateDownload(): Promise<AppUpdateStatus> {
+  const url = status.downloadUrl || RELEASES_URL;
+  await shell.openExternal(url);
+  return status;
+}
+
 export function registerAppUpdateIpc(): void {
   configureUpdater();
   ipcMain.handle("app-update-status", () => getAppUpdateStatus());
   ipcMain.handle("app-update-check", () => checkForAppUpdates());
   ipcMain.handle("app-update-install", () => installAppUpdate());
+  ipcMain.handle("app-update-open-download", () => openAppUpdateDownload());
 }

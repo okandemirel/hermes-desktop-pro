@@ -1,7 +1,7 @@
 {
   "name": "hermes-desktop-pro",
   "productName": "Hermes Desktop Pro",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Premium desktop app for Hermes Desktop Pro — all features, OpenCode, multi-provider, visual innovation",
   "main": "./out/main/index.js",
   "author": "Hermes Desktop Pro",

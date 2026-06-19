@@ -588,6 +588,8 @@ const api = {
     ipcRenderer.invoke("app-update-check"),
   installAppUpdate: (): Promise<AppUpdateStatus> =>
     ipcRenderer.invoke("app-update-install"),
+  openAppUpdateDownload: (): Promise<AppUpdateStatus> =>
+    ipcRenderer.invoke("app-update-open-download"),
   onAppUpdateStatus: (
     callback: (status: AppUpdateStatus) => void,
   ): (() => void) => {

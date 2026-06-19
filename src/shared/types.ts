@@ -268,6 +268,7 @@ export type AppUpdatePhase =
   | "idle"
   | "checking"
   | "available"
+  | "manual-download"
   | "not-available"
   | "downloading"
   | "downloaded"
@@ -283,6 +284,9 @@ export interface AppUpdateStatus {
   message?: string;
   canCheck: boolean;
   canInstall: boolean;
+  // Set in the "manual-download" phase (unsigned macOS): the page to open so the
+  // user can download the update themselves.
+  downloadUrl?: string;
 }
 
 // ─── Native app menu commands ──────────────────────────────────

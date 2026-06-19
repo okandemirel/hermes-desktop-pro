@@ -21,6 +21,7 @@ publish:
   provider: github
   owner: okandemirel
   repo: hermes-desktop-pro
+  releaseType: release
 
 # ── macOS ──────────────────────────────────────────
 mac:

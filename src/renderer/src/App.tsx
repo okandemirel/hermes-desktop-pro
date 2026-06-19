@@ -401,9 +401,13 @@ export default function App() {
 
   const handleAppUpdate = useCallback(async () => {
     try {
-      const next = updateStatus?.phase === "downloaded"
-        ? await window.hermes.installAppUpdate()
-        : await window.hermes.checkForAppUpdates();
+      const phase = updateStatus?.phase;
+      const next =
+        phase === "downloaded"
+          ? await window.hermes.installAppUpdate()
+          : phase === "manual-download"
+            ? await window.hermes.openAppUpdateDownload()
+            : await window.hermes.checkForAppUpdates();
       setUpdateStatus(next);
     } catch (error) {
       setUpdateStatus(prev => ({
@@ -418,19 +422,20 @@ export default function App() {
 
   const renderUpdateButton = (placement: "brand" | "dock" = "brand") => {
     const phase = updateStatus?.phase || "idle";
-    const active = ["checking", "available", "downloading", "downloaded", "installing", "error"].includes(phase);
+    const active = ["checking", "available", "manual-download", "downloading", "downloaded", "installing", "error"].includes(phase);
     const busy = phase === "checking" || phase === "available" || phase === "downloading" || phase === "installing";
+    const ready = phase === "downloaded" || phase === "manual-download";
     const canInteract = phase === "downloaded"
       ? updateStatus?.canInstall !== false
       : updateStatus?.canCheck !== false;
     const title = updateStatus?.message || (
       phase === "downloaded" ? "Install downloaded update" : "Check for updates"
     );
-    const Icon = phase === "downloaded" ? Download : RefreshCw;
+    const Icon = ready ? Download : RefreshCw;
 
     return (
       <button
-        className={cx("ui-sidebar-update no-drag", placement === "dock" && "is-compact", active && "is-active", phase === "downloaded" && "is-ready", phase === "error" && "is-error")}
+        className={cx("ui-sidebar-update no-drag", placement === "dock" && "is-compact", active && "is-active", ready && "is-ready", phase === "error" && "is-error")}
         onClick={handleAppUpdate}
         title={placement === "dock" ? undefined : title}
         disabled={busy || !canInteract}

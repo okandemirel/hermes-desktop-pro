@@ -10,37 +10,13 @@ permissions:
   contents: write
 
 jobs:
-  macos-release:
-    name: Build and publish macOS release
-    runs-on: macos-15
-    timeout-minutes: 60
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-
+  verify:
+    name: Verify (typecheck · lint · test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Validate release signing secrets
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=()
-          for key in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
-            if [[ -z "${!key:-}" ]]; then
-              missing+=("$key")
-            fi
-          done
-          if (( ${#missing[@]} )); then
-            printf 'Missing required macOS release secrets: %s\n' "${missing[*]}" >&2
-            printf 'Public updates require a Developer ID certificate and Apple notarization credentials.\n' >&2
-            exit 1
-          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -60,5 +36,40 @@ jobs:
       - name: Test
         run: npm run test
 
-      - name: Build and publish macOS artifacts
-        run: npx electron-builder --mac --publish always
+  release:
+    name: Build & publish (${{ matrix.os }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      # Serialize so the three platforms append assets to one release without
+      # racing on its creation.
+      max-parallel: 1
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # No Apple Developer certificate: build macOS UNSIGNED. Squirrel.Mac auto-
+      # update needs a signed + notarized build, so the app falls back to notify-
+      # and-download on macOS (see src/main/app-updater.ts). Linux (AppImage) and
+      # Windows publish auto-updatable artifacts.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer + main
+        run: npm run build
+
+      - name: Package & publish
+        run: npx electron-builder --publish always
